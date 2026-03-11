@@ -487,11 +487,10 @@ view model =
     div [ class "sidebar" ]
         [ div [ class "sidebar-header" ]
             [ span [ class "sidebar-title" ] [ text "Workspace" ]
+            , button [ class "open-folder-btn", onClick OpenFolder ] [ Icon.folderPlus 16 ]
             ]
         , div [ class "sidebar-content" ]
-            [ button [ class "open-folder-btn", onClick OpenFolder ]
-                [ text "Open Folder" ]
-            , case model.root of
+            [ case model.root of
                 Nothing ->
                     text ""
 

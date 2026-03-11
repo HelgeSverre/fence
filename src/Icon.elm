@@ -4,6 +4,7 @@ module Icon exposing
     , checkmark
     , fileText
     , folder
+    , folderPlus
     , settings
     )
 
@@ -50,6 +51,15 @@ folder : Int -> Html msg
 folder size =
     icon size
         [ path [ SA.d "M19.5 20.5h-15A2.47 2.47 0 0 1 2 18.07V5.93A2.47 2.47 0 0 1 4.5 3.5h4.6a1 1 0 0 1 .77.37l2.6 3.18h7A2.47 2.47 0 0 1 22 9.48v8.59a2.47 2.47 0 0 1-2.5 2.43z" ] []
+        ]
+
+
+folderPlus : Int -> Html msg
+folderPlus size =
+    icon size
+        [ path [ SA.d "M19.5 20.5h-15A2.47 2.47 0 0 1 2 18.07V5.93A2.47 2.47 0 0 1 4.5 3.5h4.6a1 1 0 0 1 .77.37l2.6 3.18h7A2.47 2.47 0 0 1 22 9.48v8.59a2.47 2.47 0 0 1-2.5 2.43z" ] []
+        , rect [ SA.x "11", SA.y "10.5", SA.width "2", SA.height "6", SA.rx "1", SA.fill "var(--bg-base, #1e1e2e)" ] []
+        , rect [ SA.x "9", SA.y "12.5", SA.width "6", SA.height "2", SA.rx "1", SA.fill "var(--bg-base, #1e1e2e)" ] []
         ]
 
 

@@ -1,5 +1,6 @@
 <p align="center">
   <img src="screenshot.png" alt="Fence — Split-view Markdown Editor" width="800" />
+
 </p>
 
 <h1 align="center">Fence</h1>
@@ -18,7 +19,8 @@
 
 ---
 
-Fence provides a clean, focused environment for writing markdown with a live preview, frontmatter support, and syntax highlighting.
+Fence provides a clean, focused environment for writing markdown with a live preview, frontmatter support, and syntax
+highlighting.
 
 ## Features
 
@@ -82,12 +84,12 @@ tests/          Elm test suite
 
 ## Tech Stack
 
-| Layer       | Technology                                    |
-| ----------- | --------------------------------------------- |
-| Frontend    | [Elm](https://elm-lang.org/)                  |
-| Desktop     | [Electron](https://www.electronjs.org/)       |
-| Build       | [Vite](https://vitejs.dev/) + vite-plugin-elm |
-| Testing     | elm-test                                      |
+| Layer    | Technology                                    |
+| -------- | --------------------------------------------- |
+| Frontend | [Elm](https://elm-lang.org/)                  |
+| Desktop  | [Electron](https://www.electronjs.org/)       |
+| Build    | [Vite](https://vitejs.dev/) + vite-plugin-elm |
+| Testing  | elm-test                                      |
 
 ## License
 

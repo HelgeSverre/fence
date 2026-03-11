@@ -41,6 +41,7 @@ type alias Model =
     , theme : String
     , font : String
     , editorFontSize : Float
+    , previewFontSize : Float
     , uiFontSize : Float
     , settingsOpen : Bool
     , sidebarFraction : Float
@@ -60,6 +61,7 @@ type Msg
     | SetTheme String
     | SetFont String
     | SetEditorFontSize Float
+    | SetPreviewFontSize Float
     | SetUIFontSize Float
     | CloseSettings
     | DividerMouseDown DragTarget Float
@@ -82,6 +84,11 @@ defaultEditorFraction =
 
 defaultEditorFontSize : Float
 defaultEditorFontSize =
+    14
+
+
+defaultPreviewFontSize : Float
+defaultPreviewFontSize =
     14
 
 
@@ -113,6 +120,10 @@ init flagsValue =
             D.decodeValue (D.field "editorFontSize" D.float) flagsValue
                 |> Result.withDefault defaultEditorFontSize
 
+        previewFontSize =
+            D.decodeValue (D.field "previewFontSize" D.float) flagsValue
+                |> Result.withDefault defaultPreviewFontSize
+
         uiFontSize =
             D.decodeValue (D.field "uiFontSize" D.float) flagsValue
                 |> Result.withDefault defaultUIFontSize
@@ -125,6 +136,7 @@ init flagsValue =
       , theme = "github-dark"
       , font = font
       , editorFontSize = editorFontSize
+      , previewFontSize = previewFontSize
       , uiFontSize = uiFontSize
       , settingsOpen = False
       , sidebarFraction = sidebarFraction
@@ -175,6 +187,20 @@ update msg model =
                 (E.object
                     [ ( "tag", E.string "setFontSize" )
                     , ( "editorFontSize", E.float clamped )
+                    ]
+                )
+            )
+
+        SetPreviewFontSize size ->
+            let
+                clamped =
+                    clamp 8 32 size
+            in
+            ( { model | previewFontSize = clamped }
+            , Ports.toElectron
+                (E.object
+                    [ ( "tag", E.string "setFontSize" )
+                    , ( "previewFontSize", E.float clamped )
                     ]
                 )
             )
@@ -787,7 +813,6 @@ themes =
     , ( "one-dark", "One Dark Pro" )
     , ( "tokyo-night", "Tokyo Night" )
     , ( "nord", "Nord" )
-    , ( "resharper-dark", "ReSharper Dark" )
     ]
 
 
@@ -818,8 +843,9 @@ viewSettingsDropdown model =
             , div [ class "settings-dropdown-label" ] [ text "Font" ]
             , div [] (List.map (viewFontItem model.font) fonts)
             , div [ class "settings-dropdown-divider" ] []
-            , div [ class "settings-dropdown-label" ] [ text "Size" ]
+            , div [ class "settings-dropdown-label" ] [ text "Font Size" ]
             , viewStepper "Editor" model.editorFontSize SetEditorFontSize
+            , viewStepper "Preview" model.previewFontSize SetPreviewFontSize
             , viewStepper "UI" model.uiFontSize SetUIFontSize
             ]
         ]

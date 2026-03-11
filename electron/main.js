@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const fsOps = require("./fs-ops");
+const { autoUpdater } = require("electron-updater");
 
 function getStatePath() {
   return path.join(app.getPath("userData"), "state.json");
@@ -241,6 +242,7 @@ ipcMain.on("toElm", (_event, data) => {
       const state = loadState();
       const updates = {};
       if (data.editorFontSize) updates.editorFontSize = data.editorFontSize;
+      if (data.previewFontSize) updates.previewFontSize = data.previewFontSize;
       if (data.uiFontSize) updates.uiFontSize = data.uiFontSize;
       saveState({ ...state, ...updates });
       break;
@@ -248,7 +250,14 @@ ipcMain.on("toElm", (_event, data) => {
   }
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+
+  // Check for updates in production (silent check, prompts on available update)
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdatesAndNotify();
+  }
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

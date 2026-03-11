@@ -31,6 +31,9 @@ export function wirePorts(app) {
         if (data.editorFontSize) {
           document.documentElement.style.setProperty("--font-size-editor", data.editorFontSize + "px");
         }
+        if (data.previewFontSize) {
+          document.documentElement.style.setProperty("--font-size-preview", data.previewFontSize + "px");
+        }
         if (data.uiFontSize) {
           document.documentElement.style.setProperty("--font-size-ui", data.uiFontSize + "px");
         }

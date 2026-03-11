@@ -13,6 +13,7 @@ const app = Elm.Main.init({
     editorFraction: initialState.editorFraction ?? null,
     font: initialState.font ?? "",
     editorFontSize: initialState.editorFontSize ?? null,
+    previewFontSize: initialState.previewFontSize ?? null,
     uiFontSize: initialState.uiFontSize ?? null,
   },
 });
@@ -23,6 +24,9 @@ if (initialState.font) {
 }
 if (initialState.editorFontSize) {
   document.documentElement.style.setProperty("--font-size-editor", initialState.editorFontSize + "px");
+}
+if (initialState.previewFontSize) {
+  document.documentElement.style.setProperty("--font-size-preview", initialState.previewFontSize + "px");
 }
 if (initialState.uiFontSize) {
   document.documentElement.style.setProperty("--font-size-ui", initialState.uiFontSize + "px");

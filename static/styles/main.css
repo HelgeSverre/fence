@@ -4,6 +4,10 @@
 @font-face { font-family: "Hack"; src: url("../fonts/Hack-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
 @font-face { font-family: "Source Code Pro"; src: url("../fonts/SourceCodePro-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
 @font-face { font-family: "Inconsolata"; src: url("../fonts/Inconsolata-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Cascadia Code"; src: url("../fonts/CascadiaCode-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Monaspace Neon"; src: url("../fonts/MonaspaceNeon-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Victor Mono"; src: url("../fonts/VictorMono-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Iosevka"; src: url("../fonts/Iosevka-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
 
 :root {
   /* Catppuccin Mocha */
@@ -127,6 +131,106 @@
   --syntax-strong: oklch(0.858 0.120 80.1);
   --syntax-heading: oklch(0.745 0.131 290.9);
   --syntax-list: oklch(0.873 0.005 280.0);
+}
+
+/* Dracula */
+[data-theme="dracula"] {
+  --bg-base: oklch(0.288 0.022 277.5);
+  --bg-surface: oklch(0.255 0.019 280.5);
+  --bg-overlay: oklch(0.403 0.032 277.8);
+  --bg-elevated: oklch(0.462 0.033 278.3);
+  --text-primary: oklch(0.977 0.008 106.5);
+  --text-secondary: oklch(0.805 0.000 89.9);
+  --text-muted: oklch(0.560 0.080 270.1);
+  --accent: oklch(0.742 0.149 301.9);
+  --accent-hover: oklch(0.793 0.117 302.5);
+  --border: oklch(0.403 0.032 277.8);
+  --syntax-code: oklch(0.871 0.220 148.0);
+  --status-error: oklch(0.682 0.206 24.4);
+  --syntax-emphasis: oklch(0.955 0.134 112.8);
+  --syntax-strong: oklch(0.834 0.124 66.6);
+  --syntax-heading: oklch(0.742 0.149 301.9);
+  --syntax-list: oklch(0.977 0.008 106.5);
+}
+
+/* One Dark Pro */
+[data-theme="one-dark"] {
+  --bg-base: oklch(0.293 0.016 264.3);
+  --bg-surface: oklch(0.263 0.013 258.4);
+  --bg-overlay: oklch(0.386 0.024 265.7);
+  --bg-elevated: oklch(0.439 0.029 267.6);
+  --text-primary: oklch(0.762 0.020 263.0);
+  --text-secondary: oklch(0.658 0.020 261.3);
+  --text-muted: oklch(0.498 0.022 262.9);
+  --accent: oklch(0.730 0.121 245.3);
+  --accent-hover: oklch(0.788 0.111 250.5);
+  --border: oklch(0.386 0.024 265.7);
+  --syntax-code: oklch(0.768 0.110 133.0);
+  --status-error: oklch(0.671 0.145 17.0);
+  --syntax-emphasis: oklch(0.694 0.164 318.2);
+  --syntax-strong: oklch(0.727 0.095 63.8);
+  --syntax-heading: oklch(0.671 0.145 17.0);
+  --syntax-list: oklch(0.762 0.020 263.0);
+}
+
+/* Tokyo Night */
+[data-theme="tokyo-night"] {
+  --bg-base: oklch(0.226 0.021 280.5);
+  --bg-surface: oklch(0.204 0.016 284.9);
+  --bg-overlay: oklch(0.306 0.037 273.2);
+  --bg-elevated: oklch(0.387 0.054 273.9);
+  --text-primary: oklch(0.846 0.061 274.8);
+  --text-secondary: oklch(0.767 0.054 275.5);
+  --text-muted: oklch(0.496 0.068 274.4);
+  --accent: oklch(0.719 0.132 264.2);
+  --accent-hover: oklch(0.766 0.111 259.9);
+  --border: oklch(0.306 0.037 273.2);
+  --syntax-code: oklch(0.795 0.139 130.1);
+  --status-error: oklch(0.723 0.159 10.3);
+  --syntax-emphasis: oklch(0.751 0.134 299.5);
+  --syntax-strong: oklch(0.787 0.137 50.6);
+  --syntax-heading: oklch(0.719 0.132 264.2);
+  --syntax-list: oklch(0.846 0.061 274.8);
+}
+
+/* Nord */
+[data-theme="nord"] {
+  --bg-base: oklch(0.324 0.023 264.2);
+  --bg-surface: oklch(0.293 0.020 264.2);
+  --bg-overlay: oklch(0.379 0.029 266.5);
+  --bg-elevated: oklch(0.416 0.032 264.1);
+  --text-primary: oklch(0.951 0.007 260.7);
+  --text-secondary: oklch(0.899 0.016 262.7);
+  --text-muted: oklch(0.537 0.044 264.1);
+  --accent: oklch(0.775 0.062 217.5);
+  --accent-hover: oklch(0.763 0.048 194.5);
+  --border: oklch(0.379 0.029 266.5);
+  --syntax-code: oklch(0.768 0.075 131.1);
+  --status-error: oklch(0.606 0.121 15.3);
+  --syntax-emphasis: oklch(0.855 0.089 84.1);
+  --syntax-strong: oklch(0.693 0.096 38.2);
+  --syntax-heading: oklch(0.763 0.048 194.5);
+  --syntax-list: oklch(0.899 0.016 262.7);
+}
+
+/* ReSharper Dark */
+[data-theme="resharper-dark"] {
+  --bg-base: oklch(0.289 0.000 89.9);
+  --bg-surface: oklch(0.260 0.000 89.9);
+  --bg-overlay: oklch(0.366 0.005 236.6);
+  --bg-elevated: oklch(0.436 0.006 228.9);
+  --text-primary: oklch(0.773 0.027 250.0);
+  --text-secondary: oklch(0.600 0.000 89.9);
+  --text-muted: oklch(0.498 0.006 247.9);
+  --accent: oklch(0.613 0.116 250.6);
+  --accent-hover: oklch(0.665 0.114 250.3);
+  --border: oklch(0.317 0.000 89.9);
+  --syntax-code: oklch(0.589 0.075 134.4);
+  --status-error: oklch(0.711 0.182 24.0);
+  --syntax-emphasis: oklch(0.589 0.075 134.4);
+  --syntax-strong: oklch(0.652 0.134 56.7);
+  --syntax-heading: oklch(0.860 0.125 77.0);
+  --syntax-list: oklch(0.773 0.027 250.0);
 }
 
 *,
@@ -265,6 +369,7 @@ body {
 .settings-dropdown-item {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   padding: 6px 10px;
   border-radius: 4px;
@@ -276,6 +381,10 @@ body {
   width: 100%;
   text-align: left;
   font-family: var(--font-sans);
+}
+
+.settings-dropdown-item-label {
+  flex: 1;
 }
 
 .settings-dropdown-item:hover {
@@ -290,6 +399,77 @@ body {
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+
+.settings-dropdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+}
+
+.settings-dropdown-row-label {
+  font-size: var(--font-size-ui);
+  color: var(--text-primary);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+.stepper-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  font-family: var(--font-sans);
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.stepper-btn:hover {
+  background: var(--bg-overlay);
+  color: var(--text-primary);
+}
+
+.stepper-btn:active {
+  background: var(--state-active);
+}
+
+.stepper-input {
+  width: 52px;
+  height: 26px;
+  text-align: center;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-ui);
+  outline: none;
+  -moz-appearance: textfield;
+}
+
+.stepper-input::-webkit-inner-spin-button,
+.stepper-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.stepper-input:focus {
+  background: var(--state-hover);
 }
 
 .settings-dropdown-check {
@@ -319,16 +499,17 @@ body {
 }
 
 .divider {
-  width: 4px;
+  width: 2px;
   cursor: col-resize;
   background: var(--border);
-  transition: background 0.15s;
+  transition: background 0.15s, width 0.1s, margin 0.1s;
   z-index: 1;
 }
 
-.divider:hover,
-.divider:active {
-  background: var(--accent);
+.divider:hover {
+  width: 4px;
+  margin: 0 -1px;
+  background: oklch(from var(--border) calc(l + 0.12) c h);
 }
 
 .sidebar {
@@ -439,8 +620,8 @@ body {
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -448,10 +629,10 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--bg-elevated);
-  border-radius: 4px;
+  background: var(--bg-overlay);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: var(--bg-elevated);
 }

@@ -236,6 +236,15 @@ ipcMain.on("toElm", (_event, data) => {
       saveState({ ...state, font: data.font });
       break;
     }
+
+    case "setFontSize": {
+      const state = loadState();
+      const updates = {};
+      if (data.editorFontSize) updates.editorFontSize = data.editorFontSize;
+      if (data.uiFontSize) updates.uiFontSize = data.uiFontSize;
+      saveState({ ...state, ...updates });
+      break;
+    }
   }
 });
 

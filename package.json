@@ -13,7 +13,7 @@
     "vite:dev": "vite"
   },
   "build": {
-    "appId": "com.helgesverre.fence",
+    "appId": "no.helgesverre.fence",
     "productName": "Fence",
     "directories": {
       "output": "release"
@@ -25,6 +25,7 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "build/icons/icon.icns",
       "target": [
         { "target": "dmg", "arch": ["universal"] },
         { "target": "zip", "arch": ["universal"] }
@@ -32,9 +33,11 @@
       "identity": null
     },
     "win": {
+      "icon": "build/icons/icon.ico",
       "target": ["nsis"]
     },
     "linux": {
+      "icon": "build/icons/icon.png",
       "target": ["AppImage", "deb"],
       "category": "Development"
     },

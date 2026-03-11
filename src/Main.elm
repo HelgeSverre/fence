@@ -40,6 +40,8 @@ type alias Model =
     , debounceGeneration : Int
     , theme : String
     , font : String
+    , editorFontSize : Float
+    , uiFontSize : Float
     , settingsOpen : Bool
     , sidebarFraction : Float
     , editorFraction : Float
@@ -57,6 +59,8 @@ type Msg
     | ToggleSettings
     | SetTheme String
     | SetFont String
+    | SetEditorFontSize Float
+    | SetUIFontSize Float
     | CloseSettings
     | DividerMouseDown DragTarget Float
     | DividerMouseMove Float
@@ -74,6 +78,16 @@ defaultSidebarFraction =
 defaultEditorFraction : Float
 defaultEditorFraction =
     0.5
+
+
+defaultEditorFontSize : Float
+defaultEditorFontSize =
+    14
+
+
+defaultUIFontSize : Float
+defaultUIFontSize =
+    13
 
 
 init : D.Value -> ( Model, Cmd Msg )
@@ -94,6 +108,14 @@ init flagsValue =
         font =
             D.decodeValue (D.field "font" D.string) flagsValue
                 |> Result.withDefault ""
+
+        editorFontSize =
+            D.decodeValue (D.field "editorFontSize" D.float) flagsValue
+                |> Result.withDefault defaultEditorFontSize
+
+        uiFontSize =
+            D.decodeValue (D.field "uiFontSize" D.float) flagsValue
+                |> Result.withDefault defaultUIFontSize
     in
     ( { fileTree = FileTree.init
       , editor = Editor.init
@@ -102,6 +124,8 @@ init flagsValue =
       , debounceGeneration = 0
       , theme = "github-dark"
       , font = font
+      , editorFontSize = editorFontSize
+      , uiFontSize = uiFontSize
       , settingsOpen = False
       , sidebarFraction = sidebarFraction
       , editorFraction = editorFraction
@@ -122,7 +146,7 @@ update msg model =
             ( { model | settingsOpen = not model.settingsOpen }, Cmd.none )
 
         SetTheme themeValue ->
-            ( { model | theme = themeValue, settingsOpen = False }
+            ( { model | theme = themeValue }
             , Ports.toElectron
                 (E.object
                     [ ( "tag", E.string "setTheme" )
@@ -132,11 +156,39 @@ update msg model =
             )
 
         SetFont fontValue ->
-            ( { model | font = fontValue, settingsOpen = False }
+            ( { model | font = fontValue }
             , Ports.toElectron
                 (E.object
                     [ ( "tag", E.string "setFont" )
                     , ( "font", E.string fontValue )
+                    ]
+                )
+            )
+
+        SetEditorFontSize size ->
+            let
+                clamped =
+                    clamp 8 32 size
+            in
+            ( { model | editorFontSize = clamped }
+            , Ports.toElectron
+                (E.object
+                    [ ( "tag", E.string "setFontSize" )
+                    , ( "editorFontSize", E.float clamped )
+                    ]
+                )
+            )
+
+        SetUIFontSize size ->
+            let
+                clamped =
+                    clamp 8 24 size
+            in
+            ( { model | uiFontSize = clamped }
+            , Ports.toElectron
+                (E.object
+                    [ ( "tag", E.string "setFontSize" )
+                    , ( "uiFontSize", E.float clamped )
                     ]
                 )
             )
@@ -259,6 +311,8 @@ update msg model =
         KeyDown key metaKey ctrlKey ->
             if key == "s" && (metaKey || ctrlKey) then
                 saveFile model
+            else if key == "Escape" && model.settingsOpen then
+                ( { model | settingsOpen = False }, Cmd.none )
             else
                 ( model, Cmd.none )
 
@@ -665,9 +719,9 @@ view model =
     let
         gridColumns =
             pct model.sidebarFraction
-                ++ " 4px "
+                ++ " 2px "
                 ++ pct (model.editorFraction * (1 - model.sidebarFraction))
-                ++ " 4px 1fr"
+                ++ " 2px 1fr"
     in
     div []
         [ div [ class "app-shell" ]
@@ -715,7 +769,7 @@ viewTitleBar model =
         , div [ class "titlebar-actions" ]
             [ button [ class "settings-btn", onClick ToggleSettings ] [ Icon.settings 16 ]
             , if model.settingsOpen then
-                viewSettingsDropdown model.theme model.font
+                viewSettingsDropdown model
               else
                 text ""
             ]
@@ -729,6 +783,11 @@ themes =
     , ( "github-dark", "GitHub Dark" )
     , ( "vscode-dark", "VS Code Dark+" )
     , ( "fleet-dark", "Fleet Dark" )
+    , ( "dracula", "Dracula" )
+    , ( "one-dark", "One Dark Pro" )
+    , ( "tokyo-night", "Tokyo Night" )
+    , ( "nord", "Nord" )
+    , ( "resharper-dark", "ReSharper Dark" )
     ]
 
 
@@ -741,19 +800,27 @@ fonts =
     , ( "Hack", "Hack" )
     , ( "Source Code Pro", "Source Code Pro" )
     , ( "Inconsolata", "Inconsolata" )
+    , ( "Cascadia Code", "Cascadia Code" )
+    , ( "Monaspace Neon", "Monaspace Neon" )
+    , ( "Victor Mono", "Victor Mono" )
+    , ( "Iosevka", "Iosevka" )
     ]
 
 
-viewSettingsDropdown : String -> String -> Html Msg
-viewSettingsDropdown currentTheme currentFont =
+viewSettingsDropdown : Model -> Html Msg
+viewSettingsDropdown model =
     div []
         [ div [ class "settings-backdrop", onClick CloseSettings ] []
         , div [ class "settings-dropdown" ]
             [ div [ class "settings-dropdown-label" ] [ text "Theme" ]
-            , div [] (List.map (viewThemeItem currentTheme) themes)
+            , div [] (List.map (viewThemeItem model.theme) themes)
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Font" ]
-            , div [] (List.map (viewFontItem currentFont) fonts)
+            , div [] (List.map (viewFontItem model.font) fonts)
+            , div [ class "settings-dropdown-divider" ] []
+            , div [ class "settings-dropdown-label" ] [ text "Size" ]
+            , viewStepper "Editor" model.editorFontSize SetEditorFontSize
+            , viewStepper "UI" model.uiFontSize SetUIFontSize
             ]
         ]
 
@@ -769,13 +836,13 @@ viewThemeItem currentTheme ( themeValue, displayName ) =
         , classList [ ( "active", isActive ) ]
         , onClick (SetTheme themeValue)
         ]
-        [ span [ class "settings-dropdown-check" ]
+        [ span [ class "settings-dropdown-item-label" ] [ text displayName ]
+        , span [ class "settings-dropdown-check" ]
             [ if isActive then
                 Icon.checkmark 14
               else
                 text ""
             ]
-        , text displayName
         ]
 
 
@@ -790,14 +857,58 @@ viewFontItem currentFont ( fontValue, displayName ) =
         , classList [ ( "active", isActive ) ]
         , onClick (SetFont fontValue)
         ]
-        [ span [ class "settings-dropdown-check" ]
+        [ span [ class "settings-dropdown-item-label" ] [ text displayName ]
+        , span [ class "settings-dropdown-check" ]
             [ if isActive then
                 Icon.checkmark 14
               else
                 text ""
             ]
-        , text displayName
         ]
+
+
+viewStepper : String -> Float -> (Float -> Msg) -> Html Msg
+viewStepper label currentValue toMsg =
+    div [ class "settings-dropdown-row" ]
+        [ span [ class "settings-dropdown-row-label" ] [ text label ]
+        , div [ class "stepper" ]
+            [ button
+                [ class "stepper-btn"
+                , onClick (toMsg (currentValue - 1))
+                ]
+                [ text "−" ]
+            , input
+                [ type_ "number"
+                , class "stepper-input"
+                , Html.Attributes.step "0.1"
+                , Html.Attributes.min "8"
+                , Html.Attributes.max "32"
+                , value (formatSize currentValue)
+                , onInput (\s -> toMsg (Maybe.withDefault currentValue (String.toFloat s)))
+                ]
+                []
+            , button
+                [ class "stepper-btn"
+                , onClick (toMsg (currentValue + 1))
+                ]
+                [ text "+" ]
+            ]
+        ]
+
+
+formatSize : Float -> String
+formatSize f =
+    let
+        rounded =
+            toFloat (round (f * 10)) / 10
+
+        str =
+            String.fromFloat rounded
+    in
+    if String.contains "." str then
+        str
+    else
+        str ++ ".0"
 
 
 main : Program D.Value Model Msg

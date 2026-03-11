@@ -12,12 +12,20 @@ const app = Elm.Main.init({
     sidebarFraction: initialState.sidebarFraction ?? null,
     editorFraction: initialState.editorFraction ?? null,
     font: initialState.font ?? "",
+    editorFontSize: initialState.editorFontSize ?? null,
+    uiFontSize: initialState.uiFontSize ?? null,
   },
 });
 
 // Apply persisted font on startup
 if (initialState.font) {
   document.documentElement.style.setProperty("--font-mono", `"${initialState.font}", monospace`);
+}
+if (initialState.editorFontSize) {
+  document.documentElement.style.setProperty("--font-size-editor", initialState.editorFontSize + "px");
+}
+if (initialState.uiFontSize) {
+  document.documentElement.style.setProperty("--font-size-ui", initialState.uiFontSize + "px");
 }
 
 wirePorts(app);

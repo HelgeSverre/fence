@@ -26,6 +26,17 @@ export function wirePorts(app) {
         return;
       }
 
+      // Handle font size changes locally
+      if (data.tag === "setFontSize") {
+        if (data.editorFontSize) {
+          document.documentElement.style.setProperty("--font-size-editor", data.editorFontSize + "px");
+        }
+        if (data.uiFontSize) {
+          document.documentElement.style.setProperty("--font-size-ui", data.uiFontSize + "px");
+        }
+        return;
+      }
+
       if (window.electronAPI) {
         window.electronAPI.send(data);
       } else {

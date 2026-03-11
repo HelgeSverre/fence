@@ -1,0 +1,65 @@
+.editor-container {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Shared typography for textarea and highlight overlay */
+.editor-textarea,
+.editor-highlight {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-editor);
+  font-weight: normal;
+  line-height: var(--editor-line-height);
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  box-sizing: border-box;
+  padding: 16px;
+  margin: 0;
+  border: none;
+}
+
+/* Textarea — on top, transparent text, visible caret */
+.editor-textarea {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-primary);
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+}
+
+.editor-textarea::selection {
+  background: var(--selection);
+}
+
+.editor-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+/* Highlight overlay — behind textarea, renders colored tokens */
+.editor-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  min-height: 100%;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.editor-highlight code {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}

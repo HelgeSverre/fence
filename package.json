@@ -1,0 +1,62 @@
+{
+  "name": "fence",
+  "version": "0.1.0",
+  "description": "Split-view markdown editor built with Elm and Electron",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:debug": "concurrently \"vite\" \"wait-on http://localhost:5173 && DEVTOOLS=1 electron .\"",
+    "build": "vite build && electron-builder",
+    "build:mac": "vite build && electron-builder --mac",
+    "build:win": "vite build && electron-builder --win",
+    "build:linux": "vite build && electron-builder --linux",
+    "vite:dev": "vite"
+  },
+  "build": {
+    "appId": "com.helgesverre.fence",
+    "productName": "Fence",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        { "target": "dmg", "arch": ["universal"] },
+        { "target": "zip", "arch": ["universal"] }
+      ],
+      "identity": null
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Development"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "HelgeSverre",
+      "repo": "fence"
+    }
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1",
+    "vite": "^5.0.10",
+    "vite-plugin-elm": "^3.0.1",
+    "wait-on": "^7.2.0"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0"
+  }
+}

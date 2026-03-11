@@ -1,0 +1,96 @@
+/* Phase 2: File tree styles */
+.file-tree {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: var(--font-size-ui);
+}
+
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  cursor: pointer;
+  color: var(--text-primary);
+  user-select: none;
+  border-radius: 4px;
+  margin: 0 4px;
+  transition: background 80ms ease;
+}
+
+/* Hover */
+.file-tree-item:hover {
+  background: var(--state-hover);
+}
+
+/* Selected (the currently open file) */
+.file-tree-item.selected {
+  background: var(--state-selected);
+  color: var(--accent-text);
+}
+
+/* Selected + hovered */
+.file-tree-item.selected:hover {
+  background: var(--state-selected-focus);
+}
+
+/* Keyboard focus ring */
+.file-tree-item:focus-visible {
+  outline: 2px solid var(--state-focus-ring);
+  outline-offset: -2px;
+}
+
+/* Active/pressed */
+.file-tree-item:active {
+  background: var(--state-active);
+}
+
+/* Dimmed selection when sidebar loses focus */
+.sidebar:not(:focus-within) .file-tree-item.selected {
+  background: var(--state-hover);
+  color: var(--text-primary);
+}
+
+.file-tree-item .icon {
+  display: flex;
+  align-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.file-tree-item .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-children {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.open-folder-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: calc(100% - 16px);
+  margin: 8px;
+  padding: 6px 12px;
+  background: var(--bg-overlay);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--font-size-ui);
+  font-family: var(--font-sans);
+}
+
+.open-folder-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}

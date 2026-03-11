@@ -62,30 +62,39 @@ Vite dev server runs on **port 5173**.
 ## Architecture Notes
 
 ### Elm Architecture (TEA)
+
 The app uses standard TEA. `Main.elm` composes `FileTree`, `Editor`, `Markdown`, `Preview` modules.
 
 ### OutCmd Pattern
+
 `FileTree.elm` uses an `OutCmd` type instead of `Cmd` for side effects, letting `Main.elm` translate them to port calls:
+
 ```elm
 type OutCmd = CmdOpenFolder | CmdReadDir | CmdReadFile | CmdWatchDir | CmdUnwatchDir
 ```
 
 ### Resizable Panes
+
 Drag state tracks mouse delta relative to window width. Sidebar clamped to 8-40%, editor/preview split to 15-85%. Values persisted to Electron `state.json`.
 
 ### IPC (Ports)
+
 All file I/O and window operations go through `Ports.elm` → `preload.js` contextBridge → `electron/main.js`. No direct Node access from renderer.
 
 ### Debounced Markdown Parsing
+
 Editor changes use a generation counter (150ms debounce) to discard stale parse operations.
 
 ### Themes
+
 CSS `data-theme` attribute switching. 5 themes: `catppuccin-mocha` (default), `catppuccin-latte`, `github-dark`, `vscode-dark`, `fleet-dark`. Colors use oklch for perceptual consistency.
 
 ### State Persistence
+
 Electron persists `sidebarFraction`, `editorFraction`, and recent workspaces to `app.getPath('userData')/state.json`.
 
 ### File Watching
+
 chokidar watches the open directory and pushes change events to Elm via ports. Auto-reloads files with no unsaved changes.
 
 ## Key Files to Know

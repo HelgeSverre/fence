@@ -230,6 +230,12 @@ ipcMain.on("toElm", (_event, data) => {
       });
       break;
     }
+
+    case "setFont": {
+      const state = loadState();
+      saveState({ ...state, font: data.font });
+      break;
+    }
   }
 });
 

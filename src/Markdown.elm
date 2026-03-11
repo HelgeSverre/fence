@@ -215,6 +215,39 @@ renderCodeBlock { body, language } =
                 Just "nix" ->
                     Just SyntaxHighlight.nix
 
+                Just "rust" ->
+                    Just SyntaxHighlight.rust
+
+                Just "rs" ->
+                    Just SyntaxHighlight.rust
+
+                Just "php" ->
+                    Just SyntaxHighlight.php
+
+                Just "typescript" ->
+                    Just SyntaxHighlight.typescript
+
+                Just "ts" ->
+                    Just SyntaxHighlight.typescript
+
+                Just "tsx" ->
+                    Just SyntaxHighlight.typescript
+
+                Just "jsx" ->
+                    Just SyntaxHighlight.javascript
+
+                Just "dart" ->
+                    Just SyntaxHighlight.dart
+
+                Just "vue" ->
+                    Just SyntaxHighlight.xml
+
+                Just "mdx" ->
+                    Just SyntaxHighlight.javascript
+
+                Just "golang" ->
+                    Just SyntaxHighlight.go
+
                 _ ->
                     Nothing
     in

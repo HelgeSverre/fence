@@ -84,10 +84,30 @@
   line-height: 1.5;
 }
 
+/* Reset inner pre.elmsh when nested inside .md-code-block to avoid double padding */
+.preview-content .md-code-block pre.elmsh {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+  overflow-x: visible;
+}
+
 .preview-content .md-code-block code {
   font-family: inherit;
   font-size: inherit;
 }
+
+/* Syntax highlighting token colors — mapped to theme CSS variables */
+.preview-content .elmsh { color: var(--text-primary); }
+.preview-content .elmsh-comm { color: var(--text-muted); font-style: italic; }
+.preview-content .elmsh1 { color: var(--syntax-strong); }
+.preview-content .elmsh2 { color: var(--syntax-code); }
+.preview-content .elmsh3 { color: var(--syntax-heading); }
+.preview-content .elmsh4 { color: var(--syntax-heading); }
+.preview-content .elmsh5 { color: var(--accent); }
+.preview-content .elmsh6 { color: var(--syntax-strong); }
+.preview-content .elmsh7 { color: var(--text-primary); }
 
 /* Blockquotes */
 .preview-content .md-blockquote {

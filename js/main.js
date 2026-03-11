@@ -11,7 +11,13 @@ const app = Elm.Main.init({
     windowWidth: window.innerWidth,
     sidebarFraction: initialState.sidebarFraction ?? null,
     editorFraction: initialState.editorFraction ?? null,
+    font: initialState.font ?? "",
   },
 });
+
+// Apply persisted font on startup
+if (initialState.font) {
+  document.documentElement.style.setProperty("--font-mono", `"${initialState.font}", monospace`);
+}
 
 wirePorts(app);

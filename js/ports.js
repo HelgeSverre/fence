@@ -16,6 +16,16 @@ export function wirePorts(app) {
         return;
       }
 
+      // Handle font changes locally
+      if (data.tag === "setFont") {
+        if (data.font) {
+          document.documentElement.style.setProperty("--font-mono", `"${data.font}", monospace`);
+        } else {
+          document.documentElement.style.removeProperty("--font-mono");
+        }
+        return;
+      }
+
       if (window.electronAPI) {
         window.electronAPI.send(data);
       } else {

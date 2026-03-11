@@ -16,7 +16,6 @@ import Ports
 import Preview
 import Yaml
 import Process
-import SyntaxHighlight
 import Task
 import Types exposing (..)
 
@@ -40,6 +39,7 @@ type alias Model =
     , frontmatter : Maybe Yaml.Value
     , debounceGeneration : Int
     , theme : String
+    , font : String
     , settingsOpen : Bool
     , sidebarFraction : Float
     , editorFraction : Float
@@ -56,6 +56,7 @@ type Msg
     | DebouncedParse Int
     | ToggleSettings
     | SetTheme String
+    | SetFont String
     | CloseSettings
     | DividerMouseDown DragTarget Float
     | DividerMouseMove Float
@@ -89,6 +90,10 @@ init flagsValue =
         editorFraction =
             D.decodeValue (D.field "editorFraction" D.float) flagsValue
                 |> Result.withDefault defaultEditorFraction
+
+        font =
+            D.decodeValue (D.field "font" D.string) flagsValue
+                |> Result.withDefault ""
     in
     ( { fileTree = FileTree.init
       , editor = Editor.init
@@ -96,6 +101,7 @@ init flagsValue =
       , frontmatter = Nothing
       , debounceGeneration = 0
       , theme = "github-dark"
+      , font = font
       , settingsOpen = False
       , sidebarFraction = sidebarFraction
       , editorFraction = editorFraction
@@ -121,6 +127,16 @@ update msg model =
                 (E.object
                     [ ( "tag", E.string "setTheme" )
                     , ( "theme", E.string themeValue )
+                    ]
+                )
+            )
+
+        SetFont fontValue ->
+            ( { model | font = fontValue, settingsOpen = False }
+            , Ports.toElectron
+                (E.object
+                    [ ( "tag", E.string "setFont" )
+                    , ( "font", E.string fontValue )
                     ]
                 )
             )
@@ -654,8 +670,7 @@ view model =
                 ++ " 4px 1fr"
     in
     div []
-        [ SyntaxHighlight.useTheme SyntaxHighlight.oneDark
-        , div [ class "app-shell" ]
+        [ div [ class "app-shell" ]
             [ viewTitleBar model
             , div
                 [ class "app-layout"
@@ -700,7 +715,7 @@ viewTitleBar model =
         , div [ class "titlebar-actions" ]
             [ button [ class "settings-btn", onClick ToggleSettings ] [ Icon.settings 16 ]
             , if model.settingsOpen then
-                viewSettingsDropdown model.theme
+                viewSettingsDropdown model.theme model.font
               else
                 text ""
             ]
@@ -717,13 +732,28 @@ themes =
     ]
 
 
-viewSettingsDropdown : String -> Html Msg
-viewSettingsDropdown currentTheme =
+fonts : List ( String, String )
+fonts =
+    [ ( "", "System Default" )
+    , ( "JetBrains Mono", "JetBrains Mono" )
+    , ( "IBM Plex Mono", "IBM Plex Mono" )
+    , ( "Fira Code", "Fira Code" )
+    , ( "Hack", "Hack" )
+    , ( "Source Code Pro", "Source Code Pro" )
+    , ( "Inconsolata", "Inconsolata" )
+    ]
+
+
+viewSettingsDropdown : String -> String -> Html Msg
+viewSettingsDropdown currentTheme currentFont =
     div []
         [ div [ class "settings-backdrop", onClick CloseSettings ] []
         , div [ class "settings-dropdown" ]
             [ div [ class "settings-dropdown-label" ] [ text "Theme" ]
             , div [] (List.map (viewThemeItem currentTheme) themes)
+            , div [ class "settings-dropdown-divider" ] []
+            , div [ class "settings-dropdown-label" ] [ text "Font" ]
+            , div [] (List.map (viewFontItem currentFont) fonts)
             ]
         ]
 
@@ -738,6 +768,27 @@ viewThemeItem currentTheme ( themeValue, displayName ) =
         [ class "settings-dropdown-item"
         , classList [ ( "active", isActive ) ]
         , onClick (SetTheme themeValue)
+        ]
+        [ span [ class "settings-dropdown-check" ]
+            [ if isActive then
+                Icon.checkmark 14
+              else
+                text ""
+            ]
+        , text displayName
+        ]
+
+
+viewFontItem : String -> ( String, String ) -> Html Msg
+viewFontItem currentFont ( fontValue, displayName ) =
+    let
+        isActive =
+            currentFont == fontValue
+    in
+    button
+        [ class "settings-dropdown-item"
+        , classList [ ( "active", isActive ) ]
+        , onClick (SetFont fontValue)
         ]
         [ span [ class "settings-dropdown-check" ]
             [ if isActive then

@@ -1,3 +1,10 @@
+@font-face { font-family: "JetBrains Mono"; src: url("../fonts/JetBrainsMono-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "IBM Plex Mono"; src: url("../fonts/IBMPlexMono-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Fira Code"; src: url("../fonts/FiraCode-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Hack"; src: url("../fonts/Hack-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Source Code Pro"; src: url("../fonts/SourceCodePro-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Inconsolata"; src: url("../fonts/Inconsolata-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+
 :root {
   /* Catppuccin Mocha */
   --bg-base: oklch(0.243 0.03 283.9);
@@ -10,12 +17,12 @@
   --accent: oklch(0.766 0.111 259.9);
   --accent-hover: oklch(0.791 0.097 228.7);
   --border: oklch(0.324 0.032 282);
-  --syntax-code: oklch(0.858 0.109 142.8);
-  --status-error: oklch(0.756 0.13 2.7);
-  --syntax-emphasis: oklch(0.919 0.07 86.5);
-  --syntax-strong: oklch(0.824 0.101 52.6);
+  --syntax-code: oklch(0.842 0.113 142.8);
+  --status-error: oklch(0.743 0.127 11.2);
+  --syntax-emphasis: oklch(0.743 0.127 11.2);
+  --syntax-strong: oklch(0.743 0.127 11.2);
   --syntax-heading: oklch(0.787 0.119 304.8);
-  --syntax-list: oklch(0.858 0.079 182.8);
+  --syntax-list: oklch(0.849 0.079 182.8);
 
   /* Derived interaction states from accent */
   --state-hover:          oklch(from var(--accent) l c h / 0.08);
@@ -54,12 +61,12 @@
   --accent: oklch(0.559 0.226 262.1);
   --accent-hover: oklch(0.648 0.107 212.9);
   --border: oklch(0.857 0.015 268.5);
-  --syntax-code: oklch(0.625 0.177 140.5);
-  --status-error: oklch(0.55 0.215 19.8);
-  --syntax-emphasis: oklch(0.714 0.149 67.8);
-  --syntax-strong: oklch(0.692 0.204 42.4);
-  --syntax-heading: oklch(0.555 0.25 297);
-  --syntax-list: oklch(0.602 0.098 201.1);
+  --syntax-code: oklch(0.594 0.156 142.5);
+  --status-error: oklch(0.522 0.208 18.3);
+  --syntax-emphasis: oklch(0.522 0.208 18.3);
+  --syntax-strong: oklch(0.522 0.208 18.3);
+  --syntax-heading: oklch(0.502 0.243 299.3);
+  --syntax-list: oklch(0.559 0.089 194.8);
 }
 
 /* GitHub Dark */
@@ -74,12 +81,12 @@
   --accent: oklch(0.715 0.152 253.3);
   --accent-hover: oklch(0.786 0.115 246.7);
   --border: oklch(0.33 0.015 252.3);
-  --syntax-code: oklch(0.695 0.181 145.6);
-  --status-error: oklch(0.665 0.205 26.9);
-  --syntax-emphasis: oklch(0.72 0.14 79.9);
-  --syntax-strong: oklch(0.727 0.153 52.8);
-  --syntax-heading: oklch(0.732 0.167 301.7);
-  --syntax-list: oklch(0.782 0.126 183.3);
+  --syntax-code: oklch(0.852 0.074 237.4);
+  --status-error: oklch(0.789 0.108 19.6);
+  --syntax-emphasis: oklch(0.941 0.011 243.8);
+  --syntax-strong: oklch(0.941 0.011 243.8);
+  --syntax-heading: oklch(0.791 0.098 237.4);
+  --syntax-list: oklch(0.941 0.011 243.8);
 }
 
 /* VS Code Dark+ */
@@ -94,12 +101,12 @@
   --accent: oklch(0.671 0.112 245.6);
   --accent-hover: oklch(0.863 0.08 232.1);
   --border: oklch(0.356 0 0);
-  --syntax-code: oklch(0.632 0.109 136.6);
-  --status-error: oklch(0.648 0.21 25.2);
-  --syntax-emphasis: oklch(0.882 0.066 107.7);
-  --syntax-strong: oklch(0.71 0.082 43.1);
-  --syntax-heading: oklch(0.702 0.109 329.4);
-  --syntax-list: oklch(0.76 0.115 177.2);
+  --syntax-code: oklch(0.718 0.078 47.3);
+  --status-error: oklch(0.617 0.209 22.2);
+  --syntax-emphasis: oklch(0.672 0.114 327.8);
+  --syntax-strong: oklch(0.670 0.112 245.6);
+  --syntax-heading: oklch(0.670 0.112 245.6);
+  --syntax-list: oklch(0.658 0.129 255.1);
 }
 
 /* JetBrains Fleet Dark */
@@ -114,12 +121,12 @@
   --accent: oklch(0.707 0.152 262.5);
   --accent-hover: oklch(0.766 0.12 260.9);
   --border: oklch(0.297 0.008 264.4);
-  --syntax-code: oklch(0.683 0.106 147.7);
-  --status-error: oklch(0.671 0.198 18.7);
-  --syntax-emphasis: oklch(0.715 0.094 73.3);
-  --syntax-strong: oklch(0.704 0.092 47.7);
-  --syntax-heading: oklch(0.674 0.147 308.4);
-  --syntax-list: oklch(0.741 0.102 195.2);
+  --syntax-code: oklch(0.746 0.120 334.3);
+  --status-error: oklch(0.617 0.210 22.2);
+  --syntax-emphasis: oklch(0.804 0.069 184.7);
+  --syntax-strong: oklch(0.858 0.120 80.1);
+  --syntax-heading: oklch(0.745 0.131 290.9);
+  --syntax-list: oklch(0.873 0.005 280.0);
 }
 
 *,
@@ -277,6 +284,12 @@ body {
 
 .settings-dropdown-item.active {
   color: var(--accent);
+}
+
+.settings-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
 }
 
 .settings-dropdown-check {

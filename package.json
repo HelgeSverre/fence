@@ -1,6 +1,6 @@
 {
   "name": "fence",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Split-view markdown editor built with Elm and Electron",
   "author": {
     "name": "Helge Sverre",

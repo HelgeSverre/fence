@@ -113,6 +113,20 @@
   height: auto;
 }
 
+.preview-content pre.mermaid:not([data-processed]) {
+  background: var(--bg-surface);
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+.preview-content pre.mermaid .error-icon,
+.preview-content pre.mermaid .error-text {
+  color: var(--text-muted);
+}
+
 /* Syntax highlighting token colors — mapped to theme CSS variables */
 .preview-content .elmsh { color: var(--text-primary); }
 .preview-content .elmsh-comm { color: var(--text-muted); font-style: italic; }
@@ -187,8 +201,72 @@
 }
 
 /* Del/strikethrough */
-.preview-content del {
+.preview-content del,
+.preview-content s {
   color: var(--text-muted);
+}
+
+/* Inline formatting */
+.preview-content kbd {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.1em 0.4em;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.preview-content mark {
+  background: oklch(0.85 0.15 85);
+  color: oklch(0.25 0 0);
+  padding: 0.1em 0.2em;
+  border-radius: 2px;
+}
+
+.preview-content ins {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+}
+
+.preview-content abbr {
+  text-decoration: underline dotted;
+  cursor: help;
+}
+
+.preview-content small {
+  font-size: 0.85em;
+}
+
+.preview-content u {
+  text-decoration: underline;
+}
+
+/* Definition lists */
+.preview-content dl {
+  margin: 0.75em 0;
+}
+
+.preview-content dt {
+  font-weight: 600;
+  margin-top: 0.5em;
+}
+
+.preview-content dd {
+  margin-left: 2em;
+  margin-bottom: 0.25em;
+}
+
+/* Figure */
+.preview-content figure {
+  margin: 1em 0;
+  text-align: center;
+}
+
+.preview-content figcaption {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin-top: 0.5em;
 }
 
 /* Frontmatter metadata */

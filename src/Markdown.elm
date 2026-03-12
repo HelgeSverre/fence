@@ -61,52 +61,29 @@ customRenderer =
     , blockQuote = blockquote [ class "md-blockquote" ]
     , html =
         Markdown.Html.oneOf
-            [ Markdown.Html.tag "p"
-                (\align children ->
-                    Html.p
-                        (case align of
-                            Just a ->
-                                [ attribute "align" a ]
+            [ -- Block elements with align attribute
+              htmlTagWithAlign "p" Html.p
+            , htmlTagWithAlign "h1" h1
+            , htmlTagWithAlign "h2" h2
+            , htmlTagWithAlign "h3" h3
+            , htmlTagWithAlign "h4" h4
+            , htmlTagWithAlign "h5" h5
+            , htmlTagWithAlign "h6" h6
+            , htmlTagWithAlign "div" div
 
-                            Nothing ->
-                                []
-                        )
-                        children
-                )
-                |> Markdown.Html.withOptionalAttribute "align"
-            , Markdown.Html.tag "h1"
-                (\align children ->
-                    h1
-                        (case align of
-                            Just a ->
-                                [ attribute "align" a ]
+            -- Container with class
+            , htmlTagWithClass "span" span
+            , htmlTagWithClass "section" (Html.node "section")
 
-                            Nothing ->
-                                []
-                        )
-                        children
-                )
-                |> Markdown.Html.withOptionalAttribute "align"
-            , Markdown.Html.tag "h2"
-                (\align children ->
-                    h2
-                        (case align of
-                            Just a ->
-                                [ attribute "align" a ]
-
-                            Nothing ->
-                                []
-                        )
-                        children
-                )
-                |> Markdown.Html.withOptionalAttribute "align"
+            -- Images
             , Markdown.Html.tag "img"
-                (\srcAttr altAttr widthAttr _ ->
+                (\srcAttr altAttr widthAttr heightAttr _ ->
                     img
                         (List.filterMap identity
                             [ Maybe.map src srcAttr
                             , Maybe.map alt altAttr
                             , Maybe.map (\w -> attribute "width" w) widthAttr
+                            , Maybe.map (\h -> attribute "height" h) heightAttr
                             ]
                         )
                         []
@@ -114,59 +91,93 @@ customRenderer =
                 |> Markdown.Html.withOptionalAttribute "src"
                 |> Markdown.Html.withOptionalAttribute "alt"
                 |> Markdown.Html.withOptionalAttribute "width"
-            , Markdown.Html.tag "br" (\_ -> br [] [])
-            , Markdown.Html.tag "hr" (\_ -> hr [] [])
-            , Markdown.Html.tag "div"
-                (\classAttr children ->
-                    div
-                        (case classAttr of
-                            Just c ->
-                                [ class c ]
+                |> Markdown.Html.withOptionalAttribute "height"
 
-                            Nothing ->
-                                []
-                        )
-                        children
-                )
-                |> Markdown.Html.withOptionalAttribute "class"
-            , Markdown.Html.tag "span"
-                (\classAttr children ->
-                    span
-                        (case classAttr of
-                            Just c ->
-                                [ class c ]
-
-                            Nothing ->
-                                []
-                        )
-                        children
-                )
-                |> Markdown.Html.withOptionalAttribute "class"
-            , Markdown.Html.tag "details"
-                (\children -> details [] children)
-            , Markdown.Html.tag "summary"
-                (\children -> summary [] children)
-            , Markdown.Html.tag "sup"
-                (\children -> sup [] children)
-            , Markdown.Html.tag "sub"
-                (\children -> sub [] children)
-            , Markdown.Html.tag "kbd"
-                (\children -> Html.node "kbd" [] children)
-            , Markdown.Html.tag "mark"
-                (\children -> Html.node "mark" [] children)
+            -- Links
             , Markdown.Html.tag "a"
-                (\hrefAttr children ->
+                (\hrefAttr titleAttr children ->
                     a
-                        (case hrefAttr of
-                            Just h ->
-                                [ href h ]
-
-                            Nothing ->
-                                []
+                        (List.filterMap identity
+                            [ Maybe.map href hrefAttr
+                            , Maybe.map title titleAttr
+                            ]
                         )
                         children
                 )
                 |> Markdown.Html.withOptionalAttribute "href"
+                |> Markdown.Html.withOptionalAttribute "title"
+
+            -- Void elements
+            , Markdown.Html.tag "br" (\_ -> br [] [])
+            , Markdown.Html.tag "hr" (\_ -> hr [] [])
+            , Markdown.Html.tag "wbr" (\_ -> Html.node "wbr" [] [])
+
+            -- Collapsible sections
+            , Markdown.Html.tag "details"
+                (\openAttr children ->
+                    details
+                        (case openAttr of
+                            Just _ ->
+                                [ attribute "open" "" ]
+
+                            Nothing ->
+                                []
+                        )
+                        children
+                )
+                |> Markdown.Html.withOptionalAttribute "open"
+            , Markdown.Html.tag "summary"
+                (\children -> summary [] children)
+
+            -- Inline formatting
+            , simpleHtmlTag "strong" (strong [])
+            , simpleHtmlTag "b" (Html.node "b" [])
+            , simpleHtmlTag "em" (em [])
+            , simpleHtmlTag "i" (Html.node "i" [])
+            , simpleHtmlTag "del" (del [])
+            , simpleHtmlTag "s" (Html.node "s" [])
+            , simpleHtmlTag "strike" (Html.node "s" [])
+            , simpleHtmlTag "u" (Html.node "u" [])
+            , simpleHtmlTag "ins" (Html.node "ins" [])
+            , simpleHtmlTag "small" (Html.node "small" [])
+            , simpleHtmlTag "sup" (sup [])
+            , simpleHtmlTag "sub" (sub [])
+            , simpleHtmlTag "kbd" (Html.node "kbd" [])
+            , simpleHtmlTag "mark" (Html.node "mark" [])
+            , simpleHtmlTag "abbr" (Html.node "abbr" [])
+            , simpleHtmlTag "cite" (Html.node "cite" [])
+            , simpleHtmlTag "q" (Html.node "q" [])
+
+            -- Lists (raw HTML)
+            , simpleHtmlTag "ul" (ul [])
+            , simpleHtmlTag "ol" (ol [])
+            , simpleHtmlTag "li" (li [])
+
+            -- Tables (raw HTML)
+            , simpleHtmlTag "table" (table [ class "md-table" ])
+            , simpleHtmlTag "thead" (thead [])
+            , simpleHtmlTag "tbody" (tbody [])
+            , simpleHtmlTag "tr" (tr [])
+            , simpleHtmlTag "th" (th [])
+            , simpleHtmlTag "td" (td [])
+
+            -- Definition lists
+            , simpleHtmlTag "dl" (Html.node "dl" [])
+            , simpleHtmlTag "dt" (Html.node "dt" [])
+            , simpleHtmlTag "dd" (Html.node "dd" [])
+
+            -- Semantic / structural
+            , simpleHtmlTag "blockquote" (blockquote [ class "md-blockquote" ])
+            , simpleHtmlTag "figure" (Html.node "figure" [])
+            , simpleHtmlTag "figcaption" (Html.node "figcaption" [])
+            , simpleHtmlTag "aside" (Html.node "aside" [])
+            , simpleHtmlTag "nav" (Html.node "nav" [])
+            , simpleHtmlTag "header" (Html.node "header" [])
+            , simpleHtmlTag "footer" (Html.node "footer" [])
+
+            -- Preformatted / code (raw HTML)
+            , simpleHtmlTag "pre" (pre [ class "md-code-block" ])
+            , simpleHtmlTag "code" (code [])
             ]
     , text = text
     , codeSpan = \content -> code [ class "md-code-span" ] [ text content ]
@@ -432,3 +443,52 @@ renderTableCell element maybeAlignment children =
                     []
     in
     element attrs children
+
+
+
+-- HTML tag handler helpers
+
+
+{-| Simple pass-through handler for an HTML tag with no special attributes.
+-}
+simpleHtmlTag : String -> (List (Html msg) -> Html msg) -> Markdown.Html.Renderer (List (Html msg) -> Html msg)
+simpleHtmlTag tagName viewFn =
+    Markdown.Html.tag tagName (\children -> viewFn children)
+
+
+{-| Handler for block elements that support an optional `align` attribute.
+-}
+htmlTagWithAlign : String -> (List (Attribute msg) -> List (Html msg) -> Html msg) -> Markdown.Html.Renderer (List (Html msg) -> Html msg)
+htmlTagWithAlign tagName viewFn =
+    Markdown.Html.tag tagName
+        (\align children ->
+            viewFn
+                (case align of
+                    Just a ->
+                        [ attribute "align" a ]
+
+                    Nothing ->
+                        []
+                )
+                children
+        )
+        |> Markdown.Html.withOptionalAttribute "align"
+
+
+{-| Handler for elements that support an optional `class` attribute.
+-}
+htmlTagWithClass : String -> (List (Attribute msg) -> List (Html msg) -> Html msg) -> Markdown.Html.Renderer (List (Html msg) -> Html msg)
+htmlTagWithClass tagName viewFn =
+    Markdown.Html.tag tagName
+        (\classAttr children ->
+            viewFn
+                (case classAttr of
+                    Just c ->
+                        [ class c ]
+
+                    Nothing ->
+                        []
+                )
+                children
+        )
+        |> Markdown.Html.withOptionalAttribute "class"

@@ -6,6 +6,7 @@ function getMermaidTheme() {
 }
 
 let renderTimeout = null;
+let observer = null;
 
 async function renderMermaidBlocks() {
   const blocks = document.querySelectorAll("pre.mermaid:not([data-processed])");
@@ -36,7 +37,10 @@ function scheduleRender() {
 }
 
 function observePreview(target) {
-  const observer = new MutationObserver(scheduleRender);
+  // Disconnect any previous observer
+  if (observer) observer.disconnect();
+
+  observer = new MutationObserver(scheduleRender);
   observer.observe(target, { childList: true, subtree: true });
   renderMermaidBlocks();
 }
@@ -48,15 +52,17 @@ export function initMermaid() {
     securityLevel: "strict",
   });
 
-  const target = document.querySelector(".preview-content");
-  if (target) {
-    observePreview(target);
-  } else {
-    requestAnimationFrame(() => {
-      const retryTarget = document.querySelector(".preview-content");
-      if (retryTarget) observePreview(retryTarget);
-    });
+  // Retry until .preview-content appears (Elm may not have rendered yet)
+  function tryAttach() {
+    const target = document.querySelector(".preview-content");
+    if (target) {
+      observePreview(target);
+    } else {
+      requestAnimationFrame(tryAttach);
+    }
   }
+
+  tryAttach();
 }
 
 export function reRenderMermaid() {

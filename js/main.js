@@ -1,5 +1,6 @@
 import { Elm } from "../src/Main.elm";
 import { wirePorts } from "./ports.js";
+import { initMermaid } from "./mermaid-init.js";
 
 document.documentElement.setAttribute("data-theme", "github-dark");
 
@@ -33,3 +34,4 @@ if (initialState.uiFontSize) {
 }
 
 wirePorts(app);
+initMermaid();

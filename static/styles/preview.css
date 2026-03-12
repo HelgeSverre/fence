@@ -98,6 +98,21 @@
   font-size: inherit;
 }
 
+/* Mermaid diagrams */
+.preview-content pre.mermaid {
+  display: flex;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 1rem 0;
+  overflow-x: auto;
+}
+
+.preview-content pre.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
 /* Syntax highlighting token colors — mapped to theme CSS variables */
 .preview-content .elmsh { color: var(--text-primary); }
 .preview-content .elmsh-comm { color: var(--text-muted); font-style: italic; }

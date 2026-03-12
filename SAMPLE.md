@@ -181,6 +181,36 @@ Plain code block without language specification.
 No syntax highlighting here.
 ```
 
+### Mermaid Diagrams
+
+```mermaid
+graph LR
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Process]
+    B -->|No| D[Skip]
+    C --> E[End]
+    D --> E
+```
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant E as Editor
+    participant P as Preview
+    U->>E: Type markdown
+    E->>P: Parse & render
+    P-->>U: Show preview
+```
+
+```mermaid
+pie title Languages Supported
+    "JavaScript" : 3
+    "Python" : 2
+    "Rust" : 1
+    "Elm" : 1
+    "CSS" : 1
+```
+
 ### Indented Code Block
 
     This is an indented code block.

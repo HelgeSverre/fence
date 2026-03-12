@@ -1,4 +1,5 @@
 import { setupEditorKeys } from "./editor-keys.js";
+import { reRenderMermaid } from "./mermaid-init.js";
 
 export function wirePorts(app) {
   if (!app.ports) return;
@@ -13,6 +14,7 @@ export function wirePorts(app) {
         } else {
           document.documentElement.removeAttribute("data-theme");
         }
+        reRenderMermaid();
         return;
       }
 

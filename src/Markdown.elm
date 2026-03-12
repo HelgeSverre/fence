@@ -7,6 +7,7 @@ import Markdown.Block as Block
 import Markdown.Html
 import Markdown.Parser
 import Markdown.Renderer exposing (Renderer)
+import Regex
 import SyntaxHighlight
 import Yaml
 
@@ -27,6 +28,7 @@ renderMarkdown : String -> List (Html msg)
 renderMarkdown input =
     case
         input
+            |> escapeHtmlAmpersands
             |> Markdown.Parser.parse
             |> Result.mapError (\_ -> "Parse error")
             |> Result.andThen (Markdown.Renderer.render customRenderer)
@@ -38,12 +40,134 @@ renderMarkdown input =
             [ pre [] [ text input ] ]
 
 
+{-| Escape bare `&` in HTML attribute values that aren't already entities.
+The elm-markdown parser is strict about HTML entities, but many markdown
+files (especially GitHub READMEs) use raw `&` in URLs within HTML tags.
+-}
+escapeHtmlAmpersands : String -> String
+escapeHtmlAmpersands input =
+    case Regex.fromString "&(?!#?[a-zA-Z0-9]+;)(?=[^<>]*>)" of
+        Just bareAmpInTag ->
+            Regex.replace bareAmpInTag (\_ -> "&amp;") input
+
+        Nothing ->
+            input
+
+
 customRenderer : Renderer (Html msg)
 customRenderer =
     { heading = renderHeading
     , paragraph = p []
     , blockQuote = blockquote [ class "md-blockquote" ]
-    , html = Markdown.Html.oneOf []
+    , html =
+        Markdown.Html.oneOf
+            [ Markdown.Html.tag "p"
+                (\align children ->
+                    Html.p
+                        (case align of
+                            Just a ->
+                                [ attribute "align" a ]
+
+                            Nothing ->
+                                []
+                        )
+                        children
+                )
+                |> Markdown.Html.withOptionalAttribute "align"
+            , Markdown.Html.tag "h1"
+                (\align children ->
+                    h1
+                        (case align of
+                            Just a ->
+                                [ attribute "align" a ]
+
+                            Nothing ->
+                                []
+                        )
+                        children
+                )
+                |> Markdown.Html.withOptionalAttribute "align"
+            , Markdown.Html.tag "h2"
+                (\align children ->
+                    h2
+                        (case align of
+                            Just a ->
+                                [ attribute "align" a ]
+
+                            Nothing ->
+                                []
+                        )
+                        children
+                )
+                |> Markdown.Html.withOptionalAttribute "align"
+            , Markdown.Html.tag "img"
+                (\srcAttr altAttr widthAttr _ ->
+                    img
+                        (List.filterMap identity
+                            [ Maybe.map src srcAttr
+                            , Maybe.map alt altAttr
+                            , Maybe.map (\w -> attribute "width" w) widthAttr
+                            ]
+                        )
+                        []
+                )
+                |> Markdown.Html.withOptionalAttribute "src"
+                |> Markdown.Html.withOptionalAttribute "alt"
+                |> Markdown.Html.withOptionalAttribute "width"
+            , Markdown.Html.tag "br" (\_ -> br [] [])
+            , Markdown.Html.tag "hr" (\_ -> hr [] [])
+            , Markdown.Html.tag "div"
+                (\classAttr children ->
+                    div
+                        (case classAttr of
+                            Just c ->
+                                [ class c ]
+
+                            Nothing ->
+                                []
+                        )
+                        children
+                )
+                |> Markdown.Html.withOptionalAttribute "class"
+            , Markdown.Html.tag "span"
+                (\classAttr children ->
+                    span
+                        (case classAttr of
+                            Just c ->
+                                [ class c ]
+
+                            Nothing ->
+                                []
+                        )
+                        children
+                )
+                |> Markdown.Html.withOptionalAttribute "class"
+            , Markdown.Html.tag "details"
+                (\children -> details [] children)
+            , Markdown.Html.tag "summary"
+                (\children -> summary [] children)
+            , Markdown.Html.tag "sup"
+                (\children -> sup [] children)
+            , Markdown.Html.tag "sub"
+                (\children -> sub [] children)
+            , Markdown.Html.tag "kbd"
+                (\children -> Html.node "kbd" [] children)
+            , Markdown.Html.tag "mark"
+                (\children -> Html.node "mark" [] children)
+            , Markdown.Html.tag "a"
+                (\hrefAttr children ->
+                    a
+                        (case hrefAttr of
+                            Just h ->
+                                [ href h ]
+
+                            Nothing ->
+                                []
+                        )
+                        children
+                )
+                |> Markdown.Html.withOptionalAttribute "href"
+            ]
     , text = text
     , codeSpan = \content -> code [ class "md-code-span" ] [ text content ]
     , strong = \children -> strong [] children
@@ -173,6 +297,16 @@ renderOrderedList startIndex items =
 
 renderCodeBlock : { body : String, language : Maybe String } -> Html msg
 renderCodeBlock { body, language } =
+    case Maybe.map String.toLower language of
+        Just "mermaid" ->
+            Html.pre [ class "mermaid" ] [ text body ]
+
+        _ ->
+            renderHighlightedCodeBlock body language
+
+
+renderHighlightedCodeBlock : String -> Maybe String -> Html msg
+renderHighlightedCodeBlock body language =
     let
         highlighter =
             case Maybe.map String.toLower language of

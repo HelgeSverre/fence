@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const fsOps = require("./fs-ops");
@@ -30,6 +30,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
+    show: false,
     title: "Fence",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 12, y: 10 },
@@ -37,7 +38,12 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      spellcheck: false,
     },
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
   });
 
   const isDev = !app.isPackaged;
@@ -91,6 +97,19 @@ function createWindow() {
           }
           // Cancel — do nothing
         });
+    }
+  });
+
+  // Open external links in system browser
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("http://localhost:")) {
+      event.preventDefault();
+      shell.openExternal(url);
     }
   });
 }
@@ -250,23 +269,37 @@ ipcMain.on("toElm", (_event, data) => {
   }
 });
 
-app.whenReady().then(() => {
-  createWindow();
+const gotLock = app.requestSingleInstanceLock();
 
-  // Check for updates in production (silent check, prompts on available update)
-  if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify();
-  }
-});
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
-
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  app.whenReady().then(() => {
+    Menu.setApplicationMenu(null);
     createWindow();
-  }
-});
+
+    // Check for updates in production (silent check, prompts on available update)
+    if (app.isPackaged) {
+      autoUpdater.checkForUpdatesAndNotify();
+    }
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+}

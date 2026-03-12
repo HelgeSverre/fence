@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Elm-0.19.1-1293D8?logo=elm&logoColor=white" alt="Elm" />
-  <img src="https://img.shields.io/badge/Electron-28-47848F?logo=electron&logoColor=white" alt="Electron" />
+  <img src="https://img.shields.io/badge/Electron-41-47848F?logo=electron&logoColor=white" alt="Electron" />
   <img src="https://img.shields.io/badge/Markdown-Editor-000000?logo=markdown&logoColor=white" alt="Markdown" />
   <img src="https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white" alt="Vite" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
@@ -19,31 +19,36 @@
 
 ---
 
-Fence provides a clean, focused environment for writing markdown with a live preview, frontmatter support, and syntax
-highlighting.
+Fence provides a clean, focused environment for writing markdown with a live preview, frontmatter support, syntax highlighting, and mermaid diagram rendering.
 
 ## Features
 
 - **Split-View Editor** — Real-time markdown preview as you type
 - **Frontmatter Support** — Parses and displays YAML frontmatter
 - **Syntax Highlighting** — Built-in support for Elm, JavaScript, Python, CSS, JSON, and more
+- **Mermaid Diagrams** — Render mermaid diagrams directly in the preview
 - **File Explorer** — Integrated file tree for managing your markdown files
 - **Themes** — Customizable themes for the editor environment
-- **Built with Elm** — Type-safe, reliable editing experience
+- **Auto-Update** — Built-in auto-updater via GitHub releases
+- **Cross-Platform** — Builds for macOS, Windows, and Linux
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (latest LTS recommended)
-- [Elm](https://guide.elm-lang.org/install/elm.html)
+- [Node.js](https://nodejs.org/) (latest LTS recommended) or [Bun](https://bun.sh/)
 
 ### Installation
 
 ```bash
 git clone https://github.com/helgesverre/fence.git
 cd fence
+
+# Using npm
 npm install
+
+# Or using bun
+bun install
 ```
 
 ### Development
@@ -51,7 +56,11 @@ npm install
 Start the development server with hot-reloading:
 
 ```bash
+# Using npm
 npm run dev
+
+# Or using bun
+bun run dev
 ```
 
 With Electron DevTools enabled:
@@ -62,24 +71,47 @@ npm run dev:debug
 
 ### Building
 
-Build the application for production:
+Build for your platform:
 
 ```bash
+# Generic build
 npm run build
+
+# Platform-specific
+npm run build:mac
+npm run build:win
+npm run build:linux
 ```
 
 ## Project Structure
 
 ```
-src/            Elm source code
-├── Main.elm        Main application entry point
-├── Editor.elm      Markdown editor component
-├── Markdown.elm    Markdown parsing and rendering
-└── FileTree.elm    File navigation component
-electron/       Electron main process and preload scripts
-js/             JavaScript glue code and Ports
-static/         CSS styles and static assets
-tests/          Elm test suite
+src/
+├── Main.elm            Application entry point
+├── Editor.elm          Markdown editor component
+├── Markdown.elm        Markdown parsing and rendering
+├── Preview.elm         Preview pane rendering
+├── FileTree.elm        File navigation component
+├── Frontmatter.elm     YAML frontmatter parsing
+├── Yaml.elm            YAML parser
+├── Ports.elm           Elm port definitions
+├── Types.elm           Shared types
+└── Icon.elm            SVG icon components
+electron/
+├── main.js             Electron main process
+├── preload.js          Preload script (context bridge)
+└── fs-ops.js           File system operations
+js/
+├── main.js             App initialization
+├── elm.js              Elm app bootstrap
+├── ports.js            Port subscriptions
+├── editor-keys.js      Keyboard shortcut handling
+└── mermaid-init.js     Mermaid diagram rendering
+static/
+├── fonts/              Bundled fonts
+└── styles/             CSS stylesheets
+tests/
+└── YamlTest.elm        YAML parser tests
 ```
 
 ## Tech Stack
@@ -89,6 +121,7 @@ tests/          Elm test suite
 | Frontend | [Elm](https://elm-lang.org/)                  |
 | Desktop  | [Electron](https://www.electronjs.org/)       |
 | Build    | [Vite](https://vitejs.dev/) + vite-plugin-elm |
+| Diagrams | [Mermaid](https://mermaid.js.org/)            |
 | Testing  | elm-test                                      |
 
 ## License

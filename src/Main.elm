@@ -44,6 +44,7 @@ type alias Model =
     , previewFontSize : Float
     , uiFontSize : Float
     , settingsOpen : Bool
+    , settingsFocus : Int
     , sidebarFraction : Float
     , editorFraction : Float
     , drag : Maybe DragState
@@ -64,6 +65,7 @@ type Msg
     | SetPreviewFontSize Float
     | SetUIFontSize Float
     | CloseSettings
+    | SettingsKeyDown String
     | DividerMouseDown DragTarget Float
     | DividerMouseMove Float
     | DividerMouseUp
@@ -139,6 +141,7 @@ init flagsValue =
       , previewFontSize = previewFontSize
       , uiFontSize = uiFontSize
       , settingsOpen = False
+      , settingsFocus = 0
       , sidebarFraction = sidebarFraction
       , editorFraction = editorFraction
       , drag = Nothing
@@ -155,7 +158,16 @@ update msg model =
             ( model, Cmd.none )
 
         ToggleSettings ->
-            ( { model | settingsOpen = not model.settingsOpen }, Cmd.none )
+            let
+                open =
+                    not model.settingsOpen
+            in
+            ( { model | settingsOpen = open, settingsFocus = 0 }
+            , if open then
+                Task.attempt (\_ -> NoOp) (Browser.Dom.focus "settings-item-0")
+              else
+                Cmd.none
+            )
 
         SetTheme themeValue ->
             ( { model | theme = themeValue }
@@ -221,6 +233,85 @@ update msg model =
 
         CloseSettings ->
             ( { model | settingsOpen = False }, Cmd.none )
+
+        SettingsKeyDown key ->
+            let
+                itemCount =
+                    List.length themes + List.length fonts
+
+                focus =
+                    model.settingsFocus
+            in
+            case key of
+                "ArrowDown" ->
+                    let
+                        next =
+                            Basics.min (itemCount - 1) (focus + 1)
+                    in
+                    ( { model | settingsFocus = next }
+                    , Task.attempt (\_ -> NoOp) (Browser.Dom.focus ("settings-item-" ++ String.fromInt next))
+                    )
+
+                "ArrowUp" ->
+                    let
+                        prev =
+                            Basics.max 0 (focus - 1)
+                    in
+                    ( { model | settingsFocus = prev }
+                    , Task.attempt (\_ -> NoOp) (Browser.Dom.focus ("settings-item-" ++ String.fromInt prev))
+                    )
+
+                "Enter" ->
+                    let
+                        allItems =
+                            List.map Tuple.first themes ++ List.map Tuple.first fonts
+                    in
+                    case List.head (List.drop focus allItems) of
+                        Just val ->
+                            if focus < List.length themes then
+                                update (SetTheme val) model
+
+                            else
+                                update (SetFont val) model
+
+                        Nothing ->
+                            ( model, Cmd.none )
+
+                " " ->
+                    let
+                        allItems =
+                            List.map Tuple.first themes ++ List.map Tuple.first fonts
+                    in
+                    case List.head (List.drop focus allItems) of
+                        Just val ->
+                            if focus < List.length themes then
+                                update (SetTheme val) model
+
+                            else
+                                update (SetFont val) model
+
+                        Nothing ->
+                            ( model, Cmd.none )
+
+                "Escape" ->
+                    ( { model | settingsOpen = False }, Cmd.none )
+
+                "Home" ->
+                    ( { model | settingsFocus = 0 }
+                    , Task.attempt (\_ -> NoOp) (Browser.Dom.focus "settings-item-0")
+                    )
+
+                "End" ->
+                    let
+                        last =
+                            itemCount - 1
+                    in
+                    ( { model | settingsFocus = last }
+                    , Task.attempt (\_ -> NoOp) (Browser.Dom.focus ("settings-item-" ++ String.fromInt last))
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
         DividerMouseDown target clientX ->
             let
@@ -477,6 +568,18 @@ handlePortMessage tag value model =
         "doClose" ->
             ( model
             , Ports.toElectron (E.object [ ( "tag", E.string "closeWindow" ) ])
+            )
+
+        "toggleSettings" ->
+            let
+                open =
+                    not model.settingsOpen
+            in
+            ( { model | settingsOpen = open, settingsFocus = 0 }
+            , if open then
+                Task.attempt (\_ -> NoOp) (Browser.Dom.focus "settings-item-0")
+              else
+                Cmd.none
             )
 
         _ ->
@@ -832,16 +935,59 @@ fonts =
     ]
 
 
+settingsKeyDecoder : D.Decoder ( Msg, Bool )
+settingsKeyDecoder =
+    D.field "key" D.string
+        |> D.map
+            (\key ->
+                case key of
+                    "ArrowDown" ->
+                        ( SettingsKeyDown key, True )
+
+                    "ArrowUp" ->
+                        ( SettingsKeyDown key, True )
+
+                    "Enter" ->
+                        ( SettingsKeyDown key, True )
+
+                    " " ->
+                        ( SettingsKeyDown key, True )
+
+                    "Escape" ->
+                        ( SettingsKeyDown key, True )
+
+                    "Home" ->
+                        ( SettingsKeyDown key, True )
+
+                    "End" ->
+                        ( SettingsKeyDown key, True )
+
+                    _ ->
+                        ( NoOp, False )
+            )
+
+
 viewSettingsDropdown : Model -> Html Msg
 viewSettingsDropdown model =
+    let
+        themeOffset =
+            0
+
+        fontOffset =
+            List.length themes
+    in
     div []
         [ div [ class "settings-backdrop", onClick CloseSettings ] []
-        , div [ class "settings-dropdown" ]
+        , div
+            [ class "settings-dropdown"
+            , attribute "role" "listbox"
+            , attribute "aria-label" "Settings"
+            ]
             [ div [ class "settings-dropdown-label" ] [ text "Theme" ]
-            , div [] (List.map (viewThemeItem model.theme) themes)
+            , div [] (List.indexedMap (\i item -> viewThemeItem model (themeOffset + i) item) themes)
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Font" ]
-            , div [] (List.map (viewFontItem model.font) fonts)
+            , div [] (List.indexedMap (\i item -> viewFontItem model (fontOffset + i) item) fonts)
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Font Size" ]
             , viewStepper "Editor" model.editorFontSize SetEditorFontSize
@@ -851,16 +997,34 @@ viewSettingsDropdown model =
         ]
 
 
-viewThemeItem : String -> ( String, String ) -> Html Msg
-viewThemeItem currentTheme ( themeValue, displayName ) =
+viewThemeItem : Model -> Int -> ( String, String ) -> Html Msg
+viewThemeItem model idx ( themeValue, displayName ) =
     let
         isActive =
-            currentTheme == themeValue
+            model.theme == themeValue
+
+        isFocused =
+            model.settingsFocus == idx
     in
     button
         [ class "settings-dropdown-item"
         , classList [ ( "active", isActive ) ]
+        , id ("settings-item-" ++ String.fromInt idx)
+        , tabindex
+            (if isFocused then
+                0
+             else
+                -1
+            )
+        , attribute "role" "option"
+        , attribute "aria-selected"
+            (if isActive then
+                "true"
+             else
+                "false"
+            )
         , onClick (SetTheme themeValue)
+        , preventDefaultOn "keydown" settingsKeyDecoder
         ]
         [ span [ class "settings-dropdown-item-label" ] [ text displayName ]
         , span [ class "settings-dropdown-check" ]
@@ -872,16 +1036,34 @@ viewThemeItem currentTheme ( themeValue, displayName ) =
         ]
 
 
-viewFontItem : String -> ( String, String ) -> Html Msg
-viewFontItem currentFont ( fontValue, displayName ) =
+viewFontItem : Model -> Int -> ( String, String ) -> Html Msg
+viewFontItem model idx ( fontValue, displayName ) =
     let
         isActive =
-            currentFont == fontValue
+            model.font == fontValue
+
+        isFocused =
+            model.settingsFocus == idx
     in
     button
         [ class "settings-dropdown-item"
         , classList [ ( "active", isActive ) ]
+        , id ("settings-item-" ++ String.fromInt idx)
+        , tabindex
+            (if isFocused then
+                0
+             else
+                -1
+            )
+        , attribute "role" "option"
+        , attribute "aria-selected"
+            (if isActive then
+                "true"
+             else
+                "false"
+            )
         , onClick (SetFont fontValue)
+        , preventDefaultOn "keydown" settingsKeyDecoder
         ]
         [ span [ class "settings-dropdown-item-label" ] [ text displayName ]
         , span [ class "settings-dropdown-check" ]

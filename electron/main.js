@@ -282,7 +282,86 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
-    Menu.setApplicationMenu(null);
+    app.setAboutPanelOptions({
+      applicationName: "Fence",
+      applicationVersion: app.getVersion(),
+      copyright: "Copyright © 2026 Helge Sverre",
+      website: "https://github.com/HelgeSverre/fence",
+      iconPath: path.join(__dirname, "../build/icons/icon.png"),
+    });
+
+    const isMac = process.platform === "darwin";
+
+    const template = [
+      ...(isMac
+        ? [
+            {
+              label: app.name,
+              submenu: [
+                { role: "about" },
+                { type: "separator" },
+                {
+                  label: "Settings...",
+                  accelerator: "Cmd+,",
+                  click: () => sendToRenderer({ tag: "toggleSettings" }),
+                },
+                { type: "separator" },
+                { role: "hide" },
+                { role: "hideOthers" },
+                { role: "unhide" },
+                { type: "separator" },
+                { role: "quit" },
+              ],
+            },
+          ]
+        : []),
+      {
+        label: "File",
+        submenu: [
+          {
+            label: "Open Folder...",
+            accelerator: "CmdOrCtrl+O",
+            click: () => sendToRenderer({ tag: "triggerOpenFolder" }),
+          },
+          { type: "separator" },
+          isMac ? { role: "close" } : { role: "quit" },
+        ],
+      },
+      {
+        label: "Edit",
+        submenu: [
+          { role: "undo" },
+          { role: "redo" },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          { role: "selectAll" },
+        ],
+      },
+      {
+        label: "View",
+        submenu: [
+          { role: "resetZoom" },
+          { role: "zoomIn" },
+          { role: "zoomOut" },
+          { type: "separator" },
+          { role: "togglefullscreen" },
+        ],
+      },
+      {
+        label: "Window",
+        submenu: [
+          { role: "minimize" },
+          { role: "zoom" },
+          ...(isMac
+            ? [{ type: "separator" }, { role: "front" }]
+            : [{ role: "close" }]),
+        ],
+      },
+    ];
+
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
     createWindow();
 
     // Check for updates in production (silent check, prompts on available update)

@@ -376,7 +376,17 @@ body {
 }
 
 .settings-dropdown-item:hover {
-  background: var(--bg-overlay);
+  background: var(--state-hover);
+}
+
+.settings-dropdown-item:focus-visible {
+  outline: 2px solid var(--state-focus-ring);
+  outline-offset: -2px;
+  background: var(--state-hover);
+}
+
+.settings-dropdown-item:active {
+  background: var(--state-active);
 }
 
 .settings-dropdown-item.active {

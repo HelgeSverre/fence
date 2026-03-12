@@ -78,6 +78,7 @@
     "concurrently": "^8.2.2",
     "electron": "^41.0.0",
     "electron-builder": "^26.8.1",
+    "elm": "^0.19.1-6",
     "vite": "^5.4.21",
     "vite-plugin-elm": "^3.0.1",
     "wait-on": "^7.2.0"

@@ -375,7 +375,7 @@ handlePortMessage tag value model =
         "folderOpened" ->
             case D.decodeValue dirEntriesDecoder value of
                 Ok ( path, entries ) ->
-                    ( { model | fileTree = FileTree.handleDirContents path entries model.fileTree }
+                    ( { model | fileTree = FileTree.handleFolderOpened path entries model.fileTree }
                     , Cmd.none
                     )
 

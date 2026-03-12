@@ -6,6 +6,7 @@ module FileTree exposing
     , update
     , view
     , handleDirContents
+    , handleFolderOpened
     , handleFsEvent
     )
 
@@ -323,6 +324,11 @@ handleDirContents path entries model =
 
         Nothing ->
             freshRoot path entries model
+
+
+handleFolderOpened : FilePath -> List FileEntry -> Model -> Model
+handleFolderOpened path entries model =
+    freshRoot path entries model
 
 
 freshRoot : FilePath -> List FileEntry -> Model -> Model

@@ -133,3 +133,13 @@ jobs:
           path: |
             release/*.exe
           if-no-files-found: ignore
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-mac, build-linux, build-win]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false

@@ -126,8 +126,8 @@ All standalone Angular components. Inputs are typed; no NgModules.
   frontmatter, syntax highlighting, multiple themes, resizable panes.
 - **Screenshots:** `screenshot.png` from repo root is the hero image. Additional
   per-feature captures can be added later under `public/screenshots/`.
-- **Download links:** point to `https://github.com/<repo>/releases/latest` for
-  now. Per-OS deep links can be wired later.
+- **Download links:** point to `https://github.com/HelgeSverre/fence/releases/latest`
+  for now. Per-OS deep links can be wired later.
 - **Changelog:** initial stub with v0.1.0 and v0.1.1. Future maintenance is manual
   edits to `changelog.md` (no automated GitHub release sync in this spec).
 

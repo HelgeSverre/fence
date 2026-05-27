@@ -1,5 +1,6 @@
 import { setupEditorKeys } from "./editor-keys.js";
 import { reRenderMermaid } from "./mermaid-init.js";
+import { applyFontFamily, applyFontSizesFromState } from "./font-settings.js";
 
 export function wirePorts(app) {
   if (!app.ports) return;
@@ -20,25 +21,13 @@ export function wirePorts(app) {
 
       // Handle font changes locally
       if (data.tag === "setFont") {
-        if (data.font) {
-          document.documentElement.style.setProperty("--font-mono", `"${data.font}", monospace`);
-        } else {
-          document.documentElement.style.removeProperty("--font-mono");
-        }
+        applyFontFamily(data.font);
         return;
       }
 
       // Handle font size changes locally
       if (data.tag === "setFontSize") {
-        if (data.editorFontSize) {
-          document.documentElement.style.setProperty("--font-size-editor", data.editorFontSize + "px");
-        }
-        if (data.previewFontSize) {
-          document.documentElement.style.setProperty("--font-size-preview", data.previewFontSize + "px");
-        }
-        if (data.uiFontSize) {
-          document.documentElement.style.setProperty("--font-size-ui", data.uiFontSize + "px");
-        }
+        applyFontSizesFromState(data);
         return;
       }
 

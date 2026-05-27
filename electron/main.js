@@ -4,6 +4,8 @@ const fs = require("fs");
 const fsOps = require("./fs-ops");
 const { autoUpdater } = require("electron-updater");
 
+const MAX_RECENT_WORKSPACES = 20;
+
 function getStatePath() {
   return path.join(app.getPath("userData"), "state.json");
 }
@@ -22,6 +24,14 @@ function saveState(state) {
   } catch {
     /* ignore */
   }
+}
+
+// Load → mutate → save the persisted state file. Use for any IPC handler
+// that needs to update one or more fields without dropping the others.
+function updateState(updater) {
+  const state = loadState();
+  const updates = updater(state) || {};
+  saveState({ ...state, ...updates });
 }
 
 let mainWindow;
@@ -142,13 +152,13 @@ ipcMain.on("toElm", (_event, data) => {
                 path: folderPath,
                 entries,
               });
-              const state = loadState();
-              const recents = (state.recentWorkspaces || []).filter(p => p !== folderPath);
-              recents.unshift(folderPath);
-              saveState({
-                ...state,
-                lastWorkspace: folderPath,
-                recentWorkspaces: recents.slice(0, 20),
+              updateState((state) => {
+                const recents = (state.recentWorkspaces || []).filter(p => p !== folderPath);
+                recents.unshift(folderPath);
+                return {
+                  lastWorkspace: folderPath,
+                  recentWorkspaces: recents.slice(0, MAX_RECENT_WORKSPACES),
+                };
               });
             } catch (err) {
               sendToRenderer({
@@ -241,28 +251,26 @@ ipcMain.on("toElm", (_event, data) => {
     }
 
     case "saveSplits": {
-      const state = loadState();
-      saveState({
-        ...state,
+      updateState(() => ({
         sidebarFraction: data.sidebarFraction,
         editorFraction: data.editorFraction,
-      });
+      }));
       break;
     }
 
     case "setFont": {
-      const state = loadState();
-      saveState({ ...state, font: data.font });
+      updateState(() => ({ font: data.font }));
       break;
     }
 
     case "setFontSize": {
-      const state = loadState();
-      const updates = {};
-      if (data.editorFontSize) updates.editorFontSize = data.editorFontSize;
-      if (data.previewFontSize) updates.previewFontSize = data.previewFontSize;
-      if (data.uiFontSize) updates.uiFontSize = data.uiFontSize;
-      saveState({ ...state, ...updates });
+      updateState(() => {
+        const updates = {};
+        if (data.editorFontSize) updates.editorFontSize = data.editorFontSize;
+        if (data.previewFontSize) updates.previewFontSize = data.previewFontSize;
+        if (data.uiFontSize) updates.uiFontSize = data.uiFontSize;
+        return updates;
+      });
       break;
     }
   }

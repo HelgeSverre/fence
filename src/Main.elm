@@ -99,12 +99,47 @@ defaultUIFontSize =
     13
 
 
+defaultWindowWidth : Float
+defaultWindowWidth =
+    1400
+
+
+editorFontMin : Float
+editorFontMin =
+    8
+
+
+editorFontMax : Float
+editorFontMax =
+    32
+
+
+uiFontMin : Float
+uiFontMin =
+    8
+
+
+uiFontMax : Float
+uiFontMax =
+    24
+
+
+settingsItemId : Int -> String
+settingsItemId n =
+    "settings-item-" ++ String.fromInt n
+
+
+focusSilently : String -> Cmd Msg
+focusSilently elementId =
+    Task.attempt (\_ -> NoOp) (Browser.Dom.focus elementId)
+
+
 init : D.Value -> ( Model, Cmd Msg )
 init flagsValue =
     let
         windowWidth =
             D.decodeValue (D.field "windowWidth" D.float) flagsValue
-                |> Result.withDefault 1400
+                |> Result.withDefault defaultWindowWidth
 
         sidebarFraction =
             D.decodeValue (D.field "sidebarFraction" D.float) flagsValue
@@ -164,7 +199,7 @@ update msg model =
             in
             ( { model | settingsOpen = open, settingsFocus = 0 }
             , if open then
-                Task.attempt (\_ -> NoOp) (Browser.Dom.focus "settings-item-0")
+                focusSilently (settingsItemId 0)
               else
                 Cmd.none
             )
@@ -192,7 +227,7 @@ update msg model =
         SetEditorFontSize size ->
             let
                 clamped =
-                    clamp 8 32 size
+                    clamp editorFontMin editorFontMax size
             in
             ( { model | editorFontSize = clamped }
             , Ports.toElectron
@@ -206,7 +241,7 @@ update msg model =
         SetPreviewFontSize size ->
             let
                 clamped =
-                    clamp 8 32 size
+                    clamp editorFontMin editorFontMax size
             in
             ( { model | previewFontSize = clamped }
             , Ports.toElectron
@@ -220,7 +255,7 @@ update msg model =
         SetUIFontSize size ->
             let
                 clamped =
-                    clamp 8 24 size
+                    clamp uiFontMin uiFontMax size
             in
             ( { model | uiFontSize = clamped }
             , Ports.toElectron
@@ -241,74 +276,49 @@ update msg model =
 
                 focus =
                     model.settingsFocus
+
+                moveFocus newFocus =
+                    ( { model | settingsFocus = newFocus }
+                    , focusSilently (settingsItemId newFocus)
+                    )
+
+                activateFocused =
+                    let
+                        allItems =
+                            List.map Tuple.first themes ++ List.map Tuple.first fonts
+                    in
+                    case List.head (List.drop focus allItems) of
+                        Just val ->
+                            if focus < List.length themes then
+                                update (SetTheme val) model
+
+                            else
+                                update (SetFont val) model
+
+                        Nothing ->
+                            ( model, Cmd.none )
             in
             case key of
                 "ArrowDown" ->
-                    let
-                        next =
-                            Basics.min (itemCount - 1) (focus + 1)
-                    in
-                    ( { model | settingsFocus = next }
-                    , Task.attempt (\_ -> NoOp) (Browser.Dom.focus ("settings-item-" ++ String.fromInt next))
-                    )
+                    moveFocus (Basics.min (itemCount - 1) (focus + 1))
 
                 "ArrowUp" ->
-                    let
-                        prev =
-                            Basics.max 0 (focus - 1)
-                    in
-                    ( { model | settingsFocus = prev }
-                    , Task.attempt (\_ -> NoOp) (Browser.Dom.focus ("settings-item-" ++ String.fromInt prev))
-                    )
+                    moveFocus (Basics.max 0 (focus - 1))
 
                 "Enter" ->
-                    let
-                        allItems =
-                            List.map Tuple.first themes ++ List.map Tuple.first fonts
-                    in
-                    case List.head (List.drop focus allItems) of
-                        Just val ->
-                            if focus < List.length themes then
-                                update (SetTheme val) model
-
-                            else
-                                update (SetFont val) model
-
-                        Nothing ->
-                            ( model, Cmd.none )
+                    activateFocused
 
                 " " ->
-                    let
-                        allItems =
-                            List.map Tuple.first themes ++ List.map Tuple.first fonts
-                    in
-                    case List.head (List.drop focus allItems) of
-                        Just val ->
-                            if focus < List.length themes then
-                                update (SetTheme val) model
-
-                            else
-                                update (SetFont val) model
-
-                        Nothing ->
-                            ( model, Cmd.none )
+                    activateFocused
 
                 "Escape" ->
                     ( { model | settingsOpen = False }, Cmd.none )
 
                 "Home" ->
-                    ( { model | settingsFocus = 0 }
-                    , Task.attempt (\_ -> NoOp) (Browser.Dom.focus "settings-item-0")
-                    )
+                    moveFocus 0
 
                 "End" ->
-                    let
-                        last =
-                            itemCount - 1
-                    in
-                    ( { model | settingsFocus = last }
-                    , Task.attempt (\_ -> NoOp) (Browser.Dom.focus ("settings-item-" ++ String.fromInt last))
-                    )
+                    moveFocus (itemCount - 1)
 
                 _ ->
                     ( model, Cmd.none )
@@ -375,8 +385,7 @@ update msg model =
                     case newTree.focused of
                         Just path ->
                             if newTree.focused /= model.fileTree.focused then
-                                Browser.Dom.focus (treeItemId path)
-                                    |> Task.attempt (\_ -> NoOp)
+                                focusSilently (treeItemId path)
                             else
                                 Cmd.none
 
@@ -577,7 +586,7 @@ handlePortMessage tag value model =
             in
             ( { model | settingsOpen = open, settingsFocus = 0 }
             , if open then
-                Task.attempt (\_ -> NoOp) (Browser.Dom.focus "settings-item-0")
+                focusSilently (settingsItemId 0)
               else
                 Cmd.none
             )

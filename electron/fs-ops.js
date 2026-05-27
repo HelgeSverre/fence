@@ -4,7 +4,30 @@ const chokidar = require("chokidar");
 
 const watchers = new Map();
 
+// Currently open workspace. All read/write/watch operations are constrained
+// to paths inside this directory. Set via setWorkspace() when a folder is
+// opened; cleared on close.
+let currentWorkspace = null;
+
+function setWorkspace(dirPath) {
+  currentWorkspace = dirPath ? path.resolve(dirPath) : null;
+}
+
+// Throws if the target path resolves outside the active workspace.
+// No-op before a workspace is set (e.g. the very first openFolder dialog).
+function assertWithinWorkspace(target) {
+  if (!currentWorkspace) return;
+  const resolved = path.resolve(target);
+  if (
+    resolved !== currentWorkspace &&
+    !resolved.startsWith(currentWorkspace + path.sep)
+  ) {
+    throw new Error(`Path outside workspace: ${target}`);
+  }
+}
+
 function readDir(dirPath) {
+  assertWithinWorkspace(dirPath);
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
   return entries
     .filter((e) => !e.name.startsWith("."))
@@ -23,14 +46,17 @@ function readDir(dirPath) {
 }
 
 function readFile(filePath) {
+  assertWithinWorkspace(filePath);
   return fs.readFileSync(filePath, "utf-8");
 }
 
 function writeFile(filePath, content) {
+  assertWithinWorkspace(filePath);
   fs.writeFileSync(filePath, content, "utf-8");
 }
 
 function watchDir(dirPath, callback) {
+  assertWithinWorkspace(dirPath);
   if (watchers.has(dirPath)) return;
 
   const watcher = chokidar.watch(dirPath, {
@@ -54,4 +80,11 @@ function unwatchDir(dirPath) {
   }
 }
 
-module.exports = { readDir, readFile, writeFile, watchDir, unwatchDir };
+module.exports = {
+  readDir,
+  readFile,
+  writeFile,
+  watchDir,
+  unwatchDir,
+  setWorkspace,
+};

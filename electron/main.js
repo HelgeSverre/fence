@@ -70,6 +70,7 @@ function createWindow() {
     const state = loadState();
     if (state.lastWorkspace) {
       try {
+        fsOps.setWorkspace(state.lastWorkspace);
         const entries = fsOps.readDir(state.lastWorkspace);
         sendToRenderer({
           tag: "folderOpened",
@@ -77,6 +78,7 @@ function createWindow() {
           entries,
         });
       } catch {
+        fsOps.setWorkspace(null);
         saveState({});
       }
     }
@@ -146,6 +148,7 @@ ipcMain.on("toElm", (_event, data) => {
           if (!result.canceled && result.filePaths.length > 0) {
             const folderPath = result.filePaths[0];
             try {
+              fsOps.setWorkspace(folderPath);
               const entries = fsOps.readDir(folderPath);
               sendToRenderer({
                 tag: "folderOpened",

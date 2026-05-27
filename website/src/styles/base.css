@@ -166,18 +166,33 @@ img {
   padding: 0 var(--space-5);
 }
 
-.prose {
+.prose,
+analog-markdown-route .analog-markdown-route,
+.analog-markdown-route {
+  display: block;
   max-width: var(--max-prose);
   margin: 0 auto;
   padding: var(--space-8) var(--space-5);
 }
 
-.prose h2 {
+.prose h2,
+.analog-markdown-route h2 {
   margin-top: var(--space-7);
 }
 
-.prose h3 {
+.prose h3,
+.analog-markdown-route h3 {
   margin-top: var(--space-5);
+}
+
+.analog-markdown-route h1 {
+  margin-bottom: var(--space-5);
+}
+
+.analog-markdown-route hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--space-6) 0;
 }
 
 .section {

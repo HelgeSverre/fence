@@ -7,15 +7,14 @@
     "email": "helge.sverre@gmail.com",
     "url": "https://helgesver.re"
   },
-  "main": "electron/main.js",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "dev:debug": "concurrently \"vite\" \"wait-on http://localhost:5173 && DEVTOOLS=1 electron .\"",
+    "dev": "vite",
+    "dev:debug": "DEVTOOLS=1 vite",
     "build": "vite build && electron-builder",
     "build:mac": "vite build && electron-builder --mac",
     "build:win": "vite build && electron-builder --win",
-    "build:linux": "vite build && electron-builder --linux",
-    "vite:dev": "vite"
+    "build:linux": "vite build && electron-builder --linux"
   },
   "build": {
     "appId": "no.helgesverre.fence",
@@ -25,7 +24,7 @@
     },
     "files": [
       "dist/**/*",
-      "electron/**/*",
+      "dist-electron/**/*",
       "package.json"
     ],
     "mac": {
@@ -75,13 +74,12 @@
     }
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
     "electron": "^41.0.0",
     "electron-builder": "^26.8.1",
     "elm": "^0.19.1-6",
     "vite": "^5.4.21",
-    "vite-plugin-elm": "^3.0.1",
-    "wait-on": "^7.2.0"
+    "vite-plugin-electron": "^0.29.1",
+    "vite-plugin-elm": "^3.0.1"
   },
   "dependencies": {
     "chokidar": "^3.6.0",

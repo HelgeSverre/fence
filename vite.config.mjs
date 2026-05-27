@@ -1,9 +1,39 @@
 import { defineConfig } from "vite";
 import elm from "vite-plugin-elm";
+import electron from "vite-plugin-electron/simple";
 
 export default defineConfig({
   base: "./",
-  plugins: [elm({ debug: false })],
+  plugins: [
+    elm({ debug: false }),
+    electron({
+      main: {
+        entry: "electron/main.js",
+        vite: {
+          build: {
+            outDir: "dist-electron",
+            commonjsOptions: {
+              include: [/node_modules/, /electron\//],
+            },
+            rollupOptions: {
+              external: ["electron", "electron-updater", "chokidar"],
+            },
+          },
+        },
+      },
+      preload: {
+        input: "electron/preload.js",
+        vite: {
+          build: {
+            outDir: "dist-electron",
+            rollupOptions: {
+              external: ["electron"],
+            },
+          },
+        },
+      },
+    }),
+  ],
   server: {
     port: 5173,
   },

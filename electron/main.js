@@ -46,9 +46,8 @@ function createWindow() {
     mainWindow.show();
   });
 
-  const isDev = !app.isPackaged;
-  if (isDev) {
-    mainWindow.loadURL("http://localhost:5173");
+  if (process.env.VITE_DEV_SERVER_URL) {
+    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
     if (process.env.DEVTOOLS) {
       mainWindow.webContents.openDevTools({ mode: "detach" });
     }

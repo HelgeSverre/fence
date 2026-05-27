@@ -17,6 +17,7 @@ suite =
         , commentTests
         , frontmatterTests
         , edgeCaseTests
+        , realWorldFrontmatterTests
         ]
 
 
@@ -336,4 +337,54 @@ edgeCaseTests =
             \_ ->
                 toObject (Object_ [ ( "a", Int_ 1 ) ])
                     |> Expect.equal (Just [ ( "a", Int_ 1 ) ])
+        ]
+
+
+realWorldFrontmatterTests : Test
+realWorldFrontmatterTests =
+    describe "Real-world frontmatter cases"
+        [ test "negative float" <|
+            \_ ->
+                parse "offset: -1.5"
+                    |> Expect.equal
+                        (Ok (Object_ [ ( "offset", Float_ -1.5 ) ]))
+        , test "double-quoted string containing a colon" <|
+            \_ ->
+                parse "title: \"Hello: World\""
+                    |> Expect.equal
+                        (Ok (Object_ [ ( "title", String_ "Hello: World" ) ]))
+        , test "frontmatter with CRLF line endings" <|
+            \_ ->
+                let
+                    result =
+                        Frontmatter.extract "---\r\ntitle: Hi\r\n---\r\n# Body\r\n"
+                in
+                case result.frontmatter of
+                    Just (Object_ fields) ->
+                        Expect.equal
+                            [ ( "title", String_ "Hi" ) ]
+                            fields
+
+                    _ ->
+                        Expect.fail "Expected frontmatter to parse with CRLF endings"
+        , test "frontmatter with no body" <|
+            \_ ->
+                let
+                    result =
+                        Frontmatter.extract "---\ntitle: Hi\n---\n"
+                in
+                Expect.equal "" (String.trim result.body)
+        , test "uppercase True is a string, not a boolean" <|
+            \_ ->
+                -- Yaml.elm only recognises lowercase true/false/yes/no.
+                -- Lock the behavior in so a future change is intentional.
+                parse "flag: True"
+                    |> Expect.equal
+                        (Ok (Object_ [ ( "flag", String_ "True" ) ]))
+
+        -- Known Yaml.elm gaps (parser currently rejects these). Listed here
+        -- so the next maintainer can pick them up; not promoted to failing
+        -- tests because they aren't quick fixes:
+        --   * literal block with strip-chomp: "summary: |-\n  one\n  two"
+        --   * list of mappings: "authors:\n  - name: Alice\n    email: a@x"
         ]

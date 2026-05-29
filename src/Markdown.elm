@@ -402,6 +402,48 @@ renderHighlightedCodeBlock body language =
                 Just "golang" ->
                     Just SyntaxHighlight.go
 
+                -- Aliases: reuse a lexically-close parser. Structure (strings,
+                -- comments, numbers, brackets) highlights well; keyword
+                -- coverage is partial where the languages' vocab differs.
+                Just "ocaml" ->
+                    Just SyntaxHighlight.fsharp
+
+                Just "ml" ->
+                    Just SyntaxHighlight.fsharp
+
+                Just "scss" ->
+                    Just SyntaxHighlight.css
+
+                Just "less" ->
+                    Just SyntaxHighlight.css
+
+                Just "jsonc" ->
+                    Just SyntaxHighlight.json
+
+                Just "json5" ->
+                    Just SyntaxHighlight.json
+
+                Just "c" ->
+                    Just SyntaxHighlight.kotlin
+
+                Just "cpp" ->
+                    Just SyntaxHighlight.kotlin
+
+                Just "c++" ->
+                    Just SyntaxHighlight.kotlin
+
+                Just "java" ->
+                    Just SyntaxHighlight.kotlin
+
+                Just "scala" ->
+                    Just SyntaxHighlight.kotlin
+
+                Just "swift" ->
+                    Just SyntaxHighlight.kotlin
+
+                Just "groovy" ->
+                    Just SyntaxHighlight.kotlin
+
                 _ ->
                     Nothing
     in

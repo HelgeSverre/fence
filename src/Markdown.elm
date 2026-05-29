@@ -384,6 +384,15 @@ renderHighlightedCodeBlock body language =
                 Just "dart" ->
                     Just SyntaxHighlight.dart
 
+                Just "fsharp" ->
+                    Just SyntaxHighlight.fsharp
+
+                Just "fs" ->
+                    Just SyntaxHighlight.fsharp
+
+                Just "fsx" ->
+                    Just SyntaxHighlight.fsharp
+
                 Just "vue" ->
                     Just SyntaxHighlight.xml
 

@@ -3,7 +3,7 @@ module SyntaxHighlight exposing
     , toBlockHtml, toInlineHtml, toStaticBlockHtml, toStaticInlineHtml
     , Highlight(..), highlightLines
     , css, elm, javascript, python, sql, xml, json, nix, kotlin, go, noLang
-    , rust, php, typescript, dart
+    , rust, php, typescript, dart, fsharp
     , Theme, useTheme, monokai, gitHub, oneDark
     , ConsoleOptions, toConsole
     , CustomTransform, toCustom
@@ -51,6 +51,7 @@ import Html exposing (Html, text)
 import Parser
 import SyntaxHighlight.Language.Css as Css
 import SyntaxHighlight.Language.Elm as Elm
+import SyntaxHighlight.Language.Fsharp as Fsharp
 import SyntaxHighlight.Language.Go as Go
 import SyntaxHighlight.Language.Javascript as Javascript
 import SyntaxHighlight.Language.Json as Json
@@ -236,6 +237,14 @@ typescript =
 dart : String -> Result (List Parser.DeadEnd) HCode
 dart =
     Dart.toLines
+        >> Result.map HCode
+
+
+{-| Parse F# syntax.
+-}
+fsharp : String -> Result (List Parser.DeadEnd) HCode
+fsharp =
+    Fsharp.toLines
         >> Result.map HCode
 
 

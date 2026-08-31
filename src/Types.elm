@@ -3,10 +3,12 @@ module Types exposing
     , FileEntry(..)
     , FileType(..)
     , FilePath
+    , baseName
     , fileEntryName
     , fileEntryPath
     , fileEntryType
     , fileEntryChildren
+    , treeItemId
     )
 
 
@@ -51,3 +53,21 @@ fileEntryType (FileEntry e) =
 fileEntryChildren : FileEntry -> Maybe (List FileEntry)
 fileEntryChildren (FileEntry e) =
     e.children
+
+
+baseName : FilePath -> String
+baseName path =
+    path
+        |> String.split "/"
+        |> List.filter (not << String.isEmpty)
+        |> List.reverse
+        |> List.head
+        |> Maybe.withDefault path
+
+
+{-| DOM id for a file-tree row. Shared so focus-after-navigation in Main
+always targets the id FileTree renders.
+-}
+treeItemId : FilePath -> String
+treeItemId path =
+    "tree-item-" ++ String.replace "/" "-" path

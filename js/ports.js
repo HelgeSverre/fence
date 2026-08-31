@@ -8,7 +8,8 @@ export function wirePorts(app) {
   // Elm → Electron
   if (app.ports.toElectron) {
     app.ports.toElectron.subscribe((data) => {
-      // Handle theme changes locally (no IPC needed)
+      // Theme/font changes apply locally, then fall through to IPC so the
+      // main process persists them to state.json.
       if (data.tag === "setTheme") {
         if (data.theme) {
           document.documentElement.setAttribute("data-theme", data.theme);
@@ -16,19 +17,10 @@ export function wirePorts(app) {
           document.documentElement.removeAttribute("data-theme");
         }
         reRenderMermaid();
-        return;
-      }
-
-      // Handle font changes locally
-      if (data.tag === "setFont") {
+      } else if (data.tag === "setFont") {
         applyFontFamily(data.font);
-        return;
-      }
-
-      // Handle font size changes locally
-      if (data.tag === "setFontSize") {
+      } else if (data.tag === "setFontSize") {
         applyFontSizesFromState(data);
-        return;
       }
 
       if (window.electronAPI) {

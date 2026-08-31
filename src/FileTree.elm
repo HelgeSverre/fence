@@ -414,7 +414,7 @@ addChild parentPath newEntry (FileEntry e) =
                 if List.any (\c -> fileEntryPath c == fileEntryPath newEntry) children then
                     FileEntry e
                 else
-                    FileEntry { e | children = Just (sortEntries (newEntry :: children)) }
+                    FileEntry { e | children = Just (List.sortWith directoriesFirst (newEntry :: children)) }
 
             Nothing ->
                 FileEntry e
@@ -443,30 +443,6 @@ removeChild targetPath (FileEntry e) =
 
         Nothing ->
             FileEntry e
-
-
-sortEntries : List FileEntry -> List FileEntry
-sortEntries entries =
-    let
-        dirs =
-            List.filter (\en -> fileEntryType en == Directory) entries
-                |> List.sortBy (\en -> String.toLower (fileEntryName en))
-
-        files =
-            List.filter (\en -> fileEntryType en == File) entries
-                |> List.sortBy (\en -> String.toLower (fileEntryName en))
-    in
-    dirs ++ files
-
-
-baseName : String -> String
-baseName path =
-    path
-        |> String.split "/"
-        |> List.filter (not << String.isEmpty)
-        |> List.reverse
-        |> List.head
-        |> Maybe.withDefault path
 
 
 dirName : String -> String
@@ -547,11 +523,6 @@ treeKeyDecoder _ =
             )
 
 
-treeItemId : FilePath -> String
-treeItemId path =
-    "tree-item-" ++ String.replace "/" "-" path
-
-
 viewEntry : Model -> Int -> FileEntry -> Html Msg
 viewEntry model depth entry =
     let
@@ -572,9 +543,6 @@ viewEntry model depth entry =
 
         indent =
             style "padding-left" (String.fromInt (12 + depth * 16) ++ "px")
-
-        isDir =
-            fileEntryType entry == Directory
     in
     case fileEntryType entry of
         Directory ->

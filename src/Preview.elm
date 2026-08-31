@@ -10,7 +10,7 @@ view frontmatter renderedHtml =
     div [ class "preview-pane" ]
         [ div [ class "pane-header" ]
             [ span [] [ text "Preview" ] ]
-        , div [ class "preview-container" ]
+        , div [ id "preview-container", class "preview-container" ]
             [ div [ class "preview-content" ]
                 (if List.isEmpty renderedHtml then
                     [ welcomeView ]

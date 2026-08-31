@@ -8,6 +8,7 @@ import FileTree
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
+import Html.Lazy
 import Icon
 import Json.Decode as D
 import Json.Encode as E
@@ -23,6 +24,7 @@ import Types exposing (..)
 type DragTarget
     = DraggingSidebar
     | DraggingEditor
+    | DraggingRightSidebar
 
 
 type alias DragState =
@@ -30,6 +32,25 @@ type alias DragState =
     , startX : Float
     , startFraction : Float
     }
+
+
+{-| A keyboard shortcut. `key` is the `event.key` value (e.g. "1"); the
+booleans capture which modifiers must be held.
+-}
+type alias KeyBinding =
+    { key : String
+    , meta : Bool
+    , ctrl : Bool
+    , shift : Bool
+    , alt : Bool
+    }
+
+
+{-| Which sidebar toggle is being rebound while in capture mode.
+-}
+type RebindTarget
+    = RebindLeft
+    | RebindRight
 
 
 type alias Model =
@@ -49,6 +70,16 @@ type alias Model =
     , editorFraction : Float
     , drag : Maybe DragState
     , windowWidth : Float
+    , outline : List Markdown.OutlineEntry
+    , leftSidebarVisible : Bool
+    , rightSidebarVisible : Bool
+    , rightSidebarFraction : Float
+    , outlineMaxLevel : Int
+    , leftToggleKey : KeyBinding
+    , rightToggleKey : KeyBinding
+    , rebinding : Maybe RebindTarget
+    , errorMessage : Maybe String
+    , closeAfterSave : Bool
     }
 
 
@@ -56,7 +87,7 @@ type Msg
     = FileTreeMsg FileTree.Msg
     | EditorMsg Editor.Msg
     | FromElectron D.Value
-    | KeyDown String Bool Bool
+    | KeyDown String Bool Bool Bool Bool
     | DebouncedParse Int
     | ToggleSettings
     | SetTheme String
@@ -71,6 +102,12 @@ type Msg
     | DividerMouseUp
     | DividerDoubleClick DragTarget
     | WindowResized Int Int
+    | ToggleLeftSidebar
+    | ToggleRightSidebar
+    | SetOutlineMaxLevel Int
+    | ScrollToHeading String
+    | StartRebind RebindTarget
+    | DismissError
     | NoOp
 
 
@@ -82,6 +119,93 @@ defaultSidebarFraction =
 defaultEditorFraction : Float
 defaultEditorFraction =
     0.5
+
+
+defaultRightSidebarFraction : Float
+defaultRightSidebarFraction =
+    0.18
+
+
+defaultOutlineMaxLevel : Int
+defaultOutlineMaxLevel =
+    3
+
+
+outlineMinLevel : Int
+outlineMinLevel =
+    1
+
+
+outlineMaxLevelLimit : Int
+outlineMaxLevelLimit =
+    6
+
+
+defaultLeftToggleKey : KeyBinding
+defaultLeftToggleKey =
+    { key = "1", meta = True, ctrl = False, shift = False, alt = False }
+
+
+defaultRightToggleKey : KeyBinding
+defaultRightToggleKey =
+    { key = "3", meta = True, ctrl = False, shift = False, alt = False }
+
+
+keyBindingDecoder : D.Decoder KeyBinding
+keyBindingDecoder =
+    D.map5 KeyBinding
+        (D.field "key" D.string)
+        (D.field "meta" D.bool)
+        (D.field "ctrl" D.bool)
+        (D.field "shift" D.bool)
+        (D.field "alt" D.bool)
+
+
+encodeKeyBinding : KeyBinding -> E.Value
+encodeKeyBinding binding =
+    E.object
+        [ ( "key", E.string binding.key )
+        , ( "meta", E.bool binding.meta )
+        , ( "ctrl", E.bool binding.ctrl )
+        , ( "shift", E.bool binding.shift )
+        , ( "alt", E.bool binding.alt )
+        ]
+
+
+{-| Does an actual keydown (key + modifier flags) match a configured binding?
+-}
+matchesBinding : KeyBinding -> String -> Bool -> Bool -> Bool -> Bool -> Bool
+matchesBinding binding key meta ctrl shift alt =
+    (String.toLower binding.key == String.toLower key)
+        && (binding.meta == meta)
+        && (binding.ctrl == ctrl)
+        && (binding.shift == shift)
+        && (binding.alt == alt)
+
+
+{-| Human-readable label for a binding, e.g. "⌘1" or "⇧⌥A".
+-}
+keyBindingLabel : KeyBinding -> String
+keyBindingLabel binding =
+    let
+        mods =
+            [ ( binding.ctrl, "⌃" )
+            , ( binding.alt, "⌥" )
+            , ( binding.shift, "⇧" )
+            , ( binding.meta, "⌘" )
+            ]
+                |> List.filter Tuple.first
+                |> List.map Tuple.second
+                |> String.concat
+
+        keyLabel =
+            if String.length binding.key == 1 then
+                String.toUpper binding.key
+
+            else
+                binding.key
+    in
+    mods ++ keyLabel
 
 
 defaultEditorFontSize : Float
@@ -137,50 +261,38 @@ focusSilently elementId =
 init : D.Value -> ( Model, Cmd Msg )
 init flagsValue =
     let
-        windowWidth =
-            D.decodeValue (D.field "windowWidth" D.float) flagsValue
-                |> Result.withDefault defaultWindowWidth
-
-        sidebarFraction =
-            D.decodeValue (D.field "sidebarFraction" D.float) flagsValue
-                |> Result.withDefault defaultSidebarFraction
-
-        editorFraction =
-            D.decodeValue (D.field "editorFraction" D.float) flagsValue
-                |> Result.withDefault defaultEditorFraction
-
-        font =
-            D.decodeValue (D.field "font" D.string) flagsValue
-                |> Result.withDefault ""
-
-        editorFontSize =
-            D.decodeValue (D.field "editorFontSize" D.float) flagsValue
-                |> Result.withDefault defaultEditorFontSize
-
-        previewFontSize =
-            D.decodeValue (D.field "previewFontSize" D.float) flagsValue
-                |> Result.withDefault defaultPreviewFontSize
-
-        uiFontSize =
-            D.decodeValue (D.field "uiFontSize" D.float) flagsValue
-                |> Result.withDefault defaultUIFontSize
+        flag name decoder default =
+            D.decodeValue (D.field name decoder) flagsValue
+                |> Result.withDefault default
     in
     ( { fileTree = FileTree.init
       , editor = Editor.init
       , previewHtml = []
       , frontmatter = Nothing
       , debounceGeneration = 0
-      , theme = "github-dark"
-      , font = font
-      , editorFontSize = editorFontSize
-      , previewFontSize = previewFontSize
-      , uiFontSize = uiFontSize
+      , theme = flag "theme" D.string "github-dark"
+      , font = flag "font" D.string ""
+      , editorFontSize = flag "editorFontSize" D.float defaultEditorFontSize
+      , previewFontSize = flag "previewFontSize" D.float defaultPreviewFontSize
+      , uiFontSize = flag "uiFontSize" D.float defaultUIFontSize
       , settingsOpen = False
       , settingsFocus = 0
-      , sidebarFraction = sidebarFraction
-      , editorFraction = editorFraction
+      , sidebarFraction = flag "sidebarFraction" D.float defaultSidebarFraction
+      , editorFraction = flag "editorFraction" D.float defaultEditorFraction
       , drag = Nothing
-      , windowWidth = windowWidth
+      , windowWidth = flag "windowWidth" D.float defaultWindowWidth
+      , outline = []
+      , leftSidebarVisible = flag "leftSidebarVisible" D.bool True
+      , rightSidebarVisible = flag "rightSidebarVisible" D.bool False
+      , rightSidebarFraction = flag "rightSidebarFraction" D.float defaultRightSidebarFraction
+      , outlineMaxLevel =
+            flag "outlineMaxLevel" D.int defaultOutlineMaxLevel
+                |> clamp outlineMinLevel outlineMaxLevelLimit
+      , leftToggleKey = flag "leftToggleKey" keyBindingDecoder defaultLeftToggleKey
+      , rightToggleKey = flag "rightToggleKey" keyBindingDecoder defaultRightToggleKey
+      , rebinding = Nothing
+      , errorMessage = Nothing
+      , closeAfterSave = False
       }
     , Cmd.none
     )
@@ -332,6 +444,9 @@ update msg model =
 
                         DraggingEditor ->
                             model.editorFraction
+
+                        DraggingRightSidebar ->
+                            model.rightSidebarFraction
             in
             ( { model
                 | drag =
@@ -370,11 +485,44 @@ update msg model =
 
                         DraggingEditor ->
                             { model | editorFraction = defaultEditorFraction }
+
+                        DraggingRightSidebar ->
+                            { model | rightSidebarFraction = defaultRightSidebarFraction }
             in
             ( newModel, saveSplitsCmd newModel )
 
         WindowResized w _ ->
             ( { model | windowWidth = toFloat w }, Cmd.none )
+
+        ToggleLeftSidebar ->
+            let
+                newModel =
+                    { model | leftSidebarVisible = not model.leftSidebarVisible }
+            in
+            ( newModel, saveSplitsCmd newModel )
+
+        ToggleRightSidebar ->
+            let
+                newModel =
+                    { model | rightSidebarVisible = not model.rightSidebarVisible }
+            in
+            ( newModel, saveSplitsCmd newModel )
+
+        SetOutlineMaxLevel level ->
+            let
+                newModel =
+                    { model | outlineMaxLevel = clamp outlineMinLevel outlineMaxLevelLimit level }
+            in
+            ( newModel, saveSplitsCmd newModel )
+
+        ScrollToHeading anchorId ->
+            ( model, scrollToHeadingCmd anchorId )
+
+        StartRebind target ->
+            ( { model | rebinding = Just target }, Cmd.none )
+
+        DismissError ->
+            ( { model | errorMessage = Nothing }, Cmd.none )
 
         FileTreeMsg subMsg ->
             let
@@ -424,23 +572,63 @@ update msg model =
         DebouncedParse gen ->
             if gen == model.debounceGeneration then
                 let
-                    { frontmatter, html } =
+                    { frontmatter, html, outline } =
                         Markdown.parse model.editor.content
                 in
-                ( { model | previewHtml = html, frontmatter = frontmatter }
+                ( { model | previewHtml = html, frontmatter = frontmatter, outline = outline }
                 , Cmd.none
                 )
 
             else
                 ( model, Cmd.none )
 
-        KeyDown key metaKey ctrlKey ->
-            if key == "s" && (metaKey || ctrlKey) then
-                saveFile model
-            else if key == "Escape" && model.settingsOpen then
-                ( { model | settingsOpen = False }, Cmd.none )
-            else
-                ( model, Cmd.none )
+        KeyDown key metaKey ctrlKey shiftKey altKey ->
+            case model.rebinding of
+                Just target ->
+                    if key == "Escape" then
+                        ( { model | rebinding = Nothing }, Cmd.none )
+
+                    else if isModifierKey key || not (metaKey || ctrlKey || altKey) then
+                        -- Wait for a non-modifier key held with at least one
+                        -- modifier, so a stray bare keypress can't clobber the
+                        -- binding (and plain typing stays harmless).
+                        ( model, Cmd.none )
+
+                    else
+                        let
+                            binding =
+                                { key = key
+                                , meta = metaKey
+                                , ctrl = ctrlKey
+                                , shift = shiftKey
+                                , alt = altKey
+                                }
+
+                            newModel =
+                                case target of
+                                    RebindLeft ->
+                                        { model | leftToggleKey = binding, rebinding = Nothing }
+
+                                    RebindRight ->
+                                        { model | rightToggleKey = binding, rebinding = Nothing }
+                        in
+                        ( newModel, saveSplitsCmd newModel )
+
+                Nothing ->
+                    if key == "s" && (metaKey || ctrlKey) then
+                        saveFile model
+
+                    else if key == "Escape" && model.settingsOpen then
+                        ( { model | settingsOpen = False }, Cmd.none )
+
+                    else if matchesBinding model.leftToggleKey key metaKey ctrlKey shiftKey altKey then
+                        update ToggleLeftSidebar model
+
+                    else if matchesBinding model.rightToggleKey key metaKey ctrlKey shiftKey altKey then
+                        update ToggleRightSidebar model
+
+                    else
+                        ( model, Cmd.none )
 
         FromElectron value ->
             case D.decodeValue (D.field "tag" D.string) value of
@@ -499,13 +687,14 @@ handlePortMessage tag value model =
                         newEditor =
                             Editor.setContent path content model.editor
 
-                        { frontmatter, html } =
+                        { frontmatter, html, outline } =
                             Markdown.parse content
                     in
                     ( { model
                         | editor = newEditor
                         , previewHtml = html
                         , frontmatter = frontmatter
+                        , outline = outline
                       }
                     , Cmd.batch
                         [ setTitleCmd newEditor
@@ -525,6 +714,10 @@ handlePortMessage tag value model =
             , Cmd.batch
                 [ setTitleCmd newEditor
                 , setDirtyCmd False
+                , if model.closeAfterSave then
+                    closeWindowCmd
+                  else
+                    Cmd.none
                 ]
             )
 
@@ -560,35 +753,35 @@ handlePortMessage tag value model =
                     ( model, Cmd.none )
 
         "saveAndClose" ->
-            let
-                ( newModel, saveCmd ) =
-                    saveFile model
-            in
-            ( newModel
-            , Cmd.batch
-                [ saveCmd
-                , -- Close after a small delay to let save complete
-                  Task.perform
-                    (\_ -> FromElectron (E.object [ ( "tag", E.string "doClose" ) ]))
-                    (Process.sleep 200)
-                ]
-            )
+            -- Close happens when "fileSaved" comes back, so a slow write
+            -- can't lose data. An "error" cancels the pending close.
+            case model.editor.filePath of
+                Just _ ->
+                    let
+                        ( newModel, saveCmd ) =
+                            saveFile model
+                    in
+                    ( { newModel | closeAfterSave = True }, saveCmd )
 
-        "doClose" ->
-            ( model
-            , Ports.toElectron (E.object [ ( "tag", E.string "closeWindow" ) ])
-            )
+                Nothing ->
+                    ( model, closeWindowCmd )
 
         "toggleSettings" ->
-            let
-                open =
-                    not model.settingsOpen
-            in
-            ( { model | settingsOpen = open, settingsFocus = 0 }
-            , if open then
-                focusSilently (settingsItemId 0)
-              else
-                Cmd.none
+            update ToggleSettings model
+
+        "triggerOpenFolder" ->
+            ( model
+            , Ports.toElectron (E.object [ ( "tag", E.string "openFolder" ) ])
+            )
+
+        "error" ->
+            ( { model
+                | errorMessage =
+                    D.decodeValue (D.field "message" D.string) value
+                        |> Result.toMaybe
+                , closeAfterSave = False
+              }
+            , Cmd.none
             )
 
         _ ->
@@ -634,6 +827,11 @@ setDirtyCmd dirty =
         )
 
 
+closeWindowCmd : Cmd Msg
+closeWindowCmd =
+    Ports.toElectron (E.object [ ( "tag", E.string "closeWindow" ) ])
+
+
 
 -- SPLIT HELPERS
 
@@ -653,8 +851,17 @@ computeDrag d clientX model =
 
         DraggingEditor ->
             let
+                rightFraction =
+                    if model.rightSidebarVisible then
+                        model.rightSidebarFraction
+
+                    else
+                        0
+
+                -- editorFraction is a fraction of the editor/preview region,
+                -- i.e. the window minus both sidebars.
                 remainingWidth =
-                    model.windowWidth * (1 - model.sidebarFraction)
+                    model.windowWidth * (1 - model.sidebarFraction - rightFraction)
 
                 deltaFraction =
                     if remainingWidth > 0 then
@@ -668,6 +875,18 @@ computeDrag d clientX model =
             in
             { model | editorFraction = newFraction }
 
+        DraggingRightSidebar ->
+            let
+                -- The handle sits on the sidebar's left edge, so dragging
+                -- left (negative delta) widens the right sidebar.
+                deltaFraction =
+                    (clientX - d.startX) / model.windowWidth
+
+                newFraction =
+                    clamp 0.08 0.4 (d.startFraction - deltaFraction)
+            in
+            { model | rightSidebarFraction = newFraction }
+
 
 saveSplitsCmd : Model -> Cmd Msg
 saveSplitsCmd model =
@@ -676,8 +895,38 @@ saveSplitsCmd model =
             [ ( "tag", E.string "saveSplits" )
             , ( "sidebarFraction", E.float model.sidebarFraction )
             , ( "editorFraction", E.float model.editorFraction )
+            , ( "rightSidebarFraction", E.float model.rightSidebarFraction )
+            , ( "leftSidebarVisible", E.bool model.leftSidebarVisible )
+            , ( "rightSidebarVisible", E.bool model.rightSidebarVisible )
+            , ( "outlineMaxLevel", E.int model.outlineMaxLevel )
+            , ( "leftToggleKey", encodeKeyBinding model.leftToggleKey )
+            , ( "rightToggleKey", encodeKeyBinding model.rightToggleKey )
             ]
         )
+
+
+{-| Scroll the preview pane so the heading with `anchorId` is at the top.
+Computes the heading's offset relative to the scrollable preview container.
+-}
+scrollToHeadingCmd : String -> Cmd Msg
+scrollToHeadingCmd anchorId =
+    Task.map3
+        (\heading container containerVp ->
+            -- Heading offset within the container's scrollable content.
+            containerVp.viewport.y + heading.element.y - container.element.y
+        )
+        (Browser.Dom.getElement anchorId)
+        (Browser.Dom.getElement "preview-container")
+        (Browser.Dom.getViewportOf "preview-container")
+        |> Task.andThen (\y -> Browser.Dom.setViewportOf "preview-container" 0 y)
+        |> Task.attempt (\_ -> NoOp)
+
+
+{-| Is this `event.key` value a bare modifier key (no real character)?
+-}
+isModifierKey : String -> Bool
+isModifierKey key =
+    List.member key [ "Meta", "Control", "Shift", "Alt", "CapsLock" ]
 
 
 
@@ -788,26 +1037,12 @@ fsEventDecoder =
 
 keyDecoder : D.Decoder Msg
 keyDecoder =
-    D.map3 KeyDown
+    D.map5 KeyDown
         (D.field "key" D.string)
         (D.field "metaKey" D.bool)
         (D.field "ctrlKey" D.bool)
-
-
-treeItemId : String -> String
-treeItemId path =
-    "tree-item-" ++ String.replace "/" "-" path
-
-
-baseName : String -> String
-baseName path =
-    path
-        |> String.split "/"
-        |> List.filter (not << String.isEmpty)
-        |> List.reverse
-        |> List.head
-        |> Maybe.withDefault path
-
+        (D.field "shiftKey" D.bool)
+        (D.field "altKey" D.bool)
 
 
 -- SUBSCRIPTIONS
@@ -855,11 +1090,60 @@ viewDivider target =
 view : Model -> Html Msg
 view model =
     let
+        leftFraction =
+            if model.leftSidebarVisible then
+                model.sidebarFraction
+
+            else
+                0
+
+        rightFraction =
+            if model.rightSidebarVisible then
+                model.rightSidebarFraction
+
+            else
+                0
+
+        -- Editor/preview share whatever the sidebars leave behind.
+        middleRegion =
+            Basics.max 0 (1 - leftFraction - rightFraction)
+
+        editorTrack =
+            model.editorFraction * middleRegion
+
+        -- Each section is a (grid-track-size, element) pair so the
+        -- template columns always match the rendered children exactly.
+        -- lazy: keeps typing from rebuilding the tree/preview virtual DOM
+        -- when their inputs haven't changed.
+        leftSection =
+            if model.leftSidebarVisible then
+                [ ( pct model.sidebarFraction, Html.map FileTreeMsg (Html.Lazy.lazy FileTree.view model.fileTree) )
+                , ( "2px", viewDivider DraggingSidebar )
+                ]
+
+            else
+                []
+
+        middleSection =
+            [ ( pct editorTrack, Html.map EditorMsg (Editor.view model.editor) )
+            , ( "2px", viewDivider DraggingEditor )
+            , ( "1fr", Html.Lazy.lazy2 Preview.view model.frontmatter model.previewHtml )
+            ]
+
+        rightSection =
+            if model.rightSidebarVisible then
+                [ ( "2px", viewDivider DraggingRightSidebar )
+                , ( pct model.rightSidebarFraction, viewOutline model )
+                ]
+
+            else
+                []
+
+        sections =
+            leftSection ++ middleSection ++ rightSection
+
         gridColumns =
-            pct model.sidebarFraction
-                ++ " 2px "
-                ++ pct (model.editorFraction * (1 - model.sidebarFraction))
-                ++ " 2px 1fr"
+            String.join " " (List.map Tuple.first sections)
     in
     div []
         [ div [ class "app-shell" ]
@@ -869,14 +1153,48 @@ view model =
                 , classList [ ( "dragging", model.drag /= Nothing ) ]
                 , style "grid-template-columns" gridColumns
                 ]
-                [ Html.map FileTreeMsg (FileTree.view model.fileTree)
-                , viewDivider DraggingSidebar
-                , Html.map EditorMsg (Editor.view model.editor)
-                , viewDivider DraggingEditor
-                , Preview.view model.frontmatter model.previewHtml
-                ]
+                (List.map Tuple.second sections)
             ]
+        , case model.errorMessage of
+            Just message ->
+                div [ class "error-banner", onClick DismissError, title "Click to dismiss" ]
+                    [ text message ]
+
+            Nothing ->
+                text ""
         ]
+
+
+{-| The right sidebar: a clickable outline of the document's headings,
+filtered to the configured maximum depth.
+-}
+viewOutline : Model -> Html Msg
+viewOutline model =
+    let
+        entries =
+            List.filter (\e -> e.level <= model.outlineMaxLevel) model.outline
+    in
+    div [ class "outline-pane" ]
+        [ div [ class "pane-header" ]
+            [ span [] [ text "Outline" ] ]
+        , div [ class "outline-content" ]
+            (if List.isEmpty entries then
+                [ div [ class "outline-empty" ] [ text "No headings" ] ]
+
+             else
+                List.map viewOutlineEntry entries
+            )
+        ]
+
+
+viewOutlineEntry : Markdown.OutlineEntry -> Html Msg
+viewOutlineEntry entry =
+    button
+        [ class "outline-entry"
+        , class ("outline-level-" ++ String.fromInt entry.level)
+        , onClick (ScrollToHeading entry.id)
+        ]
+        [ text entry.text ]
 
 
 viewTitleBar : Model -> Html Msg
@@ -949,30 +1267,11 @@ settingsKeyDecoder =
     D.field "key" D.string
         |> D.map
             (\key ->
-                case key of
-                    "ArrowDown" ->
-                        ( SettingsKeyDown key, True )
+                if List.member key [ "ArrowDown", "ArrowUp", "Enter", " ", "Escape", "Home", "End" ] then
+                    ( SettingsKeyDown key, True )
 
-                    "ArrowUp" ->
-                        ( SettingsKeyDown key, True )
-
-                    "Enter" ->
-                        ( SettingsKeyDown key, True )
-
-                    " " ->
-                        ( SettingsKeyDown key, True )
-
-                    "Escape" ->
-                        ( SettingsKeyDown key, True )
-
-                    "Home" ->
-                        ( SettingsKeyDown key, True )
-
-                    "End" ->
-                        ( SettingsKeyDown key, True )
-
-                    _ ->
-                        ( NoOp, False )
+                else
+                    ( NoOp, False )
             )
 
 
@@ -993,24 +1292,83 @@ viewSettingsDropdown model =
             , attribute "aria-label" "Settings"
             ]
             [ div [ class "settings-dropdown-label" ] [ text "Theme" ]
-            , div [] (List.indexedMap (\i item -> viewThemeItem model (themeOffset + i) item) themes)
+            , div [] (List.indexedMap (\i item -> viewSettingsItem model SetTheme model.theme (themeOffset + i) item) themes)
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Font" ]
-            , div [] (List.indexedMap (\i item -> viewFontItem model (fontOffset + i) item) fonts)
+            , div [] (List.indexedMap (\i item -> viewSettingsItem model SetFont model.font (fontOffset + i) item) fonts)
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Font Size" ]
             , viewStepper "Editor" model.editorFontSize SetEditorFontSize
             , viewStepper "Preview" model.previewFontSize SetPreviewFontSize
             , viewStepper "UI" model.uiFontSize SetUIFontSize
+            , div [ class "settings-dropdown-divider" ] []
+            , div [ class "settings-dropdown-label" ] [ text "Outline" ]
+            , viewOutlineLevelStepper model.outlineMaxLevel
+            , div [ class "settings-dropdown-divider" ] []
+            , div [ class "settings-dropdown-label" ] [ text "Shortcuts" ]
+            , viewRebindRow "Toggle left sidebar" model.leftToggleKey RebindLeft model.rebinding
+            , viewRebindRow "Toggle right sidebar" model.rightToggleKey RebindRight model.rebinding
             ]
         ]
 
 
-viewThemeItem : Model -> Int -> ( String, String ) -> Html Msg
-viewThemeItem model idx ( themeValue, displayName ) =
+{-| Integer +/- stepper for the maximum heading level shown in the outline.
+-}
+viewOutlineLevelStepper : Int -> Html Msg
+viewOutlineLevelStepper level =
+    div [ class "settings-dropdown-row" ]
+        [ span [ class "settings-dropdown-row-label" ] [ text "Max depth" ]
+        , div [ class "stepper" ]
+            [ button
+                [ class "stepper-btn"
+                , onClick (SetOutlineMaxLevel (level - 1))
+                ]
+                [ text "−" ]
+            , span [ class "stepper-value" ] [ text ("H" ++ String.fromInt level) ]
+            , button
+                [ class "stepper-btn"
+                , onClick (SetOutlineMaxLevel (level + 1))
+                ]
+                [ text "+" ]
+            ]
+        ]
+
+
+{-| A row showing a shortcut's current combo plus a button to rebind it.
+While capturing, the button prompts for the next keypress.
+-}
+viewRebindRow : String -> KeyBinding -> RebindTarget -> Maybe RebindTarget -> Html Msg
+viewRebindRow label binding target rebinding =
+    let
+        isCapturing =
+            rebinding == Just target
+    in
+    div [ class "settings-dropdown-row" ]
+        [ span [ class "settings-dropdown-row-label" ] [ text label ]
+        , button
+            [ class "rebind-btn"
+            , classList [ ( "capturing", isCapturing ) ]
+            , onClick (StartRebind target)
+            ]
+            [ text
+                (if isCapturing then
+                    "Press keys…"
+
+                 else
+                    keyBindingLabel binding
+                )
+            ]
+        ]
+
+
+{-| One selectable row in the settings listbox. Used for both the theme and
+font lists; only the active value and the click message differ.
+-}
+viewSettingsItem : Model -> (String -> Msg) -> String -> Int -> ( String, String ) -> Html Msg
+viewSettingsItem model toMsg activeValue idx ( itemValue, displayName ) =
     let
         isActive =
-            model.theme == themeValue
+            activeValue == itemValue
 
         isFocused =
             model.settingsFocus == idx
@@ -1018,7 +1376,7 @@ viewThemeItem model idx ( themeValue, displayName ) =
     button
         [ class "settings-dropdown-item"
         , classList [ ( "active", isActive ) ]
-        , id ("settings-item-" ++ String.fromInt idx)
+        , id (settingsItemId idx)
         , tabindex
             (if isFocused then
                 0
@@ -1032,46 +1390,7 @@ viewThemeItem model idx ( themeValue, displayName ) =
              else
                 "false"
             )
-        , onClick (SetTheme themeValue)
-        , preventDefaultOn "keydown" settingsKeyDecoder
-        ]
-        [ span [ class "settings-dropdown-item-label" ] [ text displayName ]
-        , span [ class "settings-dropdown-check" ]
-            [ if isActive then
-                Icon.checkmark 14
-              else
-                text ""
-            ]
-        ]
-
-
-viewFontItem : Model -> Int -> ( String, String ) -> Html Msg
-viewFontItem model idx ( fontValue, displayName ) =
-    let
-        isActive =
-            model.font == fontValue
-
-        isFocused =
-            model.settingsFocus == idx
-    in
-    button
-        [ class "settings-dropdown-item"
-        , classList [ ( "active", isActive ) ]
-        , id ("settings-item-" ++ String.fromInt idx)
-        , tabindex
-            (if isFocused then
-                0
-             else
-                -1
-            )
-        , attribute "role" "option"
-        , attribute "aria-selected"
-            (if isActive then
-                "true"
-             else
-                "false"
-            )
-        , onClick (SetFont fontValue)
+        , onClick (toMsg itemValue)
         , preventDefaultOn "keydown" settingsKeyDecoder
         ]
         [ span [ class "settings-dropdown-item-label" ] [ text displayName ]

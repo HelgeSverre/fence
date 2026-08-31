@@ -36,6 +36,117 @@ function updateState(updater) {
 
 let mainWindow;
 
+// Open a folder as the active workspace: point fs-ops at it, push the
+// listing to the renderer, and record it in the recents list.
+function openWorkspace(folderPath) {
+  try {
+    fsOps.setWorkspace(folderPath);
+    const entries = fsOps.readDir(folderPath);
+    sendToRenderer({ tag: "folderOpened", path: folderPath, entries });
+    updateState((state) => {
+      const recents = (state.recentWorkspaces || []).filter(
+        (p) => p !== folderPath,
+      );
+      recents.unshift(folderPath);
+      return {
+        lastWorkspace: folderPath,
+        recentWorkspaces: recents.slice(0, MAX_RECENT_WORKSPACES),
+      };
+    });
+    buildMenu();
+  } catch (err) {
+    sendToRenderer({ tag: "error", message: err.message });
+  }
+}
+
+// (Re)build the application menu. Called again whenever the recent
+// workspaces list changes so File > Open Recent stays current.
+function buildMenu() {
+  const isMac = process.platform === "darwin";
+  const recents = loadState().recentWorkspaces || [];
+
+  const template = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              {
+                label: "Settings...",
+                accelerator: "Cmd+,",
+                click: () => sendToRenderer({ tag: "toggleSettings" }),
+              },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Open Folder...",
+          accelerator: "CmdOrCtrl+O",
+          click: () => sendToRenderer({ tag: "triggerOpenFolder" }),
+        },
+        {
+          label: "Open Recent",
+          submenu:
+            recents.length > 0
+              ? recents.map((p) => ({
+                  label: p,
+                  click: () => openWorkspace(p),
+                }))
+              : [{ label: "No Recent Workspaces", enabled: false }],
+        },
+        { type: "separator" },
+        isMac ? { role: "close" } : { role: "quit" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        ...(isMac
+          ? [{ type: "separator" }, { role: "front" }]
+          : [{ role: "close" }]),
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -78,8 +189,9 @@ function createWindow() {
           entries,
         });
       } catch {
+        // Workspace vanished — forget it, but keep every other setting.
         fsOps.setWorkspace(null);
-        saveState({});
+        updateState(() => ({ lastWorkspace: null }));
       }
     }
   });
@@ -146,29 +258,7 @@ ipcMain.on("toElm", (_event, data) => {
         })
         .then((result) => {
           if (!result.canceled && result.filePaths.length > 0) {
-            const folderPath = result.filePaths[0];
-            try {
-              fsOps.setWorkspace(folderPath);
-              const entries = fsOps.readDir(folderPath);
-              sendToRenderer({
-                tag: "folderOpened",
-                path: folderPath,
-                entries,
-              });
-              updateState((state) => {
-                const recents = (state.recentWorkspaces || []).filter(p => p !== folderPath);
-                recents.unshift(folderPath);
-                return {
-                  lastWorkspace: folderPath,
-                  recentWorkspaces: recents.slice(0, MAX_RECENT_WORKSPACES),
-                };
-              });
-            } catch (err) {
-              sendToRenderer({
-                tag: "error",
-                message: err.message,
-              });
-            }
+            openWorkspace(result.filePaths[0]);
           }
         });
       break;
@@ -216,13 +306,17 @@ ipcMain.on("toElm", (_event, data) => {
     }
 
     case "watchDir": {
-      fsOps.watchDir(data.path, (event, filePath) => {
-        sendToRenderer({
-          tag: "fsEvent",
-          event,
-          path: filePath,
+      try {
+        fsOps.watchDir(data.path, (event, filePath) => {
+          sendToRenderer({
+            tag: "fsEvent",
+            event,
+            path: filePath,
+          });
         });
-      });
+      } catch (err) {
+        sendToRenderer({ tag: "error", message: err.message });
+      }
       break;
     }
 
@@ -257,7 +351,18 @@ ipcMain.on("toElm", (_event, data) => {
       updateState(() => ({
         sidebarFraction: data.sidebarFraction,
         editorFraction: data.editorFraction,
+        rightSidebarFraction: data.rightSidebarFraction,
+        leftSidebarVisible: data.leftSidebarVisible,
+        rightSidebarVisible: data.rightSidebarVisible,
+        outlineMaxLevel: data.outlineMaxLevel,
+        leftToggleKey: data.leftToggleKey,
+        rightToggleKey: data.rightToggleKey,
       }));
+      break;
+    }
+
+    case "setTheme": {
+      updateState(() => ({ theme: data.theme }));
       break;
     }
 
@@ -300,78 +405,7 @@ if (!gotLock) {
       iconPath: path.join(__dirname, "../build/icons/icon.png"),
     });
 
-    const isMac = process.platform === "darwin";
-
-    const template = [
-      ...(isMac
-        ? [
-            {
-              label: app.name,
-              submenu: [
-                { role: "about" },
-                { type: "separator" },
-                {
-                  label: "Settings...",
-                  accelerator: "Cmd+,",
-                  click: () => sendToRenderer({ tag: "toggleSettings" }),
-                },
-                { type: "separator" },
-                { role: "hide" },
-                { role: "hideOthers" },
-                { role: "unhide" },
-                { type: "separator" },
-                { role: "quit" },
-              ],
-            },
-          ]
-        : []),
-      {
-        label: "File",
-        submenu: [
-          {
-            label: "Open Folder...",
-            accelerator: "CmdOrCtrl+O",
-            click: () => sendToRenderer({ tag: "triggerOpenFolder" }),
-          },
-          { type: "separator" },
-          isMac ? { role: "close" } : { role: "quit" },
-        ],
-      },
-      {
-        label: "Edit",
-        submenu: [
-          { role: "undo" },
-          { role: "redo" },
-          { type: "separator" },
-          { role: "cut" },
-          { role: "copy" },
-          { role: "paste" },
-          { role: "selectAll" },
-        ],
-      },
-      {
-        label: "View",
-        submenu: [
-          { role: "resetZoom" },
-          { role: "zoomIn" },
-          { role: "zoomOut" },
-          { type: "separator" },
-          { role: "togglefullscreen" },
-        ],
-      },
-      {
-        label: "Window",
-        submenu: [
-          { role: "minimize" },
-          { role: "zoom" },
-          ...(isMac
-            ? [{ type: "separator" }, { role: "front" }]
-            : [{ role: "close" }]),
-        ],
-      },
-    ];
-
-    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+    buildMenu();
     createWindow();
 
     // Check for updates in production (silent check, prompts on available update)
@@ -379,6 +413,7 @@ if (!gotLock) {
       autoUpdater.checkForUpdatesAndNotify();
     }
   });
+
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {

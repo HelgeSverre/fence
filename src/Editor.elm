@@ -11,6 +11,7 @@ module Editor exposing
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
+import Html.Lazy
 import Json.Decode as D
 import Types exposing (..)
 
@@ -114,7 +115,8 @@ highlightMarkdown : String -> List (Html msg)
 highlightMarkdown content =
     content
         |> String.split "\n"
-        |> List.map highlightLine
+        -- lazy: unchanged lines skip re-rendering on each keystroke
+        |> List.map (Html.Lazy.lazy highlightLine)
         |> List.intersperse (text "\n")
 
 
@@ -283,24 +285,15 @@ findNextSpecial str =
 
 findClosing : String -> String -> Maybe ( String, String )
 findClosing delimiter str =
-    let
-        delimLen =
-            String.length delimiter
-    in
-    findClosingHelper delimiter delimLen str 0
+    case String.indexes delimiter str of
+        i :: _ ->
+            Just
+                ( String.left i str
+                , String.dropLeft (i + String.length delimiter) str
+                )
 
-
-findClosingHelper : String -> Int -> String -> Int -> Maybe ( String, String )
-findClosingHelper delimiter delimLen str pos =
-    if pos >= String.length str then
-        Nothing
-    else if String.slice pos (pos + delimLen) str == delimiter then
-        Just
-            ( String.left pos str
-            , String.dropLeft (pos + delimLen) str
-            )
-    else
-        findClosingHelper delimiter delimLen str (pos + 1)
+        [] ->
+            Nothing
 
 
 parseLinkMarkdown : String -> Maybe ( String, String, String )
@@ -327,13 +320,3 @@ parseLinkMarkdown str =
 
         [] ->
             Nothing
-
-
-baseName : String -> String
-baseName path =
-    path
-        |> String.split "/"
-        |> List.filter (not << String.isEmpty)
-        |> List.reverse
-        |> List.head
-        |> Maybe.withDefault path

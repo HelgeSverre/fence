@@ -1,5 +1,6 @@
-module Markdown exposing (parse)
+module Markdown exposing (OutlineEntry, parse)
 
+import Dict exposing (Dict)
 import Frontmatter
 import Html exposing (..)
 import Html.Attributes exposing (..)
@@ -7,37 +8,78 @@ import Markdown.Block as Block
 import Markdown.Html
 import Markdown.Parser
 import Markdown.Renderer exposing (Renderer)
+import Parser
 import Regex
 import SyntaxHighlight
 import Yaml
 
 
-parse : String -> { frontmatter : Maybe Yaml.Value, html : List (Html msg) }
+{-| A single heading in the document outline. `id` matches the anchor `id`
+emitted on the rendered heading element, so it can be used to scroll to it.
+-}
+type alias OutlineEntry =
+    { level : Int, text : String, id : String }
+
+
+parse : String -> { frontmatter : Maybe Yaml.Value, html : List (Html msg), outline : List OutlineEntry }
 parse input =
     let
         { frontmatter, body } =
             Frontmatter.extract input
 
+        blocks =
+            body
+                |> escapeHtmlAmpersands
+                |> Markdown.Parser.parse
+                |> Result.withDefault []
+
         html =
-            renderMarkdown body
+            case Markdown.Renderer.render customRenderer blocks of
+                Ok rendered ->
+                    rendered
+
+                Err _ ->
+                    [ pre [] [ text body ] ]
     in
-    { frontmatter = frontmatter, html = html }
+    { frontmatter = frontmatter, html = html, outline = extractOutline blocks }
 
 
-renderMarkdown : String -> List (Html msg)
-renderMarkdown input =
-    case
-        input
-            |> escapeHtmlAmpersands
-            |> Markdown.Parser.parse
-            |> Result.mapError (\_ -> "Parse error")
-            |> Result.andThen (Markdown.Renderer.render customRenderer)
-    of
-        Ok rendered ->
-            rendered
+{-| Walk the parsed block AST and collect every heading into an outline.
+Uses `Block.foldl` so headings nested inside other blocks are still found.
+-}
+extractOutline : List Block.Block -> List OutlineEntry
+extractOutline blocks =
+    Block.foldl
+        (\block acc ->
+            case block of
+                Block.Heading level inlines ->
+                    let
+                        rawText =
+                            Block.extractInlineText inlines
+                    in
+                    { level = Block.headingLevelToInt level
+                    , text = rawText
+                    , id = anchorId rawText
+                    }
+                        :: acc
 
-        Err _ ->
-            [ pre [] [ text input ] ]
+                _ ->
+                    acc
+        )
+        []
+        blocks
+        |> List.reverse
+
+
+{-| Derive an anchor `id` from heading text. Shared by `renderHeading` and
+`extractOutline` so outline links always resolve to the rendered element.
+-}
+anchorId : String -> String
+anchorId rawText =
+    rawText
+        |> String.toLower
+        |> String.replace " " "-"
+        |> String.filter (\c -> Char.isAlphaNum c || c == '-')
 
 
 {-| Escape bare `&` in HTML attribute values that aren't already entities.
@@ -45,13 +87,14 @@ The elm-markdown parser is strict about HTML entities, but many markdown
 files (especially GitHub READMEs) use raw `&` in URLs within HTML tags.
 -}
 escapeHtmlAmpersands : String -> String
-escapeHtmlAmpersands input =
-    case Regex.fromString "&(?!#?[a-zA-Z0-9]+;)(?=[^<>]*>)" of
-        Just bareAmpInTag ->
-            Regex.replace bareAmpInTag (\_ -> "&amp;") input
+escapeHtmlAmpersands =
+    Regex.replace bareAmpInTag (\_ -> "&amp;")
 
-        Nothing ->
-            input
+
+bareAmpInTag : Regex.Regex
+bareAmpInTag =
+    Regex.fromString "&(?!#?[a-zA-Z0-9]+;)(?=[^<>]*>)"
+        |> Maybe.withDefault Regex.never
 
 
 customRenderer : Renderer (Html msg)
@@ -203,12 +246,6 @@ customRenderer =
 renderHeading : { level : Block.HeadingLevel, rawText : String, children : List (Html msg) } -> Html msg
 renderHeading { level, rawText, children } =
     let
-        anchorId =
-            rawText
-                |> String.toLower
-                |> String.replace " " "-"
-                |> String.filter (\c -> Char.isAlphaNum c || c == '-')
-
         tag =
             case level of
                 Block.H1 ->
@@ -229,7 +266,7 @@ renderHeading { level, rawText, children } =
                 Block.H6 ->
                     h6
     in
-    tag [ id anchorId ] children
+    tag [ id (anchorId rawText) ] children
 
 
 renderLink : { title : Maybe String, destination : String } -> List (Html msg) -> Html msg
@@ -316,138 +353,39 @@ renderCodeBlock { body, language } =
             renderHighlightedCodeBlock body language
 
 
+type alias Highlighter =
+    String -> Result (List Parser.DeadEnd) SyntaxHighlight.HCode
+
+
+{-| Fenced-code language -> highlighter. Aliases reuse a lexically-close
+parser: structure (strings, comments, numbers, brackets) highlights well;
+keyword coverage is partial where the languages' vocab differs.
+-}
+highlighters : Dict String Highlighter
+highlighters =
+    [ ( [ "elm" ], SyntaxHighlight.elm )
+    , ( [ "javascript", "js", "jsx", "mdx" ], SyntaxHighlight.javascript )
+    , ( [ "typescript", "ts", "tsx" ], SyntaxHighlight.typescript )
+    , ( [ "python", "py" ], SyntaxHighlight.python )
+    , ( [ "css", "scss", "less" ], SyntaxHighlight.css )
+    , ( [ "json", "jsonc", "json5" ], SyntaxHighlight.json )
+    , ( [ "sql" ], SyntaxHighlight.sql )
+    , ( [ "xml", "html", "vue" ], SyntaxHighlight.xml )
+    , ( [ "go", "golang" ], SyntaxHighlight.go )
+    , ( [ "kotlin", "c", "cpp", "c++", "java", "scala", "swift", "groovy" ], SyntaxHighlight.kotlin )
+    , ( [ "nix" ], SyntaxHighlight.nix )
+    , ( [ "rust", "rs" ], SyntaxHighlight.rust )
+    , ( [ "php" ], SyntaxHighlight.php )
+    , ( [ "dart" ], SyntaxHighlight.dart )
+    , ( [ "fsharp", "fs", "fsx", "ocaml", "ml" ], SyntaxHighlight.fsharp )
+    ]
+        |> List.concatMap (\( names, fn ) -> List.map (\name -> ( name, fn )) names)
+        |> Dict.fromList
+
+
 renderHighlightedCodeBlock : String -> Maybe String -> Html msg
 renderHighlightedCodeBlock body language =
-    let
-        highlighter =
-            case Maybe.map String.toLower language of
-                Just "elm" ->
-                    Just SyntaxHighlight.elm
-
-                Just "javascript" ->
-                    Just SyntaxHighlight.javascript
-
-                Just "js" ->
-                    Just SyntaxHighlight.javascript
-
-                Just "python" ->
-                    Just SyntaxHighlight.python
-
-                Just "py" ->
-                    Just SyntaxHighlight.python
-
-                Just "css" ->
-                    Just SyntaxHighlight.css
-
-                Just "json" ->
-                    Just SyntaxHighlight.json
-
-                Just "sql" ->
-                    Just SyntaxHighlight.sql
-
-                Just "xml" ->
-                    Just SyntaxHighlight.xml
-
-                Just "html" ->
-                    Just SyntaxHighlight.xml
-
-                Just "go" ->
-                    Just SyntaxHighlight.go
-
-                Just "kotlin" ->
-                    Just SyntaxHighlight.kotlin
-
-                Just "nix" ->
-                    Just SyntaxHighlight.nix
-
-                Just "rust" ->
-                    Just SyntaxHighlight.rust
-
-                Just "rs" ->
-                    Just SyntaxHighlight.rust
-
-                Just "php" ->
-                    Just SyntaxHighlight.php
-
-                Just "typescript" ->
-                    Just SyntaxHighlight.typescript
-
-                Just "ts" ->
-                    Just SyntaxHighlight.typescript
-
-                Just "tsx" ->
-                    Just SyntaxHighlight.typescript
-
-                Just "jsx" ->
-                    Just SyntaxHighlight.javascript
-
-                Just "dart" ->
-                    Just SyntaxHighlight.dart
-
-                Just "fsharp" ->
-                    Just SyntaxHighlight.fsharp
-
-                Just "fs" ->
-                    Just SyntaxHighlight.fsharp
-
-                Just "fsx" ->
-                    Just SyntaxHighlight.fsharp
-
-                Just "vue" ->
-                    Just SyntaxHighlight.xml
-
-                Just "mdx" ->
-                    Just SyntaxHighlight.javascript
-
-                Just "golang" ->
-                    Just SyntaxHighlight.go
-
-                -- Aliases: reuse a lexically-close parser. Structure (strings,
-                -- comments, numbers, brackets) highlights well; keyword
-                -- coverage is partial where the languages' vocab differs.
-                Just "ocaml" ->
-                    Just SyntaxHighlight.fsharp
-
-                Just "ml" ->
-                    Just SyntaxHighlight.fsharp
-
-                Just "scss" ->
-                    Just SyntaxHighlight.css
-
-                Just "less" ->
-                    Just SyntaxHighlight.css
-
-                Just "jsonc" ->
-                    Just SyntaxHighlight.json
-
-                Just "json5" ->
-                    Just SyntaxHighlight.json
-
-                Just "c" ->
-                    Just SyntaxHighlight.kotlin
-
-                Just "cpp" ->
-                    Just SyntaxHighlight.kotlin
-
-                Just "c++" ->
-                    Just SyntaxHighlight.kotlin
-
-                Just "java" ->
-                    Just SyntaxHighlight.kotlin
-
-                Just "scala" ->
-                    Just SyntaxHighlight.kotlin
-
-                Just "swift" ->
-                    Just SyntaxHighlight.kotlin
-
-                Just "groovy" ->
-                    Just SyntaxHighlight.kotlin
-
-                _ ->
-                    Nothing
-    in
-    case highlighter of
+    case language |> Maybe.andThen (\l -> Dict.get (String.toLower l) highlighters) of
         Just highlight ->
             case highlight body of
                 Ok hcode ->

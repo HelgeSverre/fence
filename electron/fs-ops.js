@@ -10,6 +10,10 @@ const watchers = new Map();
 let currentWorkspace = null;
 
 function setWorkspace(dirPath) {
+  // Watchers from the previous workspace would otherwise leak and keep
+  // emitting events for it.
+  for (const watcher of watchers.values()) watcher.close();
+  watchers.clear();
   currentWorkspace = dirPath ? path.resolve(dirPath) : null;
 }
 
@@ -62,7 +66,9 @@ function watchDir(dirPath, callback) {
   const watcher = chokidar.watch(dirPath, {
     depth: 0,
     ignoreInitial: true,
-    ignored: /(^|[/\\])\./,
+    // chokidar 4 dropped glob/anymatch support; a function matcher is the
+    // portable way to skip dotfiles.
+    ignored: (p) => p !== dirPath && path.basename(p).startsWith("."),
   });
 
   watcher.on("all", (event, filePath) => {

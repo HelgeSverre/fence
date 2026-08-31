@@ -36,18 +36,13 @@ Fence provides a clean, focused environment for writing markdown with a live pre
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (latest LTS recommended) or [Bun](https://bun.sh/)
+- [Bun](https://bun.sh/)
 
 ### Installation
 
 ```bash
 git clone https://github.com/helgesverre/fence.git
 cd fence
-
-# Using npm
-npm install
-
-# Or using bun
 bun install
 ```
 
@@ -56,17 +51,13 @@ bun install
 Start the development server with hot-reloading:
 
 ```bash
-# Using npm
-npm run dev
-
-# Or using bun
 bun run dev
 ```
 
 With Electron DevTools enabled:
 
 ```bash
-npm run dev:debug
+bun run dev:debug
 ```
 
 ### Building
@@ -75,12 +66,12 @@ Build for your platform:
 
 ```bash
 # Generic build
-npm run build
+bun run build
 
 # Platform-specific
-npm run build:mac
-npm run build:win
-npm run build:linux
+bun run build:mac
+bun run build:win
+bun run build:linux
 ```
 
 ## Project Structure

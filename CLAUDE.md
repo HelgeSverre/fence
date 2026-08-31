@@ -6,9 +6,9 @@ Fence is a desktop Markdown editor built with **Elm + Electron**. It features a 
 
 ## Tech Stack
 
-- **Frontend**: Elm 0.19.1 (TEA architecture)
-- **Desktop**: Electron 28
-- **Build**: Vite 5 + vite-plugin-elm
+- **Frontend**: Elm 0.19.2 (TEA architecture)
+- **Desktop**: Electron 44
+- **Build**: Vite 8 + vite-plugin-elm
 - **Markdown**: dillonkearns/elm-markdown
 - **File Watching**: chokidar
 - **Packaging**: electron-builder

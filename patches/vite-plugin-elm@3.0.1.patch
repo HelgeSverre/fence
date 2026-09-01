@@ -1,0 +1,13 @@
+diff --git a/dist/assetsInjector.js b/dist/assetsInjector.js
+index acbbb00d756ad3ade031dfc745ad6b19618f0cab..ee4487b44ebcae60f0e22d543cd6666188d9d33a 100644
+--- a/dist/assetsInjector.js
++++ b/dist/assetsInjector.js
+@@ -14,7 +14,7 @@ const isDeclarator = (node) => node.type === 'VariableDeclarator';
+ const isCallExpression = (node) => node.type === 'CallExpression';
+ export const injectAssets = (compiledESM) => {
+     const taggedPaths = [];
+-    const ast = parse(compiledESM, { ecmaVersion: 2015, sourceType: 'module' });
++    const ast = parse(compiledESM, { ecmaVersion: 2019, sourceType: 'module' });
+     let helperFunctionName;
+     walk(ast, (node, state) => {
+         if (isLiteral(node)) {

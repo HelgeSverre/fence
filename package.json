@@ -94,5 +94,8 @@
     "chokidar": "^4.0.3",
     "electron-updater": "^6.8.9",
     "mermaid": "^11.17.2"
+  },
+  "patchedDependencies": {
+    "vite-plugin-elm@3.0.1": "patches/vite-plugin-elm@3.0.1.patch"
   }
 }

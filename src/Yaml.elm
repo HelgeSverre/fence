@@ -403,9 +403,13 @@ blockListItemValue indent =
 blockListHelper : Int -> List Value -> Parser (Step (List Value) (List Value))
 blockListHelper indent items =
     oneOf
-        [ succeed (\item -> Loop (item :: items))
-            |. spacesNewlines
-            |= blockListItem indent
+        [ -- backtrackable: the whitespace is consumed before the indent check
+          -- can fail, and a dedented sibling must end this block, not error.
+          backtrackable
+            (succeed (\item -> Loop (item :: items))
+                |. spacesNewlines
+                |= blockListItem indent
+            )
         , succeed ()
             |> map (\_ -> Done (List.reverse items))
         ]
@@ -465,11 +469,25 @@ mappingValue indent =
                 , foldedBlock
                 , inlineValueThenNewline
                 ]
-        , -- Value on next line(s) at deeper indent
+        , -- Value on next line(s) at deeper indent. If the next line is not
+          -- indented past the key (a sibling key, or end of the block), the
+          -- value is empty; without this check `unquotedString` would eat the
+          -- sibling line as a scalar.
           succeed identity
             |. optionalComment
             |. newlineAndSpaces
-            |= lazy (\_ -> yamlValue indent)
+            |= (getCol
+                    |> andThen
+                        (\col ->
+                            if col > indent then
+                                lazy (\_ -> yamlValue indent)
+
+                            else
+                                succeed Null_
+                        )
+               )
+        , succeed Null_
+            |. end
         ]
 
 
@@ -483,9 +501,13 @@ inlineValueThenNewline =
 blockMappingHelper : Int -> List ( String, Value ) -> Parser (Step (List ( String, Value )) (List ( String, Value )))
 blockMappingHelper indent pairs =
     oneOf
-        [ succeed (\pair -> Loop (pair :: pairs))
-            |. spacesNewlines
-            |= blockMappingPair indent
+        [ -- backtrackable: the whitespace is consumed before the indent check
+          -- can fail, and a dedented sibling must end this block, not error.
+          backtrackable
+            (succeed (\pair -> Loop (pair :: pairs))
+                |. spacesNewlines
+                |= blockMappingPair indent
+            )
         , succeed ()
             |> map (\_ -> Done (List.reverse pairs))
         ]

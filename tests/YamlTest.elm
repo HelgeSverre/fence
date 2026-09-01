@@ -343,7 +343,27 @@ edgeCaseTests =
 realWorldFrontmatterTests : Test
 realWorldFrontmatterTests =
     describe "Real-world frontmatter cases"
-        [ test "negative float" <|
+        [ test "empty value followed by a sibling key" <|
+            \_ ->
+                parse "title:\ntags: [a, b]"
+                    |> Expect.equal
+                        (Ok (Object_ [ ( "title", Null_ ), ( "tags", List_ [ String_ "a", String_ "b" ] ) ]))
+        , test "empty value at end of document" <|
+            \_ ->
+                parse "title: x\ndraft:"
+                    |> Expect.equal
+                        (Ok (Object_ [ ( "title", String_ "x" ), ( "draft", Null_ ) ]))
+        , test "nested mapping after an empty-looking key still parses" <|
+            \_ ->
+                parse "author:\n  name: A\n  url: B\ntitle: T"
+                    |> Expect.equal
+                        (Ok (Object_ [ ( "author", Object_ [ ( "name", String_ "A" ), ( "url", String_ "B" ) ] ), ( "title", String_ "T" ) ]))
+        , test "block list followed by a dedented sibling key" <|
+            \_ ->
+                parse "tags:\n  - a\n  - b\ntitle: T"
+                    |> Expect.equal
+                        (Ok (Object_ [ ( "tags", List_ [ String_ "a", String_ "b" ] ), ( "title", String_ "T" ) ]))
+        , test "negative float" <|
             \_ ->
                 parse "offset: -1.5"
                     |> Expect.equal

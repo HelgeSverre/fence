@@ -1,4 +1,14 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { RouteMeta } from '@analogjs/router';
+
+export const routeMeta: RouteMeta = {
+  title: 'Docs — Fence',
+  meta: [
+    { name: 'description', content: 'Getting started with Fence: opening a workspace, editing, preview, frontmatter, themes, and keyboard shortcuts.' },
+    { property: 'og:title', content: 'Docs — Fence' },
+    { property: 'og:description', content: 'Getting started with Fence: opening a workspace, editing, preview, frontmatter, themes, and keyboard shortcuts.' },
+  ],
+};
 
 @Component({
   selector: 'page-docs',
@@ -15,7 +25,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
       <h2>Open a folder</h2>
       <p>
         On launch, choose a folder via <kbd>⌘O</kbd> (or <kbd>Ctrl+O</kbd> on Windows /
-        Linux). Fence will treat it as your workspace, watch it for changes, and remember
+        Linux — every <kbd>⌘</kbd> shortcut below is <kbd>Ctrl</kbd> there). Fence will treat it as your workspace, watch it for changes, and remember
         it as a recent workspace.
       </p>
 
@@ -70,6 +80,7 @@ Your content goes here.</code></pre>
       <ul>
         <li><kbd>⌘O</kbd> — open folder</li>
         <li><kbd>⌘S</kbd> — save current file</li>
+        <li><kbd>⌘,</kbd> — open settings (themes and fonts)</li>
         <li><kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> — indent / outdent in the editor</li>
         <li>Arrow keys + <kbd>Enter</kbd> — navigate the file tree</li>
       </ul>

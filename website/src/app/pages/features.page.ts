@@ -1,5 +1,15 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { RouteMeta } from '@analogjs/router';
 import { FeatureSectionComponent } from '../components/feature-section.component';
+
+export const routeMeta: RouteMeta = {
+  title: 'Features — Fence',
+  meta: [
+    { name: 'description', content: 'Split-view editing, live preview, file tree, YAML frontmatter, Mermaid diagrams, nine themes, and resizable panes.' },
+    { property: 'og:title', content: 'Features — Fence' },
+    { property: 'og:description', content: 'Split-view editing, live preview, file tree, YAML frontmatter, Mermaid diagrams, nine themes, and resizable panes.' },
+  ],
+};
 
 @Component({
   selector: 'page-features',
@@ -20,6 +30,7 @@ import { FeatureSectionComponent } from '../components/feature-section.component
         eyebrow="Editor"
         title="Split-view editing with real-time preview"
         imageSrc="/screenshots/hero.png"
+        imageAlt="Fence editor pane and rendered preview side by side"
         imagePosition="right"
       >
         <p>
@@ -37,6 +48,7 @@ import { FeatureSectionComponent } from '../components/feature-section.component
         eyebrow="File tree"
         title="Open a folder, work in it"
         imageSrc="/screenshots/hero.png"
+        imageAlt="Fence file tree sidebar listing Markdown files in a workspace folder"
         imagePosition="left"
       >
         <p>
@@ -53,6 +65,7 @@ import { FeatureSectionComponent } from '../components/feature-section.component
         eyebrow="Themes"
         title="A library of themes, all in oklch"
         imageSrc="/screenshots/hero.png"
+        imageAlt="Fence in the Catppuccin Mocha theme"
         imagePosition="right"
       >
         <p>
@@ -67,12 +80,21 @@ import { FeatureSectionComponent } from '../components/feature-section.component
         eyebrow="Frontmatter"
         title="YAML frontmatter, parsed and previewed"
         imageSrc="/screenshots/hero.png"
+        imageAlt="Fence preview showing a frontmatter metadata block above the document"
         imagePosition="left"
       >
         <p>
           Documents with frontmatter render with the metadata visible above the document
           body. The parser is hand-rolled in elm/parser combinators — small, predictable,
           and doesn't choke on the YAML subset that Markdown frontmatter actually uses.
+        </p>
+      </feature-section>
+
+      <feature-section eyebrow="Diagrams" title="Mermaid, rendered in place">
+        <p>
+          A <code>mermaid</code> code fence renders as a diagram in the preview — flowcharts,
+          sequence diagrams, Gantt charts, whatever Mermaid supports. The source stays plain
+          text in your file.
         </p>
       </feature-section>
 

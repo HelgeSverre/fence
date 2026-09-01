@@ -5,7 +5,11 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="feature-section" [class.feature-section--reverse]="imagePosition === 'right'">
+    <section
+      class="feature-section"
+      [class.feature-section--reverse]="imagePosition === 'right'"
+      [class.feature-section--no-media]="!imageSrc"
+    >
       <div class="feature-section__copy">
         @if (eyebrow) {
           <span class="eyebrow">{{ eyebrow }}</span>
@@ -13,11 +17,11 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
         <h2>{{ title }}</h2>
         <ng-content />
       </div>
-      <div class="feature-section__media">
-        @if (imageSrc) {
-          <img [src]="imageSrc" [alt]="imageAlt || title" />
-        }
-      </div>
+      @if (imageSrc) {
+        <div class="feature-section__media">
+          <img [src]="imageSrc" [alt]="imageAlt || title" loading="lazy" width="2188" height="1323" />
+        </div>
+      }
     </section>
   `,
   styles: [
@@ -31,6 +35,10 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
       }
       .feature-section--reverse .feature-section__copy {
         order: 2;
+      }
+      .feature-section--no-media {
+        grid-template-columns: 1fr;
+        max-width: var(--max-prose);
       }
       .feature-section__media {
         border: 1px solid var(--border);

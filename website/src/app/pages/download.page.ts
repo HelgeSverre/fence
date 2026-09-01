@@ -1,4 +1,14 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { RouteMeta } from '@analogjs/router';
+
+export const routeMeta: RouteMeta = {
+  title: 'Download — Fence',
+  meta: [
+    { name: 'description', content: 'Download Fence for macOS (Intel and Apple Silicon), Windows, and Linux, or install it with Homebrew.' },
+    { property: 'og:title', content: 'Download — Fence' },
+    { property: 'og:description', content: 'Download Fence for macOS (Intel and Apple Silicon), Windows, and Linux, or install it with Homebrew.' },
+  ],
+};
 
 @Component({
   selector: 'page-download',
@@ -10,12 +20,12 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
         <span class="eyebrow">Download · v0.1.1</span>
         <h1>Get Fence on your machine in under a minute.</h1>
         <p class="lead">
-          Free, MIT licensed, ~80MB. No accounts, no telemetry, no nagging upgrades.
+          Free and MIT licensed. No accounts, no telemetry, no nagging upgrades.
         </p>
         <div class="download-hero__meta">
           <span><strong>3</strong> platforms</span>
           <span class="dot">·</span>
-          <span><strong>x64</strong> + Apple Silicon</span>
+          <span><strong>Intel</strong> + Apple Silicon</span>
           <span class="dot">·</span>
           <span>Signed &amp; notarized on macOS</span>
         </div>
@@ -36,10 +46,10 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
               <svg viewBox="0 0 24 24" width="40" height="40" fill="currentColor"><path d="M16.37 1.43c.07 1.4-.49 2.78-1.36 3.78-.86 1-2.28 1.76-3.65 1.65-.13-1.36.55-2.78 1.4-3.66.93-.99 2.5-1.74 3.61-1.77zM20.5 17.8c-.55 1.27-.81 1.83-1.51 2.95-1 1.55-2.4 3.49-4.13 3.5-1.54.02-1.94-.99-4.04-.98-2.09.01-2.53 1-4.07.98-1.74-.01-3.06-1.76-4.06-3.31-2.8-4.34-3.1-9.43-1.37-12.14C2.55 7.16 4.59 6.13 6.49 6.13c1.95 0 3.17 1.07 4.79 1.07 1.57 0 2.52-1.07 4.77-1.07 1.7 0 3.5.92 4.79 2.52-4.21 2.31-3.52 8.33-.34 9.15z"/></svg>
             </div>
             <div class="dl-card__os">macOS</div>
-            <div class="dl-card__arch">Universal · Intel + Apple Silicon</div>
+            <div class="dl-card__arch">Separate Intel and Apple Silicon builds</div>
             <div class="dl-card__formats">
               <span>.dmg</span>
-              <span>.zip</span>
+              <span>Homebrew</span>
             </div>
             <div class="dl-card__cta">
               Download
@@ -60,7 +70,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
             <div class="dl-card__os">Windows</div>
             <div class="dl-card__arch">x64 · Windows 10 and later</div>
             <div class="dl-card__formats">
-              <span>NSIS installer</span>
+              <span>.exe installer</span>
             </div>
             <div class="dl-card__cta">
               Download
@@ -104,15 +114,24 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
     </section>
 
     <section class="install-section">
+      <div class="container">
+        <header class="install-section__head">
+          <span class="eyebrow">Install</span>
+          <h2>Two steps, tops.</h2>
+        </header>
+      </div>
       <div class="container install-grid">
         <article class="install-card">
           <div class="install-card__head">
             <span class="install-card__chip">macOS</span>
             <h3>Drag &amp; drop</h3>
           </div>
-          <p>Open the <code>.dmg</code> and drag Fence to Applications.</p>
-          <pre><code># or with Homebrew Cask, once it lands
-brew install --cask fence</code></pre>
+          <p>
+            Open the <code>.dmg</code> and drag Fence to Applications. Pick the
+            <code>arm64</code> file on Apple Silicon.
+          </p>
+          <pre><code># or with Homebrew
+brew install --cask helgesverre/tap/fence</code></pre>
         </article>
 
         <article class="install-card">
@@ -120,9 +139,9 @@ brew install --cask fence</code></pre>
             <span class="install-card__chip">Windows</span>
             <h3>Per-user install</h3>
           </div>
-          <p>Run the <code>.exe</code> — no admin prompt, no UAC nag.</p>
-          <pre><code># or with winget, once it lands
-winget install fence</code></pre>
+          <p>
+            Run <code>Fence-Setup-*.exe</code>. It installs per-user, so no admin prompt.
+          </p>
         </article>
 
         <article class="install-card">
@@ -132,7 +151,7 @@ winget install fence</code></pre>
           </div>
           <p>AppImage is portable — just <code>chmod +x</code> and run.</p>
           <pre><code># Ubuntu / Debian
-sudo dpkg -i fence_*.deb</code></pre>
+sudo dpkg -i fence_*_amd64.deb</code></pre>
         </article>
       </div>
     </section>
@@ -143,7 +162,7 @@ sudo dpkg -i fence_*.deb</code></pre>
           <div>
             <h2>Or build from source.</h2>
             <p class="lead">
-              Clone the repo and run <code>npm install &amp;&amp; npm run dev</code>. Elm
+              Clone the repo and run <code>bun install &amp;&amp; bun run dev</code>. Elm
               + Vite + Electron — nothing exotic.
             </p>
           </div>
@@ -327,6 +346,10 @@ sudo dpkg -i fence_*.deb</code></pre>
 
       .install-section {
         padding: var(--space-7) 0;
+      }
+      .install-section__head {
+        text-align: center;
+        margin-bottom: var(--space-6);
       }
       .install-grid {
         display: grid;

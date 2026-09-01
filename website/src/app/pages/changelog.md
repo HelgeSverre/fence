@@ -1,5 +1,5 @@
 ---
-title: Changelog
+title: Changelog — Fence
 meta:
   - name: description
     content: Release notes for Fence.

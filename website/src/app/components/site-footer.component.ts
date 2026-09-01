@@ -15,18 +15,18 @@ import { RouterLink } from '@angular/router';
         </div>
         <div class="site-footer__cols">
           <div>
-            <h4>Product</h4>
+            <h3>Product</h3>
             <a routerLink="/features">Features</a>
             <a routerLink="/download">Download</a>
             <a routerLink="/changelog">Changelog</a>
           </div>
           <div>
-            <h4>Docs</h4>
+            <h3>Docs</h3>
             <a routerLink="/docs">Getting started</a>
             <a routerLink="/about">About</a>
           </div>
           <div>
-            <h4>Project</h4>
+            <h3>Project</h3>
             <a href="https://github.com/HelgeSverre/fence" target="_blank" rel="noopener">GitHub</a>
             <a
               href="https://github.com/HelgeSverre/fence/issues"
@@ -77,7 +77,7 @@ import { RouterLink } from '@angular/router';
         grid-template-columns: repeat(3, 1fr);
         gap: var(--space-5);
       }
-      .site-footer__cols h4 {
+      .site-footer__cols h3 {
         font-size: 0.78rem;
         letter-spacing: 0.1em;
         text-transform: uppercase;
@@ -106,8 +106,14 @@ import { RouterLink } from '@angular/router';
         .site-footer__inner {
           grid-template-columns: 1fr;
         }
+      }
+      @media (max-width: 480px) {
         .site-footer__cols {
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: 1fr 1fr;
+        }
+        .site-footer__legal {
+          flex-direction: column;
+          gap: var(--space-1);
         }
       }
     `,

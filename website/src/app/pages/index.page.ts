@@ -1,7 +1,17 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { RouteMeta } from '@analogjs/router';
 import { HeroComponent } from '../components/hero.component';
 import { FeatureCardComponent } from '../components/feature-card.component';
+
+export const routeMeta: RouteMeta = {
+  title: 'Fence — Split-view Markdown Editor',
+  meta: [
+    { name: 'description', content: 'Fence is a free, open source split-view Markdown editor for macOS, Windows, and Linux. Live preview, YAML frontmatter, Mermaid diagrams, and nine themes.' },
+    { property: 'og:title', content: 'Fence — Split-view Markdown Editor' },
+    { property: 'og:description', content: 'Fence is a free, open source split-view Markdown editor for macOS, Windows, and Linux. Live preview, YAML frontmatter, Mermaid diagrams, and nine themes.' },
+  ],
+};
 
 @Component({
   selector: 'page-home',
@@ -18,7 +28,13 @@ import { FeatureCardComponent } from '../components/feature-card.component';
       secondaryHref="/features"
       secondaryLabel="See features"
     >
-      <img src="/screenshots/hero.png" alt="Fence editor with split view and live preview" />
+      <img
+        src="/screenshots/hero.png"
+        alt="Fence window showing the file tree, Markdown editor, and rendered preview side by side"
+        width="2188"
+        height="1323"
+        fetchpriority="high"
+      />
     </fence-hero>
 
     <section class="section">
@@ -68,10 +84,10 @@ import { FeatureCardComponent } from '../components/feature-card.component';
           </feature-card>
 
           <feature-card
-            title="Resizable panes"
-            description="Drag dividers to set up the split that works for the document you're writing. Your layout is remembered."
+            title="Mermaid diagrams"
+            description="Flowcharts, sequence diagrams, and the rest of Mermaid render straight in the preview from a plain code fence."
           >
-            <svg slot="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v16M15 4v16M3 12h18"/></svg>
+            <svg slot="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="6" rx="1"/><rect x="14" y="15" width="7" height="6" rx="1"/><path d="M10 6h4v9"/></svg>
           </feature-card>
         </div>
       </div>

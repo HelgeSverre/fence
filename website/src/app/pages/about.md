@@ -1,5 +1,5 @@
 ---
-title: About Fence
+title: About — Fence
 meta:
   - name: description
     content: The philosophy behind Fence — a focused Markdown editor.

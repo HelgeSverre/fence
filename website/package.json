@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Marketing site for Fence — split-view Markdown editor",
+  "packageManager": "bun@1.3.14",
   "type": "module",
   "scripts": {
     "start": "vite",

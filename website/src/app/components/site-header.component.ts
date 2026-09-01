@@ -147,8 +147,24 @@ import { ThemeService } from '../shared/theme.service';
       }
 
       @media (max-width: 640px) {
+        .site-header__inner {
+          flex-wrap: wrap;
+          height: auto;
+          padding-top: var(--space-2);
+          padding-bottom: var(--space-2);
+          row-gap: 0;
+        }
+        .site-header__actions {
+          margin-left: auto;
+        }
         .site-nav {
-          display: none;
+          order: 3;
+          flex-basis: 100%;
+          margin-left: calc(-1 * var(--space-2));
+          overflow-x: auto;
+        }
+        .site-nav a {
+          white-space: nowrap;
         }
       }
     `,

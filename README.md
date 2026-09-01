@@ -32,6 +32,14 @@ Fence provides a clean, focused environment for writing markdown with a live pre
 - **Auto-Update** — Built-in auto-updater via GitHub releases
 - **Cross-Platform** — Builds for macOS, Windows, and Linux
 
+## Install
+
+```bash
+brew install --cask helgesverre/tap/fence
+```
+
+Or grab a DMG from the [releases page](https://github.com/HelgeSverre/fence/releases).
+
 ## Getting Started
 
 ### Prerequisites

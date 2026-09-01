@@ -147,6 +147,35 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+// First existing path in a CLI argv (e.g. `fence README.md`, `fence ~/notes`),
+// resolved against the invoking shell's working directory. Null if none.
+function cliPathFrom(argv, cwd) {
+  for (const arg of argv.slice(app.isPackaged ? 1 : 2)) {
+    if (arg.startsWith("-")) continue;
+    const resolved = path.resolve(cwd, arg);
+    if (fs.existsSync(resolved)) return resolved;
+  }
+  return null;
+}
+
+// Open a CLI path: a folder becomes the workspace; a file opens its parent
+// folder as the workspace and loads the file into the editor.
+function openCliPath(cliPath) {
+  const isDir = fs.statSync(cliPath).isDirectory();
+  openWorkspace(isDir ? cliPath : path.dirname(cliPath));
+  if (!isDir) {
+    try {
+      sendToRenderer({
+        tag: "fileContent",
+        path: cliPath,
+        content: fsOps.readFile(cliPath),
+      });
+    } catch (err) {
+      sendToRenderer({ tag: "error", message: err.message });
+    }
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -176,8 +205,13 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 
-  // Restore last workspace on launch
+  // Open the CLI-supplied path, or restore the last workspace
   mainWindow.webContents.on("did-finish-load", () => {
+    const cliPath = cliPathFrom(process.argv, process.cwd());
+    if (cliPath) {
+      openCliPath(cliPath);
+      return;
+    }
     const state = loadState();
     if (state.lastWorkspace) {
       try {
@@ -389,11 +423,15 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  // `fence <path>` while the app is running: the new process forwards its
+  // argv here and exits; open the path in the existing window.
+  app.on("second-instance", (_event, argv, workingDirectory) => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
+    const cliPath = cliPathFrom(argv, workingDirectory);
+    if (cliPath) openCliPath(cliPath);
   });
 
   app.whenReady().then(() => {

@@ -6,6 +6,13 @@ export default defineConfig({
   base: "./",
   plugins: [
     elm({ debug: false }),
+    {
+      // vite-plugin-elm's HMR wrapper uses eval(); allow it in dev only so
+      // the production CSP in index.html stays strict.
+      name: "dev-csp-unsafe-eval",
+      apply: "serve",
+      transformIndexHtml: (html) => html.replace("script-src 'self';", "script-src 'self' 'unsafe-eval';"),
+    },
     electron({
       main: {
         entry: "electron/main.js",

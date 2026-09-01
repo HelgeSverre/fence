@@ -2,15 +2,14 @@ module FileTree exposing
     ( Model
     , Msg(..)
     , OutCmd(..)
-    , init
-    , update
-    , view
     , handleDirContents
     , handleFolderOpened
     , handleFsEvent
+    , init
+    , update
+    , view
     )
 
-import Browser.Dom
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
@@ -41,7 +40,6 @@ type Msg
     | Activate
     | FocusFirst
     | FocusLast
-    | FocusedOn (Result Browser.Dom.Error ())
 
 
 type OutCmd
@@ -69,12 +67,15 @@ update msg model =
             ( model, [ CmdOpenFolder ] )
 
         Toggle path ->
+            -- Clicking a directory also moves keyboard focus there, so arrow
+            -- keys continue from the clicked row instead of the top of the tree.
             if Set.member path model.expanded then
-                ( { model | expanded = Set.remove path model.expanded }
+                ( { model | expanded = Set.remove path model.expanded, focused = Just path }
                 , [ CmdUnwatchDir path ]
                 )
+
             else
-                ( { model | expanded = Set.insert path model.expanded }
+                ( { model | expanded = Set.insert path model.expanded, focused = Just path }
                 , [ CmdReadDir path, CmdWatchDir path ]
                 )
 
@@ -116,6 +117,7 @@ update msg model =
                     if isDirectory current model && Set.member current model.expanded then
                         -- Collapse expanded directory
                         update (Toggle current) model
+
                     else
                         -- Move to parent
                         moveFocusTo (parentOf current model) model
@@ -134,9 +136,11 @@ update msg model =
                                     visiblePaths model
                             in
                             moveFocusTo (nextItem current paths) model
+
                         else
                             -- Expand collapsed directory
                             update (Toggle current) model
+
                     else
                         ( model, [] )
 
@@ -148,6 +152,7 @@ update msg model =
                 Just current ->
                     if isDirectory current model then
                         update (Toggle current) model
+
                     else
                         update (FileSelected current) model
 
@@ -160,9 +165,6 @@ update msg model =
                     visiblePaths model
             in
             moveFocusTo (List.head (List.reverse paths)) model
-
-        FocusedOn _ ->
-            ( model, [] )
 
 
 {-| Move focus to the given path. For files, also select and read them.
@@ -177,6 +179,7 @@ moveFocusTo maybePath model =
         Just path ->
             if isDirectory path model then
                 ( { model | focused = Just path }, [] )
+
             else
                 ( { model | focused = Just path, selected = Just path }
                 , [ CmdReadFile path ]
@@ -216,6 +219,7 @@ flattenEntry expanded (FileEntry entry) =
                     |> List.filter isMarkdownOrDir
                     |> List.sortWith directoriesFirst
                     |> List.concatMap (flattenEntry expanded)
+
             else
                 []
            )
@@ -252,6 +256,7 @@ previousItemHelp prev current paths =
         x :: rest ->
             if x == current then
                 prev
+
             else
                 previousItemHelp (Just x) current rest
 
@@ -265,6 +270,7 @@ nextItem current paths =
         x :: rest ->
             if x == current then
                 List.head rest
+
             else
                 nextItem current rest
 
@@ -283,6 +289,7 @@ findEntryType : FilePath -> FileEntry -> Maybe FileType
 findEntryType targetPath (FileEntry entry) =
     if entry.path == targetPath then
         Just entry.fileType
+
     else
         case entry.children of
             Just children ->
@@ -304,6 +311,7 @@ parentOf path model =
     in
     if List.member parent paths then
         Just parent
+
     else
         Nothing
 
@@ -397,6 +405,7 @@ insertChildren : FilePath -> List FileEntry -> FileEntry -> FileEntry
 insertChildren targetPath entries (FileEntry e) =
     if e.path == targetPath then
         FileEntry { e | children = Just entries }
+
     else
         case e.children of
             Just children ->
@@ -413,11 +422,13 @@ addChild parentPath newEntry (FileEntry e) =
             Just children ->
                 if List.any (\c -> fileEntryPath c == fileEntryPath newEntry) children then
                     FileEntry e
+
                 else
                     FileEntry { e | children = Just (List.sortWith directoriesFirst (newEntry :: children)) }
 
             Nothing ->
                 FileEntry e
+
     else
         case e.children of
             Just children ->
@@ -551,12 +562,14 @@ viewEntry model depth entry =
                 , attribute "aria-expanded"
                     (if isExpanded then
                         "true"
+
                      else
                         "false"
                     )
                 , attribute "aria-selected"
                     (if isSelected then
                         "true"
+
                      else
                         "false"
                     )
@@ -567,9 +580,11 @@ viewEntry model depth entry =
                         [ ( "selected", isSelected )
                         ]
                     , id (treeItemId entryPath)
+                    , attribute "data-path" entryPath
                     , tabindex
                         (if isFocused then
                             0
+
                          else
                             -1
                         )
@@ -579,6 +594,7 @@ viewEntry model depth entry =
                     [ span [ class "icon" ]
                         [ if isExpanded then
                             Icon.chevronDown 16
+
                           else
                             Icon.chevronRight 16
                         ]
@@ -599,6 +615,7 @@ viewEntry model depth entry =
 
                         Nothing ->
                             text ""
+
                   else
                     text ""
                 ]
@@ -609,6 +626,7 @@ viewEntry model depth entry =
                 , attribute "aria-selected"
                     (if isSelected then
                         "true"
+
                      else
                         "false"
                     )
@@ -619,9 +637,11 @@ viewEntry model depth entry =
                         [ ( "selected", isSelected )
                         ]
                     , id (treeItemId entryPath)
+                    , attribute "data-path" entryPath
                     , tabindex
                         (if isFocused then
                             0
+
                          else
                             -1
                         )

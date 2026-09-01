@@ -1,6 +1,8 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("node:crypto");
+const { pathToFileURL } = require("node:url");
 const fsOps = require("./fs-ops");
 const { autoUpdater } = require("electron-updater");
 
@@ -20,7 +22,10 @@ function loadState() {
 
 function saveState(state) {
   try {
-    fs.writeFileSync(getStatePath(), JSON.stringify(state));
+    // Write-then-rename so a crash mid-write can't leave a truncated state.json.
+    const statePath = getStatePath();
+    fs.writeFileSync(`${statePath}.tmp`, JSON.stringify(state));
+    fs.renameSync(`${statePath}.tmp`, statePath);
   } catch {
     /* ignore */
   }
@@ -34,22 +39,67 @@ function updateState(updater) {
   saveState({ ...state, ...updates });
 }
 
+function recoveryPathFor(filePath) {
+  const key = crypto.createHash("sha256").update(filePath).digest("hex");
+  return path.join(app.getPath("userData"), "recovery", `${key}.json`);
+}
+
+async function saveRecoveryDraft(payload) {
+  const filePath = requireString(payload, "path", 32768);
+  const content = requireString(payload, "content");
+  const revision = payload.revision;
+  const canonical = await fsOps.resolvePath(filePath);
+  const destination = recoveryPathFor(canonical);
+  const temp = `${destination}.${process.pid}.tmp`;
+  await fs.promises.mkdir(path.dirname(destination), { recursive: true });
+  await fs.promises.writeFile(
+    temp,
+    JSON.stringify({
+      path: canonical,
+      content,
+      revision: typeof revision === "string" ? revision : null,
+      savedAt: new Date().toISOString(),
+    }),
+    "utf-8",
+  );
+  await fs.promises.rename(temp, destination);
+}
+
+async function clearRecoveryDraft(filePath) {
+  await fs.promises.unlink(recoveryPathFor(filePath)).catch((error) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+}
+
+async function loadRecoveryDraft(filePath) {
+  try {
+    return JSON.parse(
+      await fs.promises.readFile(recoveryPathFor(filePath), "utf-8"),
+    );
+  } catch {
+    return null;
+  }
+}
+
 let mainWindow;
 
 // Open a folder as the active workspace: point fs-ops at it, push the
 // listing to the renderer, and record it in the recents list.
-function openWorkspace(folderPath) {
+async function openWorkspace(folderPath) {
   try {
-    fsOps.setWorkspace(folderPath);
-    const entries = fsOps.readDir(folderPath);
-    sendToRenderer({ tag: "folderOpened", path: folderPath, entries });
+    await fsOps.setWorkspace(folderPath);
+    const entries = await fsOps.readDir(folderPath);
+    const canonicalPath = entries.length > 0
+      ? path.dirname(entries[0].path)
+      : await fs.promises.realpath(folderPath);
+    sendToRenderer({ tag: "folderOpened", path: canonicalPath, entries });
     updateState((state) => {
       const recents = (state.recentWorkspaces || []).filter(
-        (p) => p !== folderPath,
+        (p) => p !== canonicalPath,
       );
-      recents.unshift(folderPath);
+      recents.unshift(canonicalPath);
       return {
-        lastWorkspace: folderPath,
+        lastWorkspace: canonicalPath,
         recentWorkspaces: recents.slice(0, MAX_RECENT_WORKSPACES),
       };
     });
@@ -160,16 +210,12 @@ function cliPathFrom(argv, cwd) {
 
 // Open a CLI path: a folder becomes the workspace; a file opens its parent
 // folder as the workspace and loads the file into the editor.
-function openCliPath(cliPath) {
+async function openCliPath(cliPath) {
   const isDir = fs.statSync(cliPath).isDirectory();
-  openWorkspace(isDir ? cliPath : path.dirname(cliPath));
+  await openWorkspace(isDir ? cliPath : path.dirname(cliPath));
   if (!isDir) {
     try {
-      sendToRenderer({
-        tag: "fileContent",
-        path: cliPath,
-        content: fsOps.readFile(cliPath),
-      });
+      await sendFileContent(cliPath);
     } catch (err) {
       sendToRenderer({ tag: "error", message: err.message });
     }
@@ -188,6 +234,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       spellcheck: false,
     },
   });
@@ -206,17 +253,17 @@ function createWindow() {
   }
 
   // Open the CLI-supplied path, or restore the last workspace
-  mainWindow.webContents.on("did-finish-load", () => {
+  mainWindow.webContents.on("did-finish-load", async () => {
     const cliPath = cliPathFrom(process.argv, process.cwd());
     if (cliPath) {
-      openCliPath(cliPath);
+      await openCliPath(cliPath);
       return;
     }
     const state = loadState();
     if (state.lastWorkspace) {
       try {
-        fsOps.setWorkspace(state.lastWorkspace);
-        const entries = fsOps.readDir(state.lastWorkspace);
+        await fsOps.setWorkspace(state.lastWorkspace);
+        const entries = await fsOps.readDir(state.lastWorkspace);
         sendToRenderer({
           tag: "folderOpened",
           path: state.lastWorkspace,
@@ -224,7 +271,7 @@ function createWindow() {
         });
       } catch {
         // Workspace vanished — forget it, but keep every other setting.
-        fsOps.setWorkspace(null);
+        await fsOps.setWorkspace(null);
         updateState(() => ({ lastWorkspace: null }));
       }
     }
@@ -259,16 +306,39 @@ function createWindow() {
 
   // Open external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalIfSafe(url);
     return { action: "deny" };
   });
 
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith("http://localhost:")) {
-      event.preventDefault();
-      shell.openExternal(url);
-    }
+    if (isAppUrl(url)) return;
+    event.preventDefault();
+    openExternalIfSafe(url);
   });
+}
+
+function isAppUrl(candidate) {
+  try {
+    const url = new URL(candidate);
+    if (process.env.VITE_DEV_SERVER_URL) {
+      return url.origin === new URL(process.env.VITE_DEV_SERVER_URL).origin;
+    }
+    const appUrl = pathToFileURL(path.join(__dirname, "../dist/index.html"));
+    return url.protocol === "file:" && url.pathname === appUrl.pathname;
+  } catch {
+    return false;
+  }
+}
+
+function openExternalIfSafe(candidate) {
+  try {
+    const url = new URL(candidate);
+    if (url.protocol === "https:" || url.protocol === "mailto:") {
+      void shell.openExternal(url.toString()).catch(() => {});
+    }
+  } catch {
+    // Invalid or relative external URLs are intentionally ignored.
+  }
 }
 
 function sendToRenderer(data) {
@@ -277,146 +347,214 @@ function sendToRenderer(data) {
   }
 }
 
-ipcMain.on("getInitialState", (event) => {
-  event.returnValue = loadState();
-});
+function isTrustedIpcEvent(event) {
+  return Boolean(
+    mainWindow &&
+      !mainWindow.isDestroyed() &&
+      event.sender === mainWindow.webContents &&
+      event.senderFrame === mainWindow.webContents.mainFrame,
+  );
+}
 
-ipcMain.on("toElm", (_event, data) => {
-  const { tag } = data;
+function requireString(payload, key, maxLength = 100 * 1024 * 1024) {
+  const value = payload?.[key];
+  if (typeof value !== "string" || value.length > maxLength) {
+    throw new TypeError(`Invalid ${key}`);
+  }
+  return value;
+}
 
-  switch (tag) {
-    case "openFolder": {
-      dialog
-        .showOpenDialog(mainWindow, {
-          properties: ["openDirectory"],
-        })
-        .then((result) => {
-          if (!result.canceled && result.filePaths.length > 0) {
-            openWorkspace(result.filePaths[0]);
-          }
-        });
-      break;
+function registerIpc(channel, handler) {
+  ipcMain.on(channel, (event, payload = {}) => {
+    if (!isTrustedIpcEvent(event)) return;
+    Promise.resolve(handler(payload)).catch((error) => {
+      sendToRenderer({ tag: "error", message: error.message });
+    });
+  });
+}
+
+async function sendFileContent(filePath, offerRecovery = true) {
+  const file = await fsOps.readFile(filePath);
+  let content = file.content;
+  let dirty = false;
+  const draft = offerRecovery ? await loadRecoveryDraft(file.path) : null;
+
+  if (draft && typeof draft.content === "string" && draft.content !== content) {
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: "question",
+      buttons: ["Restore Draft", "Discard Draft"],
+      defaultId: 0,
+      cancelId: 1,
+      title: "Recover Unsaved Changes",
+      message: `Fence found unsaved changes for ${path.basename(file.path)}.`,
+      detail:
+        "Restore the recovery draft or discard it and open the file from disk.",
+    });
+    if (response === 0) {
+      content = draft.content;
+      dirty = true;
+    } else {
+      await clearRecoveryDraft(file.path);
     }
+  } else if (draft) {
+    await clearRecoveryDraft(file.path);
+  }
 
-    case "readDir": {
-      try {
-        const entries = fsOps.readDir(data.path);
-        sendToRenderer({
-          tag: "dirContents",
-          path: data.path,
-          entries,
-        });
-      } catch (err) {
-        sendToRenderer({ tag: "error", message: err.message });
-      }
-      break;
-    }
+  sendToRenderer({ tag: "fileContent", ...file, content, dirty });
+}
 
-    case "readFile": {
-      try {
-        const content = fsOps.readFile(data.path);
-        sendToRenderer({
-          tag: "fileContent",
-          path: data.path,
-          content,
-        });
-      } catch (err) {
-        sendToRenderer({ tag: "error", message: err.message });
-      }
-      break;
-    }
+async function saveDocument(payload) {
+  const filePath = requireString(payload, "path", 32768);
+  const content = requireString(payload, "content");
+  const expectedRevision =
+    typeof payload.expectedRevision === "string"
+      ? payload.expectedRevision
+      : null;
 
-    case "writeFile": {
-      try {
-        fsOps.writeFile(data.path, data.content);
-        sendToRenderer({
-          tag: "fileSaved",
-          path: data.path,
-        });
-      } catch (err) {
-        sendToRenderer({ tag: "error", message: err.message });
-      }
-      break;
-    }
-
-    case "watchDir": {
-      try {
-        fsOps.watchDir(data.path, (event, filePath) => {
-          sendToRenderer({
-            tag: "fsEvent",
-            event,
-            path: filePath,
-          });
-        });
-      } catch (err) {
-        sendToRenderer({ tag: "error", message: err.message });
-      }
-      break;
-    }
-
-    case "unwatchDir": {
-      fsOps.unwatchDir(data.path);
-      break;
-    }
-
-    case "setTitle": {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.setTitle(data.title);
-      }
-      break;
-    }
-
-    case "setDirty": {
-      if (mainWindow) {
-        mainWindow._isDirty = data.dirty;
-      }
-      break;
-    }
-
-    case "closeWindow": {
-      if (mainWindow) {
-        mainWindow._isDirty = false;
-        mainWindow.close();
-      }
-      break;
-    }
-
-    case "saveSplits": {
-      updateState(() => ({
-        sidebarFraction: data.sidebarFraction,
-        editorFraction: data.editorFraction,
-        rightSidebarFraction: data.rightSidebarFraction,
-        leftSidebarVisible: data.leftSidebarVisible,
-        rightSidebarVisible: data.rightSidebarVisible,
-        outlineMaxLevel: data.outlineMaxLevel,
-        leftToggleKey: data.leftToggleKey,
-        rightToggleKey: data.rightToggleKey,
-      }));
-      break;
-    }
-
-    case "setTheme": {
-      updateState(() => ({ theme: data.theme }));
-      break;
-    }
-
-    case "setFont": {
-      updateState(() => ({ font: data.font }));
-      break;
-    }
-
-    case "setFontSize": {
-      updateState(() => {
-        const updates = {};
-        if (data.editorFontSize) updates.editorFontSize = data.editorFontSize;
-        if (data.previewFontSize) updates.previewFontSize = data.previewFontSize;
-        if (data.uiFontSize) updates.uiFontSize = data.uiFontSize;
-        return updates;
-      });
-      break;
+  try {
+    const saved = await fsOps.writeFile(filePath, content, expectedRevision);
+    await clearRecoveryDraft(saved.path);
+    sendToRenderer({ tag: "fileSaved", ...saved });
+  } catch (error) {
+    if (!(error instanceof fsOps.FileConflictError)) throw error;
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      buttons: ["Overwrite", "Reload from Disk", "Cancel"],
+      defaultId: 2,
+      cancelId: 2,
+      title: "File Changed on Disk",
+      message: `${path.basename(filePath)} changed outside Fence.`,
+      detail:
+        "Overwrite the external changes, reload the disk version, or cancel and keep editing your draft.",
+    });
+    if (response === 0) {
+      const saved = await fsOps.writeFile(filePath, content, null);
+      await clearRecoveryDraft(saved.path);
+      sendToRenderer({ tag: "fileSaved", ...saved });
+    } else if (response === 1) {
+      await clearRecoveryDraft(filePath);
+      await sendFileContent(filePath, false);
+    } else {
+      sendToRenderer({ tag: "saveCancelled" });
     }
   }
+}
+
+ipcMain.on("fence:get-initial-state", (event) => {
+  event.returnValue = isTrustedIpcEvent(event) ? loadState() : {};
 });
+
+registerIpc("fence:open-folder", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openDirectory"],
+  });
+  if (!result.canceled && result.filePaths.length > 0) {
+    await openWorkspace(result.filePaths[0]);
+  }
+});
+
+registerIpc("fence:read-dir", async (data) => {
+  const dirPath = requireString(data, "path", 32768);
+  const entries = await fsOps.readDir(dirPath);
+  sendToRenderer({ tag: "dirContents", path: dirPath, entries });
+});
+
+registerIpc("fence:read-file", async (data) => {
+  await sendFileContent(requireString(data, "path", 32768));
+});
+
+registerIpc("fence:write-file", saveDocument);
+
+registerIpc("fence:watch-dir", async (data) => {
+  await fsOps.watchDir(
+    requireString(data, "path", 32768),
+    (event, filePath) => sendToRenderer({ tag: "fsEvent", event, path: filePath }),
+  );
+});
+
+registerIpc("fence:unwatch-dir", async (data) => {
+  await fsOps.unwatchDir(requireString(data, "path", 32768));
+});
+
+registerIpc("fence:tree-context-menu", async (data) => {
+  const filePath = await fsOps.resolvePath(requireString(data, "path", 32768));
+  Menu.buildFromTemplate([
+    { label: "Copy Path", click: () => clipboard.writeText(filePath) },
+  ]).popup({ window: mainWindow });
+});
+
+registerIpc("fence:set-title", (data) => {
+  mainWindow.setTitle(requireString(data, "title", 512));
+});
+
+registerIpc("fence:set-dirty", (data) => {
+  if (typeof data.dirty !== "boolean") throw new TypeError("Invalid dirty state");
+  mainWindow._isDirty = data.dirty;
+});
+
+registerIpc("fence:close-window", () => {
+  mainWindow._isDirty = false;
+  mainWindow.close();
+});
+
+registerIpc("fence:save-splits", (data) => {
+  const updates = {};
+  for (const key of [
+    "sidebarFraction",
+    "editorFraction",
+    "rightSidebarFraction",
+  ]) {
+    if (typeof data[key] === "number" && data[key] >= 0 && data[key] <= 1) {
+      updates[key] = data[key];
+    }
+  }
+  for (const key of ["leftSidebarVisible", "rightSidebarVisible"]) {
+    if (typeof data[key] === "boolean") updates[key] = data[key];
+  }
+  if (
+    Number.isInteger(data.outlineMaxLevel) &&
+    data.outlineMaxLevel >= 1 &&
+    data.outlineMaxLevel <= 6
+  ) {
+    updates.outlineMaxLevel = data.outlineMaxLevel;
+  }
+  for (const key of ["leftToggleKey", "rightToggleKey"]) {
+    const binding = data[key];
+    if (
+      binding &&
+      typeof binding.key === "string" &&
+      binding.key.length <= 32 &&
+      ["meta", "ctrl", "shift", "alt"].every(
+        (modifier) => typeof binding[modifier] === "boolean",
+      )
+    ) {
+      updates[key] = binding;
+    }
+  }
+  updateState(() => updates);
+});
+
+registerIpc("fence:set-theme", (data) => {
+  updateState(() => ({ theme: requireString(data, "theme", 128) }));
+});
+
+registerIpc("fence:set-font", (data) => {
+  updateState(() => ({ font: requireString(data, "font", 256) }));
+});
+
+registerIpc("fence:set-font-size", (data) => {
+  updateState(() => {
+    const updates = {};
+    for (const key of ["editorFontSize", "previewFontSize", "uiFontSize"]) {
+      if (typeof data[key] === "number" && Number.isFinite(data[key])) {
+        updates[key] = Math.min(32, Math.max(8, data[key]));
+      }
+    }
+    return updates;
+  });
+});
+
+registerIpc("fence:save-recovery-draft", saveRecoveryDraft);
 
 const gotLock = app.requestSingleInstanceLock();
 
@@ -451,7 +589,6 @@ if (!gotLock) {
       autoUpdater.checkForUpdatesAndNotify();
     }
   });
-
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {

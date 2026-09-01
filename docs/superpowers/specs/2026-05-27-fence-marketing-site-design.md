@@ -23,7 +23,7 @@ shows what it does, and points visitors to a download.
 - **Bundler:** Vite (via `@analogjs/platform`).
 - **Content:** `@analogjs/content` for markdown routes and rendering.
 - **Output:** Static HTML in `website/dist/analog/public/`, deployable anywhere.
-- **Dev server:** `cd website && npm run start` on port 5173.
+- **Dev server:** `cd website && bun run start` on port 5173.
 
 The website project is isolated from the root Elm+Electron build — its own
 `package.json`, `node_modules/`, and `vite.config.ts`. The root app is unaffected.
@@ -135,9 +135,9 @@ All standalone Angular components. Inputs are typed; no NgModules.
 
 ```bash
 # inside website/
-npm install
-npm run start          # dev, http://localhost:5173
-npm run build          # static build to dist/analog/public
+bun install
+bun run start          # dev, http://localhost:5173
+bun run build          # static build to dist/analog/public
 ```
 
 Root `package.json` is untouched. Optional convenience script can be added later

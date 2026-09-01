@@ -18,7 +18,10 @@
   "scripts": {
     "dev": "vite",
     "dev:debug": "DEVTOOLS=1 vite",
-    "test": "elm-test --compiler node_modules/.bin/elm",
+    "test": "bun run test:elm && bun run test:node",
+    "test:elm": "elm-test --compiler node_modules/.bin/elm",
+    "test:node": "node --test electron/*.test.js",
+    "test:e2e": "node --test e2e/*.test.js",
     "build": "vite build && electron-builder",
     "build:mac": "vite build && electron-builder --mac",
     "build:win": "vite build && electron-builder --win",
@@ -86,6 +89,7 @@
     "electron-builder": "^26.15.3",
     "elm": "^0.19.2-0",
     "elm-test": "^0.19.2-1",
+    "playwright": "^1.62.1",
     "vite": "^8.2.2",
     "vite-plugin-electron": "^1.1.2",
     "vite-plugin-elm": "^3.0.1"

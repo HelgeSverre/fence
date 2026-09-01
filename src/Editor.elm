@@ -2,10 +2,10 @@ module Editor exposing
     ( Model
     , Msg(..)
     , init
+    , markSaved
+    , setContent
     , update
     , view
-    , setContent
-    , markClean
     )
 
 import Html exposing (..)
@@ -20,6 +20,7 @@ type alias Model =
     { content : String
     , filePath : Maybe FilePath
     , dirtyState : DirtyState
+    , revision : Maybe String
     , scrollTop : Float
     }
 
@@ -34,23 +35,38 @@ init =
     { content = ""
     , filePath = Nothing
     , dirtyState = Clean
+    , revision = Nothing
     , scrollTop = 0
     }
 
 
-setContent : FilePath -> String -> Model -> Model
-setContent path content model =
+setContent : FilePath -> String -> String -> Bool -> Model -> Model
+setContent path content revision dirty model =
     { model
         | content = content
         , filePath = Just path
-        , dirtyState = Clean
+        , dirtyState =
+            if dirty then
+                Dirty
+
+            else
+                Clean
+        , revision = Just revision
         , scrollTop = 0
     }
 
 
-markClean : Model -> Model
-markClean model =
-    { model | dirtyState = Clean }
+markSaved : String -> String -> Model -> Model
+markSaved savedContent revision model =
+    { model
+        | dirtyState =
+            if model.content == savedContent then
+                Clean
+
+            else
+                Dirty
+        , revision = Just revision
+    }
 
 
 update : Msg -> Model -> Model
@@ -99,6 +115,7 @@ headerText model =
             baseName path
                 ++ (if model.dirtyState == Dirty then
                         " *"
+
                     else
                         ""
                    )
@@ -113,11 +130,53 @@ headerText model =
 
 highlightMarkdown : String -> List (Html msg)
 highlightMarkdown content =
-    content
-        |> String.split "\n"
-        -- lazy: unchanged lines skip re-rendering on each keystroke
-        |> List.map (Html.Lazy.lazy highlightLine)
-        |> List.intersperse (text "\n")
+    if String.length content > maxHighlightedCharacters then
+        -- A single text node keeps very large documents responsive. The
+        -- textarea remains fully editable; only decorative highlighting is
+        -- reduced.
+        [ text content ]
+
+    else
+        content
+            |> String.split "\n"
+            |> chunksOf linesPerChunk
+            -- lazy: a keystroke only re-renders (and re-diffs) the chunk it
+            -- touched; Html.Lazy compares the chunk's text by value.
+            |> List.map (String.join "\n" >> Html.Lazy.lazy highlightChunk)
+
+
+{-| Each line is its own block element so the browser can skip layout for
+lines that are off-screen (see `.editor-line` in editor.css).
+-}
+highlightChunk : String -> Html msg
+highlightChunk chunk =
+    div [ class "editor-chunk" ]
+        (chunk
+            |> String.split "\n"
+            |> List.map (\line -> div [ class "editor-line" ] [ Html.Lazy.lazy highlightLine line ])
+        )
+
+
+linesPerChunk : Int
+linesPerChunk =
+    64
+
+
+chunksOf : Int -> List a -> List (List a)
+chunksOf n items =
+    case items of
+        [] ->
+            []
+
+        _ ->
+            List.take n items :: chunksOf n (List.drop n items)
+
+
+maxHighlightedCharacters : Int
+maxHighlightedCharacters =
+    -- Lines are separate blocks, so per-line highlighting stays cheap far
+    -- beyond this; the plain-text fallback is what reflows the whole document.
+    1500000
 
 
 highlightLine : String -> Html msg
@@ -275,8 +334,10 @@ findNextSpecial str =
                     if c == '*' || c == '`' || c == '[' then
                         if index == 0 then
                             0
+
                         else
                             index
+
                     else
                         helper (index + 1) (List.drop 1 cs)
     in

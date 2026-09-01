@@ -11,6 +11,6 @@ Required files:
 
 To generate all formats from a single 1024x1024 source PNG:
 
-  npx electron-icon-builder --input=icon-source.png --output=build/icons/
+  bunx electron-icon-builder --input=icon-source.png --output=build/icons/
 
 Until icons are added, electron-builder uses the default Electron icon.

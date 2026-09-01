@@ -2,10 +2,10 @@
 
 ## Commands
 
-- **Dev:** `npm run dev` (Vite + Electron with hot-reload)
-- **Build:** `npm run build` (production build via electron-builder)
-- **Test all:** `npx elm-test` (runs tests in `tests/`)
-- **Test single:** `npx elm-test tests/YamlTest.elm`
+- **Dev:** `bun run dev` (Vite + Electron with hot-reload)
+- **Build:** `bun run build` (production build via electron-builder)
+- **Test all:** `bun run test`
+- **Test single:** `bunx elm-test tests/YamlTest.elm`
 
 ## Architecture
 

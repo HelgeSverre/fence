@@ -18,6 +18,11 @@
   padding: 16px;
   margin: 0;
   border: none;
+  /* Both must wrap at the same width. The textarea's 6px scrollbar (see
+     ::-webkit-scrollbar in main.css) otherwise narrows its content box while
+     the overlay stays full-width, so lines wrap at different points and the
+     highlight drifts from the caret as the split is resized. */
+  scrollbar-gutter: stable;
 }
 
 /* Textarea — on top, transparent text, visible caret */
@@ -62,4 +67,12 @@
   font-family: inherit;
   font-size: inherit;
   line-height: inherit;
+}
+
+/* One block per line, so a keystroke re-wraps only the edited line instead
+   of re-flowing the whole document as one inline run. `min-height` keeps
+   empty lines the same height as the textarea's. (Not content-visibility:
+   its placeholder heights would drift from the textarea on wrapped lines.) */
+.editor-line {
+  min-height: 1lh;
 }

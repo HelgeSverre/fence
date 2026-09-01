@@ -15,10 +15,10 @@ import Json.Encode as E
 import Markdown
 import Ports
 import Preview
-import Yaml
 import Process
 import Task
 import Types exposing (..)
+import Yaml
 
 
 type DragTarget
@@ -57,8 +57,11 @@ type alias Model =
     { fileTree : FileTree.Model
     , editor : Editor.Model
     , previewHtml : List (Html Msg)
+    , parseCache : Markdown.Cache
     , frontmatter : Maybe Yaml.Value
     , debounceGeneration : Int
+    , recoveryGeneration : Int
+    , savingContent : Maybe String
     , theme : String
     , font : String
     , editorFontSize : Float
@@ -89,6 +92,7 @@ type Msg
     | FromElectron D.Value
     | KeyDown String Bool Bool Bool Bool
     | DebouncedParse Int
+    | RecoveryDraftDue Int
     | ToggleSettings
     | SetTheme String
     | SetFont String
@@ -268,8 +272,11 @@ init flagsValue =
     ( { fileTree = FileTree.init
       , editor = Editor.init
       , previewHtml = []
+      , parseCache = Markdown.emptyCache
       , frontmatter = Nothing
       , debounceGeneration = 0
+      , recoveryGeneration = 0
+      , savingContent = Nothing
       , theme = flag "theme" D.string "github-dark"
       , font = flag "font" D.string ""
       , editorFontSize = flag "editorFontSize" D.float defaultEditorFontSize
@@ -312,6 +319,7 @@ update msg model =
             ( { model | settingsOpen = open, settingsFocus = 0 }
             , if open then
                 focusSilently (settingsItemId 0)
+
               else
                 Cmd.none
             )
@@ -534,6 +542,7 @@ update msg model =
                         Just path ->
                             if newTree.focused /= model.fileTree.focused then
                                 focusSilently (treeItemId path)
+
                             else
                                 Cmd.none
 
@@ -554,13 +563,18 @@ update msg model =
                     let
                         gen =
                             model.debounceGeneration + 1
+
+                        recoveryGen =
+                            model.recoveryGeneration + 1
                     in
                     ( { model
                         | editor = newEditor
                         , debounceGeneration = gen
+                        , recoveryGeneration = recoveryGen
                       }
                     , Cmd.batch
-                        [ Task.perform (\_ -> DebouncedParse gen) (Process.sleep 150)
+                        [ Task.perform (\_ -> DebouncedParse gen) (Process.sleep (previewDelay newEditor.content))
+                        , Task.perform (\_ -> RecoveryDraftDue recoveryGen) (Process.sleep 1000)
                         , setTitleCmd newEditor
                         , setDirtyCmd True
                         ]
@@ -572,12 +586,19 @@ update msg model =
         DebouncedParse gen ->
             if gen == model.debounceGeneration then
                 let
-                    { frontmatter, html, outline } =
-                        Markdown.parse model.editor.content
+                    ( cache, { frontmatter, html, outline } ) =
+                        Markdown.parseCached model.parseCache model.editor.content
                 in
-                ( { model | previewHtml = html, frontmatter = frontmatter, outline = outline }
+                ( { model | previewHtml = html, frontmatter = frontmatter, outline = outline, parseCache = cache }
                 , Cmd.none
                 )
+
+            else
+                ( model, Cmd.none )
+
+        RecoveryDraftDue gen ->
+            if gen == model.recoveryGeneration && model.editor.dirtyState == Dirty then
+                ( model, saveRecoveryDraftCmd model.editor )
 
             else
                 ( model, Cmd.none )
@@ -639,21 +660,40 @@ update msg model =
                     ( model, Cmd.none )
 
 
+previewDelay : String -> Float
+previewDelay content =
+    -- Re-parsing is chunk-cached, so an update costs ~20-50ms even for very
+    -- large documents; the debounce only needs to coalesce fast typing.
+    if String.length content > 1000000 then
+        400
+
+    else if String.length content > 250000 then
+        150
+
+    else
+        50
+
+
 saveFile : Model -> ( Model, Cmd Msg )
 saveFile model =
-    case model.editor.filePath of
-        Just path ->
-            ( model
+    case ( model.editor.filePath, model.savingContent ) of
+        ( Just path, Nothing ) ->
+            ( { model | savingContent = Just model.editor.content }
             , Ports.toElectron
                 (E.object
                     [ ( "tag", E.string "writeFile" )
                     , ( "path", E.string path )
                     , ( "content", E.string model.editor.content )
+                    , ( "expectedRevision"
+                      , model.editor.revision
+                            |> Maybe.map E.string
+                            |> Maybe.withDefault E.null
+                      )
                     ]
                 )
             )
 
-        Nothing ->
+        _ ->
             ( model, Cmd.none )
 
 
@@ -664,7 +704,8 @@ handlePortMessage tag value model =
             case D.decodeValue dirEntriesDecoder value of
                 Ok ( path, entries ) ->
                     ( { model | fileTree = FileTree.handleFolderOpened path entries model.fileTree }
-                    , Cmd.none
+                      -- The root starts expanded, so watch it like Toggle would.
+                    , outCmdsToPortCmds [ FileTree.CmdWatchDir path ]
                     )
 
                 Err _ ->
@@ -682,23 +723,26 @@ handlePortMessage tag value model =
 
         "fileContent" ->
             case D.decodeValue fileContentDecoder value of
-                Ok ( path, content ) ->
+                Ok file ->
                     let
                         newEditor =
-                            Editor.setContent path content model.editor
+                            Editor.setContent file.path file.content file.revision file.dirty model.editor
 
-                        { frontmatter, html, outline } =
-                            Markdown.parse content
+                        ( cache, { frontmatter, html, outline } ) =
+                            Markdown.parseCached Markdown.emptyCache file.content
                     in
                     ( { model
                         | editor = newEditor
                         , previewHtml = html
+                        , parseCache = cache
                         , frontmatter = frontmatter
                         , outline = outline
+                        , closeAfterSave = False
+                        , savingContent = Nothing
                       }
                     , Cmd.batch
                         [ setTitleCmd newEditor
-                        , setDirtyCmd False
+                        , setDirtyCmd file.dirty
                         ]
                     )
 
@@ -706,20 +750,44 @@ handlePortMessage tag value model =
                     ( model, Cmd.none )
 
         "fileSaved" ->
-            let
-                newEditor =
-                    Editor.markClean model.editor
-            in
-            ( { model | editor = newEditor }
-            , Cmd.batch
-                [ setTitleCmd newEditor
-                , setDirtyCmd False
-                , if model.closeAfterSave then
-                    closeWindowCmd
-                  else
-                    Cmd.none
-                ]
-            )
+            case D.decodeValue fileSavedDecoder value of
+                Ok ( path, revision ) ->
+                    let
+                        savedContent =
+                            Maybe.withDefault model.editor.content model.savingContent
+
+                        newEditor =
+                            if model.editor.filePath == Just path then
+                                Editor.markSaved savedContent revision model.editor
+
+                            else
+                                model.editor
+
+                        updatedModel =
+                            { model | editor = newEditor, savingContent = Nothing }
+                    in
+                    if model.closeAfterSave && newEditor.dirtyState == Dirty then
+                        let
+                            ( resaveModel, resaveCmd ) =
+                                saveFile updatedModel
+                        in
+                        ( { resaveModel | closeAfterSave = True }, resaveCmd )
+
+                    else
+                        ( updatedModel
+                        , Cmd.batch
+                            [ setTitleCmd newEditor
+                            , setDirtyCmd (newEditor.dirtyState == Dirty)
+                            , if model.closeAfterSave then
+                                closeWindowCmd
+
+                              else
+                                Cmd.none
+                            ]
+                        )
+
+                Err _ ->
+                    ( model, Cmd.none )
 
         "fsEvent" ->
             case D.decodeValue fsEventDecoder value of
@@ -745,6 +813,7 @@ handlePortMessage tag value model =
                                 , ( "path", E.string path )
                                 ]
                             )
+
                       else
                         Cmd.none
                     )
@@ -766,6 +835,11 @@ handlePortMessage tag value model =
                 Nothing ->
                     ( model, closeWindowCmd )
 
+        "saveCancelled" ->
+            ( { model | closeAfterSave = False, savingContent = Nothing }
+            , Cmd.none
+            )
+
         "toggleSettings" ->
             update ToggleSettings model
 
@@ -780,6 +854,7 @@ handlePortMessage tag value model =
                     D.decodeValue (D.field "message" D.string) value
                         |> Result.toMaybe
                 , closeAfterSave = False
+                , savingContent = Nothing
               }
             , Cmd.none
             )
@@ -802,6 +877,7 @@ setTitleCmd editor =
                         ++ baseName path
                         ++ (if editor.dirtyState == Dirty then
                                 " *"
+
                             else
                                 ""
                            )
@@ -830,6 +906,27 @@ setDirtyCmd dirty =
 closeWindowCmd : Cmd Msg
 closeWindowCmd =
     Ports.toElectron (E.object [ ( "tag", E.string "closeWindow" ) ])
+
+
+saveRecoveryDraftCmd : Editor.Model -> Cmd Msg
+saveRecoveryDraftCmd editor =
+    case editor.filePath of
+        Just path ->
+            Ports.toElectron
+                (E.object
+                    [ ( "tag", E.string "saveRecoveryDraft" )
+                    , ( "path", E.string path )
+                    , ( "content", E.string editor.content )
+                    , ( "revision"
+                      , editor.revision
+                            |> Maybe.map E.string
+                            |> Maybe.withDefault E.null
+                      )
+                    ]
+                )
+
+        Nothing ->
+            Cmd.none
 
 
 
@@ -1021,11 +1118,28 @@ dirEntriesDecoder =
         (D.field "entries" (D.list fileEntryDecoder))
 
 
-fileContentDecoder : D.Decoder ( FilePath, String )
+type alias FileContentPayload =
+    { path : FilePath
+    , content : String
+    , revision : String
+    , dirty : Bool
+    }
+
+
+fileContentDecoder : D.Decoder FileContentPayload
 fileContentDecoder =
-    D.map2 Tuple.pair
+    D.map4 FileContentPayload
         (D.field "path" D.string)
         (D.field "content" D.string)
+        (D.field "revision" D.string)
+        (D.field "dirty" D.bool)
+
+
+fileSavedDecoder : D.Decoder ( FilePath, String )
+fileSavedDecoder =
+    D.map2 Tuple.pair
+        (D.field "path" D.string)
+        (D.field "revision" D.string)
 
 
 fsEventDecoder : D.Decoder ( String, FilePath )
@@ -1043,6 +1157,7 @@ keyDecoder =
         (D.field "ctrlKey" D.bool)
         (D.field "shiftKey" D.bool)
         (D.field "altKey" D.bool)
+
 
 
 -- SUBSCRIPTIONS
@@ -1212,6 +1327,7 @@ viewTitleBar model =
                                 (baseName path
                                     ++ (if model.editor.dirtyState == Dirty then
                                             " *"
+
                                         else
                                             ""
                                        )
@@ -1226,6 +1342,7 @@ viewTitleBar model =
             [ button [ class "settings-btn", onClick ToggleSettings ] [ Icon.settings 16 ]
             , if model.settingsOpen then
                 viewSettingsDropdown model
+
               else
                 text ""
             ]
@@ -1380,6 +1497,7 @@ viewSettingsItem model toMsg activeValue idx ( itemValue, displayName ) =
         , tabindex
             (if isFocused then
                 0
+
              else
                 -1
             )
@@ -1387,6 +1505,7 @@ viewSettingsItem model toMsg activeValue idx ( itemValue, displayName ) =
         , attribute "aria-selected"
             (if isActive then
                 "true"
+
              else
                 "false"
             )
@@ -1397,6 +1516,7 @@ viewSettingsItem model toMsg activeValue idx ( itemValue, displayName ) =
         , span [ class "settings-dropdown-check" ]
             [ if isActive then
                 Icon.checkmark 14
+
               else
                 text ""
             ]
@@ -1443,6 +1563,7 @@ formatSize f =
     in
     if String.contains "." str then
         str
+
     else
         str ++ ".0"
 

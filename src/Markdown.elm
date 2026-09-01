@@ -1,9 +1,10 @@
-module Markdown exposing (OutlineEntry, parse)
+module Markdown exposing (Cache, OutlineEntry, emptyCache, parse, parseCached, selfCloseVoidTags, splitChunks)
 
 import Dict exposing (Dict)
 import Frontmatter
 import Html exposing (..)
 import Html.Attributes exposing (..)
+import Html.Lazy
 import Markdown.Block as Block
 import Markdown.Html
 import Markdown.Parser
@@ -21,58 +22,277 @@ type alias OutlineEntry =
     { level : Int, text : String, id : String }
 
 
+{-| Parsed blocks keyed by the exact source text of a top-level chunk, so
+that re-parsing after an edit only touches the chunk that changed.
+-}
+type alias Cache =
+    Dict String (List Block.Block)
+
+
+emptyCache : Cache
+emptyCache =
+    Dict.empty
+
+
 parse : String -> { frontmatter : Maybe Yaml.Value, html : List (Html msg), outline : List OutlineEntry }
 parse input =
+    Tuple.second (parseCached emptyCache input)
+
+
+parseCached : Cache -> String -> ( Cache, { frontmatter : Maybe Yaml.Value, html : List (Html msg), outline : List OutlineEntry } )
+parseCached cache input =
     let
         { frontmatter, body } =
             Frontmatter.extract input
 
-        blocks =
-            body
-                |> escapeHtmlAmpersands
-                |> Markdown.Parser.parse
-                |> Result.withDefault []
+        chunks =
+            splitChunks body
 
-        html =
-            case Markdown.Renderer.render customRenderer blocks of
-                Ok rendered ->
-                    rendered
+        parsedChunks =
+            List.map
+                (\chunk ->
+                    case Dict.get chunk cache of
+                        Just cached ->
+                            Ok cached
+
+                        Nothing ->
+                            parseChunk chunk
+                )
+                chunks
+
+        -- A chunk that fails on its own (e.g. an HTML element split across a
+        -- boundary) means the split was unsafe: fall back to one full parse.
+        ( newCache, blocks ) =
+            case List.foldr (Result.map2 (++)) (Ok []) parsedChunks of
+                Ok all ->
+                    ( List.map2 Tuple.pair chunks parsedChunks
+                        |> List.filterMap (\( chunk, r ) -> Result.toMaybe r |> Maybe.map (Tuple.pair chunk))
+                        |> Dict.fromList
+                    , all
+                    )
 
                 Err _ ->
-                    [ pre [] [ text body ] ]
+                    ( emptyCache, parseChunk body |> Result.withDefault [] )
+
+        ids =
+            headingIds blocks
+
+        -- Render block by block so each heading's renderer can close over its
+        -- unique id (elm-markdown's heading callback has no position info).
+        html =
+            List.map2
+                (\block headingId ->
+                    Markdown.Renderer.render { customRenderer | heading = renderHeading headingId } [ block ]
+                )
+                blocks
+                ids
+                |> List.foldr (Result.map2 (++)) (Ok [])
+                |> Result.withDefault [ pre [] [ text body ] ]
     in
-    { frontmatter = frontmatter, html = html, outline = extractOutline blocks }
+    ( newCache, { frontmatter = frontmatter, html = html, outline = extractOutline blocks ids } )
 
 
-{-| Walk the parsed block AST and collect every heading into an outline.
-Uses `Block.foldl` so headings nested inside other blocks are still found.
+parseChunk chunk =
+    chunk
+        |> escapeHtmlAmpersands
+        |> selfCloseVoidTags
+        |> Markdown.Parser.parse
+
+
+
+-- CHUNKING
+
+
+{-| Split markdown at hard top-level block boundaries: an ATX heading at
+column 0, preceded by a blank line, outside any fenced code block. Each chunk
+then parses independently and identically to parsing the whole document.
+
+Documents that use link reference definitions or HTML blocks are never split,
+since those can legitimately span such boundaries.
 -}
-extractOutline : List Block.Block -> List OutlineEntry
-extractOutline blocks =
-    Block.foldl
-        (\block acc ->
-            case block of
-                Block.Heading level inlines ->
-                    let
-                        rawText =
-                            Block.extractInlineText inlines
-                    in
-                    { level = Block.headingLevelToInt level
-                    , text = rawText
-                    , id = anchorId rawText
-                    }
-                        :: acc
+splitChunks : String -> List String
+splitChunks source =
+    if Regex.contains unsplittable source then
+        [ source ]
 
-                _ ->
-                    acc
-        )
-        []
-        blocks
+    else
+        let
+            step line state =
+                let
+                    fence =
+                        fenceOf line
+                in
+                case state.openFence of
+                    Just ( char, len ) ->
+                        { state
+                            | current = line :: state.current
+                            , prevBlank = False
+                            , openFence =
+                                case fence of
+                                    Just ( c, l ) ->
+                                        if c == char && l >= len && String.trim line == String.repeat l (String.fromChar c) then
+                                            Nothing
+
+                                        else
+                                            state.openFence
+
+                                    Nothing ->
+                                        state.openFence
+                        }
+
+                    Nothing ->
+                        if state.prevBlank && Regex.contains atxHeading line && not (List.isEmpty state.current) then
+                            let
+                                -- Blank lines go with the next chunk: a chunk that
+                                -- ends in blank lines can parse differently (e.g.
+                                -- an indented code block keeps them at end of input).
+                                ( blanks, body ) =
+                                    splitWhile (String.trim >> String.isEmpty) state.current
+                            in
+                            { state
+                                | done = String.join "\n" (List.reverse body) :: state.done
+                                , current = line :: blanks
+                                , prevBlank = False
+                                , openFence = fence
+                            }
+
+                        else
+                            { state
+                                | current = line :: state.current
+                                , prevBlank = String.isEmpty (String.trim line)
+                                , openFence = fence
+                            }
+
+            final =
+                List.foldl step { done = [], current = [], prevBlank = True, openFence = Nothing } (String.split "\n" source)
+        in
+        List.reverse (String.join "\n" (List.reverse final.current) :: final.done)
+
+
+splitWhile : (a -> Bool) -> List a -> ( List a, List a )
+splitWhile pred items =
+    case items of
+        x :: rest ->
+            if pred x then
+                Tuple.mapFirst ((::) x) (splitWhile pred rest)
+
+            else
+                ( [], items )
+
+        [] ->
+            ( [], [] )
+
+
+{-| Opening fence marker (char, length) if this line starts one.
+-}
+fenceOf : String -> Maybe ( Char, Int )
+fenceOf line =
+    let
+        trimmed =
+            String.trimLeft line
+
+        indent =
+            String.length line - String.length trimmed
+
+        runOf c =
+            String.length trimmed - String.length (dropLeadingChar c trimmed)
+    in
+    if indent > 3 then
+        Nothing
+
+    else if String.startsWith "```" trimmed then
+        Just ( '`', runOf '`' )
+
+    else if String.startsWith "~~~" trimmed then
+        Just ( '~', runOf '~' )
+
+    else
+        Nothing
+
+
+dropLeadingChar : Char -> String -> String
+dropLeadingChar c str =
+    case String.uncons str of
+        Just ( head, rest ) ->
+            if head == c then
+                dropLeadingChar c rest
+
+            else
+                str
+
+        Nothing ->
+            str
+
+
+atxHeading : Regex.Regex
+atxHeading =
+    Regex.fromString "^#{1,6}(\\s|$)" |> Maybe.withDefault Regex.never
+
+
+unsplittable : Regex.Regex
+unsplittable =
+    Regex.fromStringWith { caseInsensitive = False, multiline = True } "^ {0,3}(<[a-zA-Z!/?]|\\[[^\\]]*\\]:)"
+        |> Maybe.withDefault Regex.never
+
+
+{-| One anchor id per top-level block ("" for non-headings). Repeated heading
+text gets a `-1`, `-2`, ... suffix (GitHub style) so ids stay unique and the
+outline can scroll to the second "Overview" instead of always the first.
+-}
+headingIds : List Block.Block -> List String
+headingIds blocks =
+    blocks
+        |> List.foldl
+            (\block ( seen, acc ) ->
+                case block of
+                    Block.Heading _ inlines ->
+                        let
+                            base =
+                                anchorId (Block.extractInlineText inlines)
+
+                            count =
+                                Dict.get base seen |> Maybe.withDefault 0
+
+                            unique =
+                                if count == 0 then
+                                    base
+
+                                else
+                                    base ++ "-" ++ String.fromInt count
+                        in
+                        ( Dict.insert base (count + 1) seen, unique :: acc )
+
+                    _ ->
+                        ( seen, "" :: acc )
+            )
+            ( Dict.empty, [] )
+        |> Tuple.second
         |> List.reverse
 
 
-{-| Derive an anchor `id` from heading text. Shared by `renderHeading` and
-`extractOutline` so outline links always resolve to the rendered element.
+{-| Walk the parsed block AST and collect every heading into an outline.
+-}
+extractOutline : List Block.Block -> List String -> List OutlineEntry
+extractOutline blocks ids =
+    List.map2
+        (\block headingId ->
+            case block of
+                Block.Heading level inlines ->
+                    Just
+                        { level = Block.headingLevelToInt level
+                        , text = Block.extractInlineText inlines
+                        , id = headingId
+                        }
+
+                _ ->
+                    Nothing
+        )
+        blocks
+        ids
+        |> List.filterMap identity
+
+
+{-| Derive an anchor `id` from heading text.
 -}
 anchorId : String -> String
 anchorId rawText =
@@ -97,9 +317,35 @@ bareAmpInTag =
         |> Maybe.withDefault Regex.never
 
 
+{-| Self-close HTML void elements (`<img ...>` -> `<img ... />`).
+elm-markdown's HTML parser has no notion of void elements, so an unclosed
+`<img>` inside a `<div>` fails with "tag name mismatch" and the whole
+document renders blank. Common in GitHub READMEs with centered logos.
+-}
+selfCloseVoidTags : String -> String
+selfCloseVoidTags =
+    -- ponytail: also rewrites inside code spans/fences (same as escapeHtmlAmpersands);
+    -- skip fenced blocks if that ever matters.
+    Regex.replace voidTag
+        (\m ->
+            case m.submatches of
+                [ Just tag, attrs ] ->
+                    "<" ++ tag ++ String.trimRight (Maybe.withDefault "" attrs) ++ " />"
+
+                _ ->
+                    m.match
+        )
+
+
+voidTag : Regex.Regex
+voidTag =
+    Regex.fromString "<(img|br|hr|wbr|input)((?:\\s[^<>]*?)?)\\s*/?>"
+        |> Maybe.withDefault Regex.never
+
+
 customRenderer : Renderer (Html msg)
 customRenderer =
-    { heading = renderHeading
+    { heading = renderHeading ""
     , paragraph = p []
     , blockQuote = blockquote [ class "md-blockquote" ]
     , html =
@@ -243,8 +489,8 @@ customRenderer =
     }
 
 
-renderHeading : { level : Block.HeadingLevel, rawText : String, children : List (Html msg) } -> Html msg
-renderHeading { level, rawText, children } =
+renderHeading : String -> { level : Block.HeadingLevel, rawText : String, children : List (Html msg) } -> Html msg
+renderHeading headingId { level, children } =
     let
         tag =
             case level of
@@ -266,7 +512,7 @@ renderHeading { level, rawText, children } =
                 Block.H6 ->
                     h6
     in
-    tag [ id (anchorId rawText) ] children
+    tag [ id headingId ] children
 
 
 renderLink : { title : Maybe String, destination : String } -> List (Html msg) -> Html msg
@@ -337,6 +583,7 @@ renderOrderedList startIndex items =
     ol
         (if startIndex /= 1 then
             [ start startIndex ]
+
          else
             []
         )
@@ -350,7 +597,10 @@ renderCodeBlock { body, language } =
             Html.pre [ class "mermaid" ] [ text body ]
 
         _ ->
-            renderHighlightedCodeBlock body language
+            -- lazy: highlighting is the most expensive part of a re-parse, and
+            -- Html.Lazy compares strings by value, so unchanged code blocks
+            -- skip both the highlighter and the virtual-DOM diff.
+            Html.Lazy.lazy2 renderHighlightedCodeBlock body (Maybe.withDefault "" language)
 
 
 type alias Highlighter =
@@ -383,9 +633,17 @@ highlighters =
         |> Dict.fromList
 
 
-renderHighlightedCodeBlock : String -> Maybe String -> Html msg
-renderHighlightedCodeBlock body language =
-    case language |> Maybe.andThen (\l -> Dict.get (String.toLower l) highlighters) of
+renderHighlightedCodeBlock : String -> String -> Html msg
+renderHighlightedCodeBlock body languageName =
+    let
+        language =
+            if String.isEmpty languageName then
+                Nothing
+
+            else
+                Just languageName
+    in
+    case Dict.get (String.toLower languageName) highlighters of
         Just highlight ->
             case highlight body of
                 Ok hcode ->

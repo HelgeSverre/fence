@@ -23,3 +23,14 @@ export function applyFontSizesFromState(state) {
   applyFontSize("preview", state.previewFontSize);
   applyFontSize("ui", state.uiFontSize);
 }
+
+// Load every bundled @font-face up front. Otherwise a face loads lazily the
+// first time a document needs it (a bold span, or a glyph the earlier fonts
+// in the stack lack), and each arrival relayouts the whole editor overlay.
+export function preloadBundledFonts() {
+  try {
+    for (const face of document.fonts) face.load().catch(() => {});
+  } catch {
+    /* no FontFaceSet (tests) */
+  }
+}

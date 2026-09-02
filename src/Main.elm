@@ -67,8 +67,10 @@ type RebindTarget
 type alias Model =
     { fileTree : FileTree.Model
     , editor : Editor.Model
-    , previewHtml : List (Html Msg)
-    , parseCache : Markdown.Cache
+    , previewHtml : List (List (Html Msg))
+    , parseCache : Markdown.Cache Msg
+    , parseProgress : Maybe (Markdown.Progress Msg)
+    , framePainted : Bool -- a frame has painted since the last background step
     , frontmatter : Maybe Yaml.Value
     , debounceGeneration : Int
     , recoveryGeneration : Int
@@ -103,6 +105,8 @@ type Msg
     | FromElectron D.Value
     | KeyDown String Bool Bool Bool Bool
     | DebouncedParse Int
+    | ParseStep Int
+    | Frame
     | RecoveryDraftDue Int
     | ToggleSettings
     | SetTheme String
@@ -284,6 +288,8 @@ init flagsValue =
       , editor = Editor.init
       , previewHtml = []
       , parseCache = Markdown.emptyCache
+      , parseProgress = Nothing
+      , framePainted = False
       , frontmatter = Nothing
       , debounceGeneration = 0
       , recoveryGeneration = 0
@@ -591,21 +597,44 @@ update msg model =
                         ]
                     )
 
+                Editor.OverlayStep ->
+                    ( { model | editor = newEditor, framePainted = False }, Cmd.none )
+
                 _ ->
                     ( { model | editor = newEditor }, Cmd.none )
 
         DebouncedParse gen ->
             if gen == model.debounceGeneration then
-                let
-                    ( cache, { frontmatter, html, outline } ) =
-                        Markdown.parseCached model.parseCache model.editor.content
-                in
-                ( { model | previewHtml = html, frontmatter = frontmatter, outline = outline, parseCache = cache }
-                , Cmd.none
-                )
+                startParse model.parseCache model
 
             else
                 ( model, Cmd.none )
+
+        Frame ->
+            if model.framePainted then
+                let
+                    ( afterParse, _ ) =
+                        update (ParseStep model.debounceGeneration) model
+
+                    ( afterOverlay, _ ) =
+                        update (EditorMsg Editor.OverlayStep) afterParse
+                in
+                ( { afterOverlay | framePainted = False }, Cmd.none )
+
+            else
+                ( { model | framePainted = True }, Cmd.none )
+
+        ParseStep gen ->
+            case model.parseProgress of
+                Just progress ->
+                    if gen == model.debounceGeneration then
+                        continueParse parseStepBudget progress model
+
+                    else
+                        ( model, Cmd.none )
+
+                Nothing ->
+                    ( model, Cmd.none )
 
         RecoveryDraftDue gen ->
             if gen == model.recoveryGeneration && model.editor.dirtyState == Dirty then
@@ -669,6 +698,57 @@ update msg model =
 
                 Err _ ->
                     ( model, Cmd.none )
+
+
+{-| Begin a progressive parse of the editor content: the first step is
+small so the first screen paints at once; the rest continues in
+`ParseStep`s between frames. An edit to an already-parsed document reuses
+the cache, so it usually completes in this first step.
+-}
+startParse : Markdown.Cache Msg -> Model -> ( Model, Cmd Msg )
+startParse previous model =
+    let
+        ( progress, frontmatter ) =
+            Markdown.begin previous model.editor.content
+    in
+    continueParse firstParseBudget progress { model | frontmatter = frontmatter }
+
+
+continueParse : Int -> Markdown.Progress Msg -> Model -> ( Model, Cmd Msg )
+continueParse budget progress model =
+    let
+        stepped =
+            Markdown.step budget progress
+
+        complete =
+            Markdown.isComplete stepped
+    in
+    ( { model
+        | previewHtml = Markdown.htmlChunks stepped
+        , outline = Markdown.outline stepped
+        , parseCache = Markdown.cache stepped
+        , parseProgress =
+            if complete then
+                Nothing
+
+            else
+                Just stepped
+        , framePainted = False
+      }
+    , Cmd.none
+    )
+
+
+{-| Characters of uncached source parsed before the first paint. -}
+firstParseBudget : Int
+firstParseBudget =
+    15000
+
+
+{-| Characters of uncached source per follow-up step (~60-90ms of work). -}
+parseStepBudget : Int
+parseStepBudget =
+    60000
 
 
 previewDelay : String -> Float
@@ -739,22 +819,25 @@ handlePortMessage tag value model =
                         newEditor =
                             Editor.setContent file.path file.content file.revision file.dirty model.editor
 
-                        ( cache, { frontmatter, html, outline } ) =
-                            Markdown.parseCached Markdown.emptyCache file.content
+                        gen =
+                            model.debounceGeneration + 1
+
+                        ( parsedModel, parseCmd ) =
+                            startParse Markdown.emptyCache
+                                { model
+                                    | editor = newEditor
+                                    , fileTree = FileTree.select file.path model.fileTree
+                                    , debounceGeneration = gen
+                                }
                     in
-                    ( { model
-                        | editor = newEditor
-                        , fileTree = FileTree.select file.path model.fileTree
-                        , previewHtml = html
-                        , parseCache = cache
-                        , frontmatter = frontmatter
-                        , outline = outline
-                        , closeAfterSave = False
+                    ( { parsedModel
+                        | closeAfterSave = False
                         , savingContent = Nothing
                       }
                     , Cmd.batch
                         [ setTitleCmd newEditor
                         , setDirtyCmd file.dirty
+                        , parseCmd
                         ]
                     )
 
@@ -1183,6 +1266,13 @@ subscriptions model =
         [ Ports.fromElectron FromElectron
         , Browser.Events.onKeyDown keyDecoder
         , Browser.Events.onResize WindowResized
+        , -- Background parse/overlay steps run one per painted frame, so a
+          -- large document paints its first screen before the rest fills in.
+          if model.parseProgress /= Nothing || Editor.overlayPending model.editor then
+            Browser.Events.onAnimationFrame (\_ -> Frame)
+
+          else
+            Sub.none
         , case model.drag of
             Just _ ->
                 Sub.batch

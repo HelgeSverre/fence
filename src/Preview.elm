@@ -2,24 +2,32 @@ module Preview exposing (view)
 
 import Html exposing (..)
 import Html.Attributes exposing (..)
+import Html.Lazy
 import Yaml
 
 
-view : Maybe Yaml.Value -> List (Html msg) -> Html msg
-view frontmatter renderedHtml =
+view : Maybe Yaml.Value -> List (List (Html msg)) -> Html msg
+view frontmatter chunks =
     div [ class "preview-pane", attribute "data-testid" "preview-pane" ]
         [ div [ class "pane-header" ]
             [ span [] [ text "Preview" ] ]
         , div [ id "preview-container", class "preview-container", attribute "data-testid" "preview-container" ]
             [ div [ class "preview-content", attribute "data-testid" "preview-content" ]
-                (if List.isEmpty renderedHtml then
+                (if List.all List.isEmpty chunks then
                     [ welcomeView ]
 
                  else
-                    viewFrontmatter frontmatter ++ renderedHtml
+                    -- lazy: a chunk's Html value only changes when its source
+                    -- does, so unchanged sections skip the virtual-DOM diff.
+                    viewFrontmatter frontmatter ++ List.map (Html.Lazy.lazy viewChunk) chunks
                 )
             ]
         ]
+
+
+viewChunk : List (Html msg) -> Html msg
+viewChunk html =
+    div [ class "preview-chunk" ] html
 
 
 viewFrontmatter : Maybe Yaml.Value -> List (Html msg)

@@ -13,7 +13,7 @@ import Test.Html.Selector as Selector
 
 suite : Test
 suite =
-    describe "Markdown" [ selfCloseSuite, headingIdSuite, chunkSuite, renderSuite ]
+    describe "Markdown" [ selfCloseSuite, headingIdSuite, chunkSuite, renderSuite, progressSuite ]
 
 
 selfCloseSuite : Test
@@ -145,4 +145,75 @@ renderSuite =
             \_ -> (Markdown.parse "# A\n\n### C\n\n## B\n").outline |> List.map .level |> Expect.equal [ 1, 3, 2 ]
         , test "a README with an unclosed <img> inside a <div> still renders" <|
             \_ -> render "<div align=\"center\">\n\n<img src=\"x.png\" alt=\"logo\">\n\n# Title\n\n</div>\n" |> Query.find [ Selector.tag "h1" ] |> Query.has [ Selector.text "Title" ]
+        ]
+
+
+
+progressSuite : Test
+progressSuite =
+    let
+        doc =
+            List.range 1 6 |> List.map (\i -> "# H" ++ String.fromInt i ++ "\n\n" ++ String.repeat 50 "word ") |> String.join "\n\n"
+
+        ( fresh, _ ) =
+            Markdown.begin Markdown.emptyCache doc
+
+        runToEnd p =
+            if Markdown.isComplete p then
+                p
+
+            else
+                runToEnd (Markdown.step 1000000 p)
+    in
+    describe "progressive parsing"
+        [ test "a small budget still makes progress on exactly one chunk" <|
+            \_ -> Markdown.step 1 fresh |> Markdown.htmlChunks |> List.length |> Expect.equal 1
+        , test "a budget covering several chunks parses several" <|
+            \_ -> Markdown.step 600 fresh |> Markdown.htmlChunks |> List.length |> Expect.equal 3
+        , test "steps complete the document in order with all headings" <|
+            \_ -> runToEnd fresh |> Markdown.outline |> List.map .text |> Expect.equal [ "H1", "H2", "H3", "H4", "H5", "H6" ]
+        , test "cached chunks are free: an edit to one chunk finishes in one small step" <|
+            \_ ->
+                let
+                    cache =
+                        Markdown.cache (runToEnd fresh)
+
+                    ( again, _ ) =
+                        Markdown.begin cache (doc ++ " edited")
+                in
+                Markdown.step 1 again |> Markdown.isComplete |> Expect.equal True
+        , test "unchanged chunks keep the identical rendered value across a re-parse" <|
+            \_ ->
+                let
+                    first =
+                        runToEnd fresh
+
+                    ( again, _ ) =
+                        Markdown.begin (Markdown.cache first) (doc ++ " edited")
+                in
+                List.map2 (\a b -> a == b) (Markdown.htmlChunks first) (Markdown.htmlChunks (runToEnd again))
+                    |> Expect.equal [ True, True, True, True, True, False ]
+        , test "a duplicate heading inserted earlier re-renders later chunks with new ids" <|
+            \_ ->
+                let
+                    first =
+                        runToEnd fresh
+
+                    ( again, _ ) =
+                        Markdown.begin (Markdown.cache first) ("# H3\n\nintro\n\n" ++ doc)
+                in
+                runToEnd again |> Markdown.outline |> List.map .id |> Expect.equal [ "h3", "h1", "h2", "h3-1", "h4", "h5", "h6" ]
+        , test "an HTML document that cannot be split renders as one chunk" <|
+            \_ ->
+                Markdown.begin Markdown.emptyCache "<div>\n\n# A\n\n# B\n\n</div>"
+                    |> Tuple.first
+                    |> runToEnd
+                    |> Markdown.htmlChunks
+                    |> List.length
+                    |> Expect.equal 1
+        , test "parseCached equals running all steps" <|
+            \_ ->
+                Tuple.second (Markdown.parseCached Markdown.emptyCache doc)
+                    |> .outline
+                    |> Expect.equal (Markdown.outline (runToEnd fresh))
         ]

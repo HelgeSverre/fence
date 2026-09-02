@@ -5,6 +5,7 @@ module Editor exposing
     , chunksOf
     , init
     , lineTokens
+    , overlayPending
     , markSaved
     , maxHighlightedCharacters
     , setContent
@@ -27,12 +28,14 @@ type alias Model =
     , dirtyState : DirtyState
     , revision : Maybe String
     , scrollTop : Float
+    , overlayLines : Maybe Int -- Just n: only the first n lines are highlighted so far
     }
 
 
 type Msg
     = ContentChanged String
     | ScrollChanged Float
+    | OverlayStep
 
 
 init : Model
@@ -42,6 +45,7 @@ init =
     , dirtyState = Clean
     , revision = Nothing
     , scrollTop = 0
+    , overlayLines = Nothing
     }
 
 
@@ -58,6 +62,7 @@ setContent path content revision dirty model =
                 Clean
         , revision = Just revision
         , scrollTop = 0
+        , overlayLines = initialOverlay content
     }
 
 
@@ -83,6 +88,64 @@ update msg model =
         ScrollChanged scrollTop ->
             { model | scrollTop = scrollTop }
 
+        OverlayStep ->
+            case model.overlayLines of
+                Just n ->
+                    let
+                        next =
+                            n + overlayStepLines
+                    in
+                    { model
+                        | overlayLines =
+                            if next >= lineCount model.content then
+                                Nothing
+
+                            else
+                                Just next
+                    }
+
+                Nothing ->
+                    model
+
+
+{-| A large document paints with the textarea's own text first and builds
+the highlight overlay a few thousand lines per frame behind it (see
+`overlay-pending` in editor.css), so opening never blocks on laying out
+tens of thousands of highlight nodes.
+-}
+initialOverlay : String -> Maybe Int
+initialOverlay content =
+    if lineCount content > initialOverlayLines then
+        Just initialOverlayLines
+
+    else
+        Nothing
+
+
+overlayPending : Model -> Bool
+overlayPending model =
+    model.overlayLines /= Nothing
+
+
+lineCount : String -> Int
+lineCount content =
+    List.length (String.indexes "\n" content) + 1
+
+
+initialOverlayLines : Int
+initialOverlayLines =
+    256
+
+
+largeDocumentCharacters : Int
+largeDocumentCharacters =
+    200000
+
+
+overlayStepLines : Int
+overlayStepLines =
+    2048
+
 
 view : Model -> Html Msg
 view model =
@@ -91,13 +154,21 @@ view model =
             [ span []
                 [ text (headerText model) ]
             ]
-        , div [ class "editor-container" ]
+        , div
+            [ class "editor-container"
+            , classList
+                [ ( "overlay-pending", overlayPending model )
+
+                -- shaping ligatures across a huge textarea costs ~100ms per open
+                , ( "large-document", String.length model.content > largeDocumentCharacters )
+                ]
+            ]
             [ pre
                 [ class "editor-highlight"
                 , attribute "data-testid" "editor-highlight"
                 , style "transform" ("translateY(-" ++ String.fromFloat model.scrollTop ++ "px)")
                 ]
-                [ code [] (highlightMarkdown model.content) ]
+                [ code [] (highlightMarkdown model.overlayLines model.content) ]
             , textarea
                 [ class "editor-textarea"
                 , attribute "data-testid" "editor-textarea"
@@ -135,8 +206,8 @@ headerText model =
 -- SYNTAX HIGHLIGHTING
 
 
-highlightMarkdown : String -> List (Html msg)
-highlightMarkdown content =
+highlightMarkdown : Maybe Int -> String -> List (Html msg)
+highlightMarkdown limit content =
     if String.length content > maxHighlightedCharacters then
         -- A single text node keeps very large documents responsive. The
         -- textarea remains fully editable; only decorative highlighting is
@@ -146,21 +217,28 @@ highlightMarkdown content =
     else
         content
             |> String.split "\n"
+            |> (case limit of
+                    Just n ->
+                        List.take n
+
+                    Nothing ->
+                        identity
+               )
             |> chunksOf linesPerChunk
             -- lazy: a keystroke only re-renders (and re-diffs) the chunk it
             -- touched; Html.Lazy compares the chunk's text by value.
             |> List.map (String.join "\n" >> Html.Lazy.lazy highlightChunk)
 
 
-{-| Each line is its own block element so the browser can skip layout for
-lines that are off-screen (see `.editor-line` in editor.css).
+{-| Each line is its own block element so a keystroke re-wraps only that
+line (see `.editor-line` in editor.css).
 -}
 highlightChunk : String -> Html msg
 highlightChunk chunk =
     div [ class "editor-chunk" ]
         (chunk
             |> String.split "\n"
-            |> List.map (\line -> div [ class "editor-line" ] [ Html.Lazy.lazy highlightLine line ])
+            |> List.map (Html.Lazy.lazy highlightLine)
         )
 
 
@@ -212,7 +290,7 @@ styled cls str =
 
 highlightLine : String -> Html msg
 highlightLine line =
-    span [] (List.map viewToken (lineTokens line))
+    div [ class "editor-line" ] (List.map viewToken (lineTokens line))
 
 
 viewToken : Token -> Html msg
@@ -306,7 +384,7 @@ inlineTokens line =
 parseInline : String -> List Token -> List Token
 parseInline remaining acc =
     if String.isEmpty remaining then
-        List.reverse acc
+        List.reverse (mergePlain acc)
 
     else if String.startsWith "**" remaining then
         case findClosing "**" (String.dropLeft 2 remaining) of
@@ -345,7 +423,24 @@ parseInline remaining acc =
             n =
                 Basics.max 1 (findNextSpecial remaining)
         in
-        parseInline (String.dropLeft n remaining) (plain (String.left n remaining) :: acc)
+        parseInline (String.dropLeft n remaining) (mergePlain (plain (String.left n remaining) :: acc))
+
+
+{-| Collapse two adjacent unstyled runs at the head of the (reversed)
+accumulator: fewer text nodes in the overlay means less to lay out.
+-}
+mergePlain : List Token -> List Token
+mergePlain acc =
+    case acc of
+        a :: b :: rest ->
+            if a.class == Nothing && b.class == Nothing then
+                plain (b.text ++ a.text) :: rest
+
+            else
+                acc
+
+        _ ->
+            acc
 
 
 {-| Code-unit index of the next inline delimiter, or the string length.

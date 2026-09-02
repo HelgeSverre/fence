@@ -62,7 +62,7 @@ keyDown key meta =
 suite : Test
 suite =
     describe "Main"
-        [ initSuite, bindingSuite, dragSuite, layoutSuite, previewSuite, fileSuite ]
+        [ initSuite, bindingSuite, dragSuite, layoutSuite, previewSuite, fileSuite, progressiveSuite ]
 
 
 initSuite : Test
@@ -330,4 +330,41 @@ fileSuite =
                     |> Expect.equal "unsaved"
         , test "a malformed port message is ignored" <|
             \_ -> step (FromElectron (E.string "garbage")) opened |> .editor |> .content |> Expect.equal "# Title\n\ntext"
+        ]
+
+
+
+progressiveSuite : Test
+progressiveSuite =
+    let
+        bigDoc =
+            -- 40 sections, ~2000 lines: big enough for both the parse and the overlay to be progressive
+            List.range 1 40 |> List.map (\i -> "# Section " ++ String.fromInt i ++ "\n\n" ++ String.repeat 50 "some words on a line\n") |> String.join "\n"
+
+        opened =
+            openFile "/notes/big.md" bigDoc fresh
+
+        headings m =
+            List.length m.outline
+    in
+    describe "progressive rendering of a large document"
+        [ test "opening renders the first screen and leaves the rest pending" <|
+            \_ -> ( headings opened < 40, opened.parseProgress /= Nothing, Editor.overlayPending opened.editor ) |> Expect.equal ( True, True, True )
+        , test "the first animation frame after content only lets it paint" <|
+            \_ -> step Frame opened |> headings |> Expect.equal (headings opened)
+        , test "the following frame does a parse step" <|
+            \_ -> steps [ Frame, Frame ] opened |> headings |> Expect.greaterThan (headings opened)
+        , test "frames keep alternating paint and work until everything is rendered" <|
+            \_ -> steps (List.repeat 60 Frame) opened |> (\m -> ( headings m, m.parseProgress, Editor.overlayPending m.editor )) |> Expect.equal ( 40, Nothing, False )
+        , test "a step for a stale generation is ignored" <|
+            \_ -> step (ParseStep (opened.debounceGeneration - 1)) opened |> headings |> Expect.equal (headings opened)
+        , test "an edit during the fill-in restarts the parse against the cache" <|
+            \_ ->
+                opened
+                    |> steps [ Frame, Frame ]
+                    |> edit (bigDoc ++ "\n\n# Extra")
+                    |> step (DebouncedParse (opened.debounceGeneration + 1))
+                    |> steps (List.repeat 60 Frame)
+                    |> headings
+                    |> Expect.equal 41
         ]

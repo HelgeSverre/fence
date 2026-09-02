@@ -1,7 +1,7 @@
 import { Elm } from "../src/Main.elm";
 import { wirePorts } from "./ports.js";
 import { initMermaid } from "./mermaid-init.js";
-import { applyFontFamily, applyFontSizesFromState } from "./font-settings.js";
+import { applyFontFamily, applyFontSizesFromState, preloadBundledFonts } from "./font-settings.js";
 
 const initialState = window.electronAPI?.getInitialState?.() ?? {};
 
@@ -33,6 +33,7 @@ const app = Elm.Main.init({
 
 applyFontFamily(initialState.font);
 applyFontSizesFromState(initialState);
+preloadBundledFonts();
 
 wirePorts(app);
 initMermaid();

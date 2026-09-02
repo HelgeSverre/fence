@@ -76,3 +76,21 @@
 .editor-line {
   min-height: 1lh;
 }
+
+/* While a large document's overlay is still being built, show the textarea's
+   own text so the editor is readable and editable immediately. */
+.editor-container.overlay-pending .editor-textarea {
+  color: var(--text-primary);
+}
+
+.editor-container.overlay-pending .editor-highlight {
+  visibility: hidden;
+}
+
+/* Font shaping dominates the first layout of a very large textarea; drop
+   ligatures/kerning there (monospace fonts have no kerning to lose). */
+.editor-container.large-document .editor-textarea,
+.editor-container.large-document .editor-highlight {
+  font-variant-ligatures: none;
+  font-kerning: none;
+}

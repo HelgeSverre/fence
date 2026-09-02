@@ -80,9 +80,9 @@ Drag state tracks mouse delta relative to window width. Sidebar clamped to 8-40%
 
 All file I/O and window operations go through `Ports.elm` → `preload.js` contextBridge → `electron/main.js`. No direct Node access from renderer.
 
-### Debounced Markdown Parsing
+### Progressive Markdown Parsing
 
-Editor changes use a generation counter (150ms debounce) to discard stale parse operations.
+Editor changes use a generation counter (50-400ms debounce by size) to discard stale parses. Documents are split at top-level headings (`Markdown.splitChunks`) and parsed chunk by chunk with a per-chunk cache; `Markdown.begin`/`step` render within a character budget and Main continues in `Frame` messages (one step every other animation frame) so a large file paints its first screen in ~150ms. The editor overlay is built the same way (`Editor.OverlayStep`); the textarea's own text shows until it is complete. `e2e/open-large-file.test.js` is the acceptance gate.
 
 ### Themes
 

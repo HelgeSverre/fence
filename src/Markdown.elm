@@ -1,4 +1,19 @@
-module Markdown exposing (Cache, OutlineEntry, emptyCache, parse, parseCached, selfCloseVoidTags, splitChunks)
+module Markdown exposing
+    ( Cache
+    , OutlineEntry
+    , Progress
+    , begin
+    , cache
+    , emptyCache
+    , htmlChunks
+    , isComplete
+    , outline
+    , parse
+    , parseCached
+    , selfCloseVoidTags
+    , splitChunks
+    , step
+    )
 
 import Dict exposing (Dict)
 import Frontmatter
@@ -22,74 +37,223 @@ type alias OutlineEntry =
     { level : Int, text : String, id : String }
 
 
-{-| Parsed blocks keyed by the exact source text of a top-level chunk, so
-that re-parsing after an edit only touches the chunk that changed.
+{-| Per-chunk cache keyed by the exact source text of a top-level chunk.
+Holds the parsed blocks and, once rendered, the HTML together with the
+heading ids it was rendered with, so an unchanged chunk costs nothing to
+re-parse and keeps the same `Html` value (which lets `Html.Lazy` skip it).
 -}
-type alias Cache =
-    Dict String (List Block.Block)
+type alias Cache msg =
+    Dict String (Entry msg)
 
 
-emptyCache : Cache
+type alias Entry msg =
+    { blocks : List Block.Block
+    , rendered : Maybe { ids : List String, html : List (Html msg), outline : List OutlineEntry }
+    }
+
+
+emptyCache : Cache msg
 emptyCache =
     Dict.empty
 
 
+{-| A document being parsed chunk by chunk. `begin` splits it, `step` parses
+and renders the next chunks within a character budget, so a large document
+can paint its first screen at once and fill in over a few animation frames.
+-}
+type Progress msg
+    = Progress
+        { pending : List String
+        , body : String
+        , lookup : Cache msg
+        , built : Cache msg
+        , seen : Dict String Int
+        , chunksRev : List (List (Html msg))
+        , outlineRev : List OutlineEntry
+        }
+
+
+begin : Cache msg -> String -> ( Progress msg, Maybe Yaml.Value )
+begin previous input =
+    let
+        { frontmatter, body } =
+            Frontmatter.extract input
+    in
+    ( Progress
+        { pending = splitChunks body
+        , body = body
+        , lookup = previous
+        , built = emptyCache
+        , seen = Dict.empty
+        , chunksRev = []
+        , outlineRev = []
+        }
+    , frontmatter
+    )
+
+
+isComplete : Progress msg -> Bool
+isComplete (Progress p) =
+    List.isEmpty p.pending
+
+
+{-| Rendered chunks so far, in document order. Each inner list keeps its
+identity across steps and edits unless its chunk changed.
+-}
+htmlChunks : Progress msg -> List (List (Html msg))
+htmlChunks (Progress p) =
+    List.reverse p.chunksRev
+
+
+outline : Progress msg -> List OutlineEntry
+outline (Progress p) =
+    List.reverse p.outlineRev
+
+
+cache : Progress msg -> Cache msg
+cache (Progress p) =
+    p.built
+
+
+{-| Parse and render pending chunks until roughly `budget` characters of
+*uncached* source have been processed (cached chunks are nearly free, so a
+small edit to a large document still finishes in a single step). Always
+makes progress on at least one chunk.
+-}
+step : Int -> Progress msg -> Progress msg
+step budget (Progress p) =
+    case p.pending of
+        [] ->
+            Progress p
+
+        chunk :: rest ->
+            let
+                cached =
+                    Dict.get chunk p.lookup
+
+                cost =
+                    case cached of
+                        Just _ ->
+                            0
+
+                        Nothing ->
+                            String.length chunk
+
+                parsed =
+                    case cached of
+                        Just entry ->
+                            Ok entry
+
+                        Nothing ->
+                            parseChunk chunk |> Result.map (\blocks -> { blocks = blocks, rendered = Nothing })
+            in
+            case parsed of
+                Err _ ->
+                    -- A chunk that fails on its own (e.g. an HTML element split
+                    -- across a boundary) means the split was unsafe: fall back
+                    -- to rendering the whole document as a single chunk.
+                    wholeDocument (Progress p)
+
+                Ok entry ->
+                    let
+                        ( seen, ids ) =
+                            assignIds p.seen entry.blocks
+
+                        rendered =
+                            case entry.rendered of
+                                Just r ->
+                                    if r.ids == ids then
+                                        r
+
+                                    else
+                                        renderChunk chunk entry.blocks ids
+
+                                Nothing ->
+                                    renderChunk chunk entry.blocks ids
+
+                        next =
+                            Progress
+                                { p
+                                    | pending = rest
+                                    , built = Dict.insert chunk { entry | rendered = Just rendered } p.built
+                                    , seen = seen
+                                    , chunksRev = rendered.html :: p.chunksRev
+                                    , outlineRev = List.reverse rendered.outline ++ p.outlineRev
+                                }
+                    in
+                    if budget - cost > 0 && not (List.isEmpty rest) then
+                        step (budget - cost) next
+
+                    else
+                        next
+
+
+wholeDocument : Progress msg -> Progress msg
+wholeDocument (Progress p) =
+    let
+        blocks =
+            parseChunk p.body |> Result.withDefault []
+
+        ( _, ids ) =
+            assignIds Dict.empty blocks
+
+        rendered =
+            renderChunk p.body blocks ids
+    in
+    Progress
+        { p
+            | pending = []
+            , built = emptyCache
+            , chunksRev = [ rendered.html ]
+            , outlineRev = List.reverse rendered.outline
+        }
+
+
+renderChunk : String -> List Block.Block -> List String -> { ids : List String, html : List (Html msg), outline : List OutlineEntry }
+renderChunk source blocks ids =
+    { ids = ids
+    , html =
+        -- Render block by block so each heading's renderer can close over its
+        -- unique id (elm-markdown's heading callback has no position info).
+        List.map2
+            (\block headingId ->
+                Markdown.Renderer.render { customRenderer | heading = renderHeading headingId } [ block ]
+            )
+            blocks
+            ids
+            |> List.foldr (Result.map2 (++)) (Ok [])
+            |> Result.withDefault [ pre [] [ text source ] ]
+    , outline = extractOutline blocks ids
+    }
+
+
+{-| Whole-document convenience used by tests and small documents: run steps
+to completion and flatten the chunks.
+-}
 parse : String -> { frontmatter : Maybe Yaml.Value, html : List (Html msg), outline : List OutlineEntry }
 parse input =
     Tuple.second (parseCached emptyCache input)
 
 
-parseCached : Cache -> String -> ( Cache, { frontmatter : Maybe Yaml.Value, html : List (Html msg), outline : List OutlineEntry } )
-parseCached cache input =
+parseCached : Cache msg -> String -> ( Cache msg, { frontmatter : Maybe Yaml.Value, html : List (Html msg), outline : List OutlineEntry } )
+parseCached previous input =
     let
-        { frontmatter, body } =
-            Frontmatter.extract input
+        ( progress, frontmatter ) =
+            begin previous input
 
-        chunks =
-            splitChunks body
-
-        parsedChunks =
-            List.map
-                (\chunk ->
-                    case Dict.get chunk cache of
-                        Just cached ->
-                            Ok cached
-
-                        Nothing ->
-                            parseChunk chunk
-                )
-                chunks
-
-        -- A chunk that fails on its own (e.g. an HTML element split across a
-        -- boundary) means the split was unsafe: fall back to one full parse.
-        ( newCache, blocks ) =
-            case List.foldr (Result.map2 (++)) (Ok []) parsedChunks of
-                Ok all ->
-                    ( List.map2 Tuple.pair chunks parsedChunks
-                        |> List.filterMap (\( chunk, r ) -> Result.toMaybe r |> Maybe.map (Tuple.pair chunk))
-                        |> Dict.fromList
-                    , all
-                    )
-
-                Err _ ->
-                    ( emptyCache, parseChunk body |> Result.withDefault [] )
-
-        ids =
-            headingIds blocks
-
-        -- Render block by block so each heading's renderer can close over its
-        -- unique id (elm-markdown's heading callback has no position info).
-        html =
-            List.map2
-                (\block headingId ->
-                    Markdown.Renderer.render { customRenderer | heading = renderHeading headingId } [ block ]
-                )
-                blocks
-                ids
-                |> List.foldr (Result.map2 (++)) (Ok [])
-                |> Result.withDefault [ pre [] [ text body ] ]
+        finished =
+            runToEnd progress
     in
-    ( newCache, { frontmatter = frontmatter, html = html, outline = extractOutline blocks ids } )
+    ( cache finished, { frontmatter = frontmatter, html = List.concat (htmlChunks finished), outline = outline finished } )
+
+
+runToEnd : Progress msg -> Progress msg
+runToEnd progress =
+    if isComplete progress then
+        progress
+
+    else
+        runToEnd (step 1000000 progress)
 
 
 parseChunk chunk =
@@ -117,7 +281,7 @@ splitChunks source =
 
     else
         let
-            step line state =
+            splitLine line state =
                 let
                     fence =
                         fenceOf line
@@ -170,7 +334,7 @@ splitChunks source =
                             }
 
             final =
-                List.foldl step { done = [], current = [], prevBlank = True, openFence = Nothing } (String.split "\n" source)
+                List.foldl splitLine { done = [], current = [], prevBlank = True, openFence = Nothing } (String.split "\n" source)
         in
         List.reverse (String.join "\n" (List.reverse final.current) :: final.done)
 
@@ -241,12 +405,12 @@ unsplittable =
         |> Maybe.withDefault Regex.never
 
 
-{-| One anchor id per top-level block ("" for non-headings). Repeated heading
-text gets a `-1`, `-2`, ... suffix (GitHub style) so ids stay unique and the
-outline can scroll to the second "Overview" instead of always the first.
+{-| One anchor id per block ("" for non-headings), continuing from the
+heading counts seen so far. Repeated heading text gets a `-1`, `-2`, ...
+suffix (GitHub style) so ids stay unique across the whole document.
 -}
-headingIds : List Block.Block -> List String
-headingIds blocks =
+assignIds : Dict String Int -> List Block.Block -> ( Dict String Int, List String )
+assignIds seen0 blocks =
     blocks
         |> List.foldl
             (\block ( seen, acc ) ->
@@ -271,9 +435,8 @@ headingIds blocks =
                     _ ->
                         ( seen, "" :: acc )
             )
-            ( Dict.empty, [] )
-        |> Tuple.second
-        |> List.reverse
+            ( seen0, [] )
+        |> Tuple.mapSecond List.reverse
 
 
 {-| Walk the parsed block AST and collect every heading into an outline.

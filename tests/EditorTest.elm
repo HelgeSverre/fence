@@ -10,7 +10,7 @@ import Types exposing (DirtyState(..))
 suite : Test
 suite =
     describe "Editor"
-        [ stateSuite, overlaySuite ]
+        [ stateSuite, overlaySuite, progressiveOverlaySuite ]
 
 
 stateSuite : Test
@@ -122,4 +122,40 @@ overlaySuite =
             \_ -> Editor.chunksOf 3 ([] |> List.map identity) |> List.length |> Expect.equal 0
         , test "the plain-text fallback threshold is well above typical documents" <|
             \_ -> Editor.maxHighlightedCharacters |> Expect.atLeast 1000000
+        ]
+
+
+
+progressiveOverlaySuite : Test
+progressiveOverlaySuite =
+    let
+        bigDoc =
+            String.repeat 3000 "line\n"
+
+        opened =
+            Editor.setContent "/n/big.md" bigDoc "r" False Editor.init
+    in
+    describe "progressive overlay"
+        [ test "small documents highlight everything at once" <|
+            \_ -> Editor.setContent "/n/a.md" "# a\nb" "r" False Editor.init |> Editor.overlayPending |> Expect.equal False
+        , test "large documents start with a partial overlay" <|
+            \_ -> Editor.overlayPending opened |> Expect.equal True
+        , test "steps extend the overlay until it covers the document" <|
+            \_ ->
+                let
+                    stepsUntilDone m n =
+                        if Editor.overlayPending m && n < 50 then
+                            stepsUntilDone (Editor.update Editor.OverlayStep m) (n + 1)
+
+                        else
+                            n
+                in
+                stepsUntilDone opened 0 |> Expect.all [ Expect.atLeast 1, Expect.atMost 3 ]
+        , test "typing while the overlay is filling does not restart it" <|
+            \_ ->
+                opened
+                    |> Editor.update Editor.OverlayStep
+                    |> Editor.update (Editor.ContentChanged (bigDoc ++ "x"))
+                    |> .overlayLines
+                    |> Expect.equal (Editor.update Editor.OverlayStep opened).overlayLines
         ]

@@ -6,7 +6,7 @@
   max-width: 100%;
 }
 
-.preview-content > :first-child {
+.preview-chunk:first-child > :first-child {
   margin-top: 0;
 }
 
@@ -319,19 +319,19 @@ dl.frontmatter-grid dd {
 /* Skip layout and paint for off-screen blocks. Editing one block otherwise
    reflows the whole document (~50ms at 200KB). Mermaid blocks are excluded
    because mermaid measures text with getBBox while rendering off-screen. */
-.preview-content > :not(.mermaid) {
+.preview-chunk > :not(.mermaid) {
   content-visibility: auto;
   contain-intrinsic-size: auto 2em;
 }
 
 /* Containment stops the first/last item's margin collapsing through the
    list's own margin; drop them so list spacing is unchanged. */
-.preview-content > ul > li:first-child,
-.preview-content > ol > li:first-child {
+.preview-chunk > ul > li:first-child,
+.preview-chunk > ol > li:first-child {
   margin-top: 0;
 }
 
-.preview-content > ul > li:last-child,
-.preview-content > ol > li:last-child {
+.preview-chunk > ul > li:last-child,
+.preview-chunk > ol > li:last-child {
   margin-bottom: 0;
 }

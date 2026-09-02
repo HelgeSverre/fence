@@ -31,11 +31,13 @@ test("opens, edits, previews, and saves a large document", async () => {
     const window = await electronApp.firstWindow();
     const editor = window.locator("textarea.editor-textarea");
     await editor.waitFor();
-    await editor.evaluate((element) => {
-      if (element.value !== "# Original\n") {
-        throw new Error(`Unexpected initial content: ${element.value}`);
-      }
-    });
+    // The CLI path is read and pushed over IPC after the window loads, so
+    // wait for the content rather than asserting it immediately.
+    await window.waitForFunction(
+      () => document.querySelector("textarea.editor-textarea")?.value === "# Original\n",
+      undefined,
+      { timeout: 10000 },
+    );
 
     const content = `# Large Document\n\n${"word ".repeat(60000)}`;
     const renderMs = await editor.evaluate(async (element, value) => {

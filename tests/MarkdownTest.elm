@@ -5,12 +5,15 @@ import Dict
 import Markdown
 import Markdown.Block as Block
 import Markdown.Parser
+import Html
 import Test exposing (Test, describe, test)
+import Test.Html.Query as Query
+import Test.Html.Selector as Selector
 
 
 suite : Test
 suite =
-    describe "Markdown" [ selfCloseSuite, headingIdSuite, chunkSuite ]
+    describe "Markdown" [ selfCloseSuite, headingIdSuite, chunkSuite, renderSuite ]
 
 
 selfCloseSuite : Test
@@ -106,3 +109,38 @@ chunkSuite =
                             ()
                ]
         )
+
+
+
+renderSuite : Test
+renderSuite =
+    let
+        render src =
+            Query.fromHtml (Html.div [] (Markdown.parse src).html)
+    in
+    describe "rendered HTML"
+        [ test "headings carry their anchor id" <|
+            \_ -> render "## Hello World\n" |> Query.find [ Selector.tag "h2" ] |> Query.has [ Selector.id "hello-world" ]
+        , test "fenced code with a known language is highlighted" <|
+            \_ -> render "```js\nconst x = 1;\n```\n" |> Query.findAll [ Selector.class "md-code-block" ] |> Query.count (Expect.equal 1)
+        , test "fenced code with an unknown language falls back to a plain block tagged with the language" <|
+            \_ -> render "```brainfuck\n+++\n```\n" |> Query.find [ Selector.tag "code" ] |> Query.has [ Selector.class "language-brainfuck", Selector.text "+++" ]
+        , test "mermaid fences become a pre.mermaid for the renderer" <|
+            \_ -> render "```mermaid\ngraph TD\n```\n" |> Query.find [ Selector.tag "pre" ] |> Query.has [ Selector.class "mermaid", Selector.text "graph TD" ]
+        , test "frontmatter is stripped from the rendered body and returned separately" <|
+            \_ ->
+                let
+                    result =
+                        Markdown.parse "---\ntitle: T\n---\n# Body\n"
+                in
+                Expect.all
+                    [ \_ -> result.frontmatter |> Expect.notEqual Nothing
+                    , \_ -> Query.fromHtml (Html.div [] result.html) |> Query.findAll [ Selector.tag "hr" ] |> Query.count (Expect.equal 0)
+                    , \_ -> List.map .text result.outline |> Expect.equal [ "Body" ]
+                    ]
+                    ()
+        , test "the outline records heading levels" <|
+            \_ -> (Markdown.parse "# A\n\n### C\n\n## B\n").outline |> List.map .level |> Expect.equal [ 1, 3, 2 ]
+        , test "a README with an unclosed <img> inside a <div> still renders" <|
+            \_ -> render "<div align=\"center\">\n\n<img src=\"x.png\" alt=\"logo\">\n\n# Title\n\n</div>\n" |> Query.find [ Selector.tag "h1" ] |> Query.has [ Selector.text "Title" ]
+        ]

@@ -733,6 +733,7 @@ handlePortMessage tag value model =
                     in
                     ( { model
                         | editor = newEditor
+                        , fileTree = FileTree.select file.path model.fileTree
                         , previewHtml = html
                         , parseCache = cache
                         , frontmatter = frontmatter
@@ -1196,6 +1197,17 @@ viewDivider : DragTarget -> Html Msg
 viewDivider target =
     div
         [ class "divider"
+        , attribute "data-testid"
+            (case target of
+                DraggingSidebar ->
+                    "divider-sidebar"
+
+                DraggingEditor ->
+                    "divider-editor"
+
+                DraggingRightSidebar ->
+                    "divider-outline"
+            )
         , on "mousedown" (D.map (DividerMouseDown target) (D.field "clientX" D.float))
         , onDoubleClick (DividerDoubleClick target)
         ]
@@ -1272,7 +1284,7 @@ view model =
             ]
         , case model.errorMessage of
             Just message ->
-                div [ class "error-banner", onClick DismissError, title "Click to dismiss" ]
+                div [ class "error-banner", attribute "data-testid" "error-banner", onClick DismissError, title "Click to dismiss" ]
                     [ text message ]
 
             Nothing ->
@@ -1289,12 +1301,12 @@ viewOutline model =
         entries =
             List.filter (\e -> e.level <= model.outlineMaxLevel) model.outline
     in
-    div [ class "outline-pane" ]
+    div [ class "outline-pane", attribute "data-testid" "outline-pane" ]
         [ div [ class "pane-header" ]
             [ span [] [ text "Outline" ] ]
         , div [ class "outline-content" ]
             (if List.isEmpty entries then
-                [ div [ class "outline-empty" ] [ text "No headings" ] ]
+                [ div [ class "outline-empty", attribute "data-testid" "outline-empty" ] [ text "No headings" ] ]
 
              else
                 List.map viewOutlineEntry entries
@@ -1306,6 +1318,8 @@ viewOutlineEntry : Markdown.OutlineEntry -> Html Msg
 viewOutlineEntry entry =
     button
         [ class "outline-entry"
+        , attribute "data-testid" "outline-entry"
+        , attribute "data-heading-id" entry.id
         , class ("outline-level-" ++ String.fromInt entry.level)
         , onClick (ScrollToHeading entry.id)
         ]
@@ -1314,7 +1328,7 @@ viewOutlineEntry entry =
 
 viewTitleBar : Model -> Html Msg
 viewTitleBar model =
-    div [ class "titlebar" ]
+    div [ class "titlebar", attribute "data-testid" "titlebar" ]
         [ div [ class "titlebar-traffic-pad" ] []
         , div [ class "titlebar-title" ]
             [ span [ class "titlebar-app-name" ] [ text "Fence" ]
@@ -1322,7 +1336,7 @@ viewTitleBar model =
                 Just path ->
                     span []
                         [ span [ class "titlebar-separator" ] [ text " — " ]
-                        , span [ class "titlebar-filename" ]
+                        , span [ class "titlebar-filename", attribute "data-testid" "titlebar-filename" ]
                             [ text
                                 (baseName path
                                     ++ (if model.editor.dirtyState == Dirty then
@@ -1339,7 +1353,7 @@ viewTitleBar model =
                     text ""
             ]
         , div [ class "titlebar-actions" ]
-            [ button [ class "settings-btn", onClick ToggleSettings ] [ Icon.settings 16 ]
+            [ button [ class "settings-btn", attribute "data-testid" "settings-button", onClick ToggleSettings ] [ Icon.settings 16 ]
             , if model.settingsOpen then
                 viewSettingsDropdown model
 
@@ -1405,6 +1419,7 @@ viewSettingsDropdown model =
         [ div [ class "settings-backdrop", onClick CloseSettings ] []
         , div
             [ class "settings-dropdown"
+            , attribute "data-testid" "settings-dropdown"
             , attribute "role" "listbox"
             , attribute "aria-label" "Settings"
             ]
@@ -1493,6 +1508,15 @@ viewSettingsItem model toMsg activeValue idx ( itemValue, displayName ) =
     button
         [ class "settings-dropdown-item"
         , classList [ ( "active", isActive ) ]
+        , attribute "data-testid"
+            ("settings-item-"
+                ++ (if String.isEmpty itemValue then
+                        "default"
+
+                    else
+                        itemValue
+                   )
+            )
         , id (settingsItemId idx)
         , tabindex
             (if isFocused then

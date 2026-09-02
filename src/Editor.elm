@@ -1,8 +1,12 @@
 module Editor exposing
     ( Model
     , Msg(..)
+    , Token
+    , chunksOf
     , init
+    , lineTokens
     , markSaved
+    , maxHighlightedCharacters
     , setContent
     , update
     , view
@@ -81,19 +85,21 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    div [ class "editor-pane" ]
-        [ div [ class "pane-header" ]
+    div [ class "editor-pane", attribute "data-testid" "editor-pane" ]
+        [ div [ class "pane-header", attribute "data-testid" "editor-header" ]
             [ span []
                 [ text (headerText model) ]
             ]
         , div [ class "editor-container" ]
             [ pre
                 [ class "editor-highlight"
+                , attribute "data-testid" "editor-highlight"
                 , style "transform" ("translateY(-" ++ String.fromFloat model.scrollTop ++ "px)")
                 ]
                 [ code [] (highlightMarkdown model.content) ]
             , textarea
                 [ class "editor-textarea"
+                , attribute "data-testid" "editor-textarea"
                 , spellcheck False
                 , placeholder "Open a file to start editing..."
                 , value model.content
@@ -179,67 +185,98 @@ maxHighlightedCharacters =
     1500000
 
 
+{-| One run of overlay text with an optional highlight class. The overlay
+must be character-identical to the textarea, so the concatenated token text
+of a line is always the line itself (see EditorTest).
+-}
+type alias Token =
+    { class : Maybe String, text : String }
+
+
+plain : String -> Token
+plain str =
+    { class = Nothing, text = str }
+
+
+styled : String -> String -> Token
+styled cls str =
+    { class = Just cls, text = str }
+
+
 highlightLine : String -> Html msg
 highlightLine line =
+    span [] (List.map viewToken (lineTokens line))
+
+
+viewToken : Token -> Html msg
+viewToken token =
+    case token.class of
+        Just cls ->
+            span [ class cls ] [ text token.text ]
+
+        Nothing ->
+            text token.text
+
+
+lineTokens : String -> List Token
+lineTokens line =
     let
         trimmed =
             String.trimLeft line
 
-        leadingSpaces =
-            String.length line - String.length trimmed
+        indent =
+            String.left (String.length line - String.length trimmed) line
+
+        whole cls =
+            [ styled cls line ]
+
+        listItem markerLen =
+            plain indent
+                :: styled "md-list-marker" (String.left markerLen trimmed)
+                :: inlineTokens (String.dropLeft markerLen trimmed)
     in
     if String.startsWith "# " trimmed then
-        span [ class "md-h1" ] [ text line ]
+        whole "md-h1"
 
     else if String.startsWith "## " trimmed then
-        span [ class "md-h2" ] [ text line ]
+        whole "md-h2"
 
     else if String.startsWith "### " trimmed then
-        span [ class "md-h3" ] [ text line ]
+        whole "md-h3"
 
     else if String.startsWith "#### " trimmed then
-        span [ class "md-h4" ] [ text line ]
+        whole "md-h4"
 
     else if String.startsWith "##### " trimmed then
-        span [ class "md-h5" ] [ text line ]
+        whole "md-h5"
 
     else if String.startsWith "###### " trimmed then
-        span [ class "md-h6" ] [ text line ]
+        whole "md-h6"
 
     else if String.startsWith "```" trimmed then
-        span [ class "md-code-fence" ] [ text line ]
+        whole "md-code-fence"
 
     else if String.startsWith ">" trimmed then
-        span [ class "md-blockquote-marker" ] [ text line ]
+        whole "md-blockquote-marker"
 
     else if String.startsWith "- " trimmed || String.startsWith "* " trimmed || String.startsWith "+ " trimmed then
-        span []
-            [ text (String.left leadingSpaces line)
-            , span [ class "md-list-marker" ] [ text (String.left 2 trimmed) ]
-            , highlightInline (String.dropLeft 2 trimmed)
-            ]
+        listItem 2
 
     else if isOrderedListItem trimmed then
-        let
-            markerEnd =
-                case String.indexes ". " trimmed of
-                    i :: _ ->
-                        i + 2
+        listItem
+            (case String.indexes ". " trimmed of
+                i :: _ ->
+                    i + 2
 
-                    [] ->
-                        0
-        in
-        span []
-            [ text (String.left leadingSpaces line)
-            , span [ class "md-list-marker" ] [ text (String.left markerEnd trimmed) ]
-            , highlightInline (String.dropLeft markerEnd trimmed)
-            ]
+                [] ->
+                    0
+            )
 
     else if String.startsWith "---" trimmed || String.startsWith "***" trimmed || String.startsWith "___" trimmed then
-        span [ class "md-hr" ] [ text line ]
+        whole "md-hr"
 
     else
-        highlightInline line
+        inlineTokens line
 
 
 isOrderedListItem : String -> Bool
@@ -252,17 +289,14 @@ isOrderedListItem line =
             False
 
 
-highlightInline : String -> Html msg
-highlightInline line =
-    -- Highlight inline elements: bold, italic, links, code spans
-    let
-        parts =
-            parseInline line []
-    in
-    span [] parts
+{-| Inline elements: bold, italic, links, code spans.
+-}
+inlineTokens : String -> List Token
+inlineTokens line =
+    parseInline line []
 
 
-parseInline : String -> List (Html msg) -> List (Html msg)
+parseInline : String -> List Token -> List Token
 parseInline remaining acc =
     if String.isEmpty remaining then
         List.reverse acc
@@ -270,53 +304,41 @@ parseInline remaining acc =
     else if String.startsWith "**" remaining then
         case findClosing "**" (String.dropLeft 2 remaining) of
             Just ( inner, rest ) ->
-                parseInline rest
-                    (span [ class "md-bold-marker" ] [ text ("**" ++ inner ++ "**") ] :: acc)
+                parseInline rest (styled "md-bold-marker" ("**" ++ inner ++ "**") :: acc)
 
             Nothing ->
-                parseInline (String.dropLeft 2 remaining) (text "**" :: acc)
+                parseInline (String.dropLeft 2 remaining) (plain "**" :: acc)
 
     else if String.startsWith "*" remaining then
         case findClosing "*" (String.dropLeft 1 remaining) of
             Just ( inner, rest ) ->
-                parseInline rest
-                    (span [ class "md-italic-marker" ] [ text ("*" ++ inner ++ "*") ] :: acc)
+                parseInline rest (styled "md-italic-marker" ("*" ++ inner ++ "*") :: acc)
 
             Nothing ->
-                parseInline (String.dropLeft 1 remaining) (text "*" :: acc)
+                parseInline (String.dropLeft 1 remaining) (plain "*" :: acc)
 
     else if String.startsWith "`" remaining then
         case findClosing "`" (String.dropLeft 1 remaining) of
             Just ( inner, rest ) ->
-                parseInline rest
-                    (span [ class "md-code-span" ] [ text ("`" ++ inner ++ "`") ] :: acc)
+                parseInline rest (styled "md-code-span" ("`" ++ inner ++ "`") :: acc)
 
             Nothing ->
-                parseInline (String.dropLeft 1 remaining) (text "`" :: acc)
+                parseInline (String.dropLeft 1 remaining) (plain "`" :: acc)
 
     else if String.startsWith "[" remaining then
         case parseLinkMarkdown (String.dropLeft 1 remaining) of
             Just ( linkText, url, rest ) ->
-                parseInline rest
-                    (span [ class "md-link" ] [ text ("[" ++ linkText ++ "](" ++ url ++ ")") ] :: acc)
+                parseInline rest (styled "md-link" ("[" ++ linkText ++ "](" ++ url ++ ")") :: acc)
 
             Nothing ->
-                parseInline (String.dropLeft 1 remaining) (text "[" :: acc)
+                parseInline (String.dropLeft 1 remaining) (plain "[" :: acc)
 
     else
         let
-            nextSpecial =
-                findNextSpecial remaining
-
-            ( plain, rest ) =
-                case nextSpecial of
-                    0 ->
-                        ( String.left 1 remaining, String.dropLeft 1 remaining )
-
-                    n ->
-                        ( String.left n remaining, String.dropLeft n remaining )
+            n =
+                Basics.max 1 (findNextSpecial remaining)
         in
-        parseInline rest (text plain :: acc)
+        parseInline (String.dropLeft n remaining) (plain (String.left n remaining) :: acc)
 
 
 findNextSpecial : String -> Int

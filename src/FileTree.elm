@@ -6,6 +6,7 @@ module FileTree exposing
     , handleFolderOpened
     , handleFsEvent
     , init
+    , select
     , update
     , view
     )
@@ -165,6 +166,36 @@ update msg model =
                     visiblePaths model
             in
             moveFocusTo (List.head (List.reverse paths)) model
+
+
+{-| Drop selection/focus that pointed at a path that no longer exists
+(the path itself, or anything inside a removed directory).
+-}
+forget : FilePath -> Model -> Model
+forget path model =
+    let
+        gone p =
+            p == path || String.startsWith (path ++ "/") p
+
+        clear =
+            Maybe.andThen
+                (\p ->
+                    if gone p then
+                        Nothing
+
+                    else
+                        Just p
+                )
+    in
+    { model | selected = clear model.selected, focused = clear model.focused }
+
+
+{-| Mark a file as the open one without reading it, for files opened from
+outside the tree (CLI argument, Finder, "Open With").
+-}
+select : FilePath -> Model -> Model
+select path model =
+    { model | selected = Just path, focused = Just path }
 
 
 {-| Move focus to the given path. For files, also select and read them.
@@ -392,10 +423,10 @@ handleFsEvent event path model =
                     { model | root = Just (addChild (dirName path) entry root) }
 
                 "unlink" ->
-                    { model | root = Just (removeChild path root) }
+                    forget path { model | root = Just (removeChild path root) }
 
                 "unlinkDir" ->
-                    { model | root = Just (removeChild path root) }
+                    forget path { model | root = Just (removeChild path root) }
 
                 _ ->
                     model
@@ -477,10 +508,10 @@ dirName path =
 
 view : Model -> Html Msg
 view model =
-    div [ class "sidebar" ]
+    div [ class "sidebar", attribute "data-testid" "sidebar" ]
         [ div [ class "sidebar-header" ]
             [ span [ class "sidebar-title" ] [ text "Workspace" ]
-            , button [ class "open-folder-btn", onClick OpenFolder ] [ Icon.folderPlus 16 ]
+            , button [ class "open-folder-btn", attribute "data-testid" "open-folder-button", onClick OpenFolder ] [ Icon.folderPlus 16 ]
             ]
         , div [ class "sidebar-content" ]
             [ case model.root of
@@ -490,6 +521,7 @@ view model =
                 Just root ->
                     ul
                         [ class "file-tree"
+                        , attribute "data-testid" "file-tree"
                         , attribute "role" "tree"
                         , attribute "aria-label" "File tree"
                         , preventDefaultOn "keydown" (treeKeyDecoder model)
@@ -581,6 +613,7 @@ viewEntry model depth entry =
                         ]
                     , id (treeItemId entryPath)
                     , attribute "data-path" entryPath
+                    , attribute "data-testid" "tree-dir"
                     , tabindex
                         (if isFocused then
                             0
@@ -638,6 +671,7 @@ viewEntry model depth entry =
                         ]
                     , id (treeItemId entryPath)
                     , attribute "data-path" entryPath
+                    , attribute "data-testid" "tree-file"
                     , tabindex
                         (if isFocused then
                             0

@@ -28,7 +28,7 @@
     "test": "bun run test:elm && bun run test:node",
     "test:elm": "elm-test --compiler node_modules/.bin/elm",
     "test:node": "node --test electron/*.test.js",
-    "test:e2e": "node --test e2e/*.test.js",
+    "test:e2e": "node --test --test-concurrency=1 e2e/*.test.js",
     "build": "vite build && electron-builder",
     "build:mac": "vite build && electron-builder --mac",
     "build:win": "vite build && electron-builder --win",

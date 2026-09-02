@@ -7,11 +7,11 @@ import Yaml
 
 view : Maybe Yaml.Value -> List (Html msg) -> Html msg
 view frontmatter renderedHtml =
-    div [ class "preview-pane" ]
+    div [ class "preview-pane", attribute "data-testid" "preview-pane" ]
         [ div [ class "pane-header" ]
             [ span [] [ text "Preview" ] ]
-        , div [ id "preview-container", class "preview-container" ]
-            [ div [ class "preview-content" ]
+        , div [ id "preview-container", class "preview-container", attribute "data-testid" "preview-container" ]
+            [ div [ class "preview-content", attribute "data-testid" "preview-content" ]
                 (if List.isEmpty renderedHtml then
                     [ welcomeView ]
 
@@ -26,7 +26,7 @@ viewFrontmatter : Maybe Yaml.Value -> List (Html msg)
 viewFrontmatter maybeFm =
     case maybeFm of
         Just (Yaml.Object_ fields) ->
-            [ details [ class "frontmatter" ]
+            [ details [ class "frontmatter", attribute "data-testid" "frontmatter" ]
                 [ summary []
                     [ text ("Metadata (" ++ String.fromInt (List.length fields) ++ " fields)") ]
                 , dl [ class "frontmatter-grid" ]
@@ -90,7 +90,7 @@ viewValue value =
 
 welcomeView : Html msg
 welcomeView =
-    div [ class "welcome" ]
+    div [ class "welcome", attribute "data-testid" "preview-welcome" ]
         [ h1 [ class "welcome-title" ] [ text "Fence" ]
         , p [ class "welcome-subtitle" ] [ text "A split-view markdown editor" ]
         , div [ class "welcome-hints" ]

@@ -6,6 +6,12 @@ const { pathToFileURL } = require("node:url");
 const fsOps = require("./fs-ops");
 const { autoUpdater } = require("electron-updater");
 
+// Tests point this at a temp dir so they never touch the real state.json,
+// recovery drafts or single-instance lock. Must run before the lock below.
+if (process.env.FENCE_USER_DATA) {
+  app.setPath("userData", process.env.FENCE_USER_DATA);
+}
+
 const MAX_RECENT_WORKSPACES = 20;
 
 function getStatePath() {

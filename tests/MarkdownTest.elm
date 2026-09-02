@@ -80,6 +80,8 @@ chunkSuite =
             docs
             ++ [ test "html doc is a single chunk" <|
                     \_ -> Markdown.splitChunks "<div>\n\n# T\n\n</div>" |> List.length |> Expect.equal 1
+               , test "leading blank lines never produce an empty chunk" <|
+                    \_ -> Markdown.splitChunks "\n\n# A\n\nx" |> Expect.equal [ "\n\n# A\n\nx" ]
                , test "splits at blank-line-preceded headings" <|
                     \_ -> Markdown.splitChunks "# A\n\nx\n\n# B\n\ny" |> Expect.equal [ "# A\n\nx", "\n# B\n\ny" ]
                , test "indented code before a heading: chunked drops trailing blanks (whole-doc elm-markdown keeps them)" <|

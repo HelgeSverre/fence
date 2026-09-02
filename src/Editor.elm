@@ -17,6 +17,7 @@ import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Html.Lazy
 import Json.Decode as D
+import Regex
 import Types exposing (..)
 
 
@@ -170,12 +171,18 @@ linesPerChunk =
 
 chunksOf : Int -> List a -> List (List a)
 chunksOf n items =
+    -- tail-recursive: a 500k-line document is ~8k chunks, past the JS stack
+    chunksOfHelp n items []
+
+
+chunksOfHelp : Int -> List a -> List (List a) -> List (List a)
+chunksOfHelp n items acc =
     case items of
         [] ->
-            []
+            List.reverse acc
 
         _ ->
-            List.take n items :: chunksOf n (List.drop n items)
+            chunksOfHelp n (List.drop n items) (List.take n items :: acc)
 
 
 maxHighlightedCharacters : Int
@@ -342,52 +349,106 @@ parseInline remaining acc =
 
 
 {-| Code-unit index of the next inline delimiter, or the string length.
-Must be code-unit based (like `String.left`/`String.dropLeft`), not a
-`String.toList` position: splitting a string inside a surrogate pair leaves a
-lone surrogate, on which elm/core's string folds never terminate.
+
+Two constraints: it must be code-unit based (like `String.left`), never a
+`String.toList` position, or a surrogate pair gets split and elm/core's
+string folds hang on the lone surrogate; and it must stop at the first hit,
+because `String.indexes` scans the whole remainder and turns a long line
+with many delimiters quadratic (a 200k-char line took 87s).
 -}
 findNextSpecial : String -> Int
 findNextSpecial str =
-    [ "*", "`", "[" ]
-        |> List.filterMap (\delimiter -> List.head (String.indexes delimiter str))
-        |> List.minimum
-        |> Maybe.withDefault (String.length str)
+    firstIndex nextSpecialRegex str |> Maybe.withDefault (String.length str)
+
+
+nextSpecialRegex : Regex.Regex
+nextSpecialRegex =
+    Regex.fromString "[*`\\[]" |> Maybe.withDefault Regex.never
+
+
+firstIndex : Regex.Regex -> String -> Maybe Int
+firstIndex regex str =
+    Regex.findAtMost 1 regex str |> List.head |> Maybe.map .index
+
+
+literal : String -> Regex.Regex
+literal delimiter =
+    Regex.fromString (escapeRegex delimiter) |> Maybe.withDefault Regex.never
+
+
+specialRegexChars : Regex.Regex
+specialRegexChars =
+    Regex.fromString "[.*+?^${}()|\\[\\]\\\\]" |> Maybe.withDefault Regex.never
+
+
+escapeRegex : String -> String
+escapeRegex =
+    Regex.replace specialRegexChars (\m -> "\\" ++ m.match)
+
+
+closingBold : Regex.Regex
+closingBold =
+    literal "**"
+
+
+closingItalic : Regex.Regex
+closingItalic =
+    literal "*"
+
+
+closingCode : Regex.Regex
+closingCode =
+    literal "`"
+
+
+linkMiddle : Regex.Regex
+linkMiddle =
+    literal "]("
+
+
+linkEnd : Regex.Regex
+linkEnd =
+    literal ")"
 
 
 findClosing : String -> String -> Maybe ( String, String )
 findClosing delimiter str =
-    case String.indexes delimiter str of
-        i :: _ ->
-            Just
+    let
+        regex =
+            case delimiter of
+                "**" ->
+                    closingBold
+
+                "*" ->
+                    closingItalic
+
+                _ ->
+                    closingCode
+    in
+    firstIndex regex str
+        |> Maybe.map
+            (\i ->
                 ( String.left i str
                 , String.dropLeft (i + String.length delimiter) str
                 )
-
-        [] ->
-            Nothing
+            )
 
 
 parseLinkMarkdown : String -> Maybe ( String, String, String )
 parseLinkMarkdown str =
-    case String.indexes "](" str of
-        i :: _ ->
-            let
-                linkText =
-                    String.left i str
-
-                afterBracket =
-                    String.dropLeft (i + 2) str
-            in
-            case String.indexes ")" afterBracket of
-                j :: _ ->
-                    Just
-                        ( linkText
-                        , String.left j afterBracket
-                        , String.dropLeft (j + 1) afterBracket
+    firstIndex linkMiddle str
+        |> Maybe.andThen
+            (\i ->
+                let
+                    afterBracket =
+                        String.dropLeft (i + 2) str
+                in
+                firstIndex linkEnd afterBracket
+                    |> Maybe.map
+                        (\j ->
+                            ( String.left i str
+                            , String.left j afterBracket
+                            , String.dropLeft (j + 1) afterBracket
+                            )
                         )
-
-                [] ->
-                    Nothing
-
-        [] ->
-            Nothing
+            )

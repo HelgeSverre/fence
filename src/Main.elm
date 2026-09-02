@@ -786,7 +786,9 @@ handlePortMessage tag value model =
                         ( { resaveModel | closeAfterSave = True }, resaveCmd )
 
                     else
-                        ( updatedModel
+                        -- The pending close is consumed here; leaving it set
+                        -- would turn the next ordinary save into a close.
+                        ( { updatedModel | closeAfterSave = False }
                         , Cmd.batch
                             [ setTitleCmd newEditor
                             , setDirtyCmd (newEditor.dirtyState == Dirty)

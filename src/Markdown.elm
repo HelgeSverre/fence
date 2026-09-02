@@ -150,7 +150,13 @@ splitChunks source =
                                     splitWhile (String.trim >> String.isEmpty) state.current
                             in
                             { state
-                                | done = String.join "\n" (List.reverse body) :: state.done
+                                | done =
+                                    -- only blank lines so far: nothing to emit yet
+                                    if List.isEmpty body then
+                                        state.done
+
+                                    else
+                                        String.join "\n" (List.reverse body) :: state.done
                                 , current = line :: blanks
                                 , prevBlank = False
                                 , openFence = fence

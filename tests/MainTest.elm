@@ -292,6 +292,13 @@ fileSuite =
                     |> edit "changed"
                     |> step (fromElectron "saveAndClose" [])
                     |> (\m -> Expect.equal ( True, Just "changed" ) ( m.closeAfterSave, m.savingContent ))
+        , test "a completed save-and-close leaves no pending close behind" <|
+            \_ ->
+                opened
+                    |> edit "changed"
+                    |> step (fromElectron "saveAndClose" [])
+                    |> step (fromElectron "fileSaved" [ ( "path", E.string "/notes/a.md" ), ( "revision", E.string "rev-2" ) ])
+                    |> (\m -> Expect.equal ( False, Nothing, Clean ) ( m.closeAfterSave, m.savingContent, m.editor.dirtyState ))
         , test "cancelling the save dialog abandons the pending close" <|
             \_ ->
                 opened

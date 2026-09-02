@@ -4,6 +4,7 @@ import Array
 import Expect
 import Fuzz
 import Html
+import Json.Decode as D
 import Test exposing (Test, describe, fuzz3, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
@@ -12,7 +13,7 @@ import VirtualEditor
 
 metrics : VirtualEditor.Metrics
 metrics =
-    { lineHeight = 20, charWidth = 8, viewportHeight = 200 }
+    { lineHeight = 20, charWidth = 8, viewportHeight = 200, viewportWidth = 400 }
 
 
 suite : Test
@@ -52,12 +53,25 @@ suite =
                     lines =
                         Array.initialize 10000 (\i -> "line " ++ String.fromInt i)
                 in
-                VirtualEditor.view { onScroll = always (), highlightLine = Html.text } metrics 2000 8 lines
+                VirtualEditor.view
+                    { onScroll = always ()
+                    , highlightLine = Html.text
+                    , keyDecoder = D.fail "n/a"
+                    , onInput = always ()
+                    , onPaste = always ()
+                    , onPointerDown = \_ _ -> ()
+                    , cursor = { line = 95, col = 3 }
+                    }
+                    metrics
+                    2000
+                    8
+                    lines
                     |> Query.fromHtml
                     |> Expect.all
                         [ Query.findAll [ Selector.class "veditor-row" ] >> Query.count (Expect.equal 30)
                         , Query.find [ Selector.class "veditor-spacer" ] >> Query.has [ Selector.style "height" "200000px" ]
                         , Query.find [ Selector.class "veditor-rows" ] >> Query.has [ Selector.style "top" "1800px" ]
                         , Query.findAll [ Selector.class "veditor-row" ] >> Query.first >> Query.has [ Selector.text "line 90" ]
+                        , Query.find [ Selector.class "veditor-caret" ] >> Query.has [ Selector.style "left" "24px", Selector.style "top" "1900px" ]
                         ]
         ]

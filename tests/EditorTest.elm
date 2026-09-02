@@ -1,6 +1,8 @@
 module EditorTest exposing (suite)
 
 import Editor
+import Json.Decode as D
+import Json.Encode as E
 import Expect
 import Fuzz
 import Test exposing (Test, describe, fuzz, test)
@@ -10,7 +12,7 @@ import Types exposing (DirtyState(..))
 suite : Test
 suite =
     describe "Editor"
-        [ stateSuite, overlaySuite, progressiveOverlaySuite ]
+        [ stateSuite, overlaySuite, progressiveOverlaySuite, editingSuite ]
 
 
 stateSuite : Test
@@ -158,4 +160,107 @@ progressiveOverlaySuite =
                     |> Editor.update (Editor.ContentChanged (bigDoc ++ "x"))
                     |> .overlayLines
                     |> Expect.equal (Editor.update Editor.OverlayStep opened).overlayLines
+        ]
+
+
+
+editingSuite : Test
+editingSuite =
+    let
+        opened =
+            Editor.setContent "/n/a.md" "hello\nworld" "r" False Editor.init
+
+        type_ chars m =
+            List.foldl (\c -> Editor.update (Editor.KeyPressed (Editor.Char c))) m (String.split "" chars)
+
+        press key =
+            Editor.update (Editor.KeyPressed key)
+
+        keyEvent key mods =
+            E.object
+                ([ ( "key", E.string key ), ( "metaKey", E.bool False ), ( "ctrlKey", E.bool False ), ( "shiftKey", E.bool False ), ( "altKey", E.bool False ) ]
+                    |> List.map (\( k, v ) -> ( k, if List.member k mods then E.bool True else v ))
+                )
+
+        decode key mods =
+            D.decodeValue Editor.keyDecoder (keyEvent key mods) |> Result.toMaybe
+    in
+    describe "virtual editing"
+        [ test "typing inserts at the caret, dirties the document and keeps content and lines in sync" <|
+            \_ ->
+                opened
+                    |> press Editor.End
+                    |> type_ "!!"
+                    |> (\m -> Expect.equal ( "hello!!\nworld", Dirty, { line = 0, col = 7 } ) ( m.content, m.dirtyState, m.cursor ))
+        , test "a run of typed characters is one undo step" <|
+            \_ ->
+                opened
+                    |> type_ "abc"
+                    |> Editor.update Editor.Undo
+                    |> .content
+                    |> Expect.equal "hello\nworld"
+        , test "a space ends the run so words undo separately" <|
+            \_ ->
+                opened
+                    |> type_ "ab"
+                    |> Editor.update (Editor.InsertText " ")
+                    |> type_ "cd"
+                    |> Editor.update Editor.Undo
+                    |> .content
+                    |> Expect.equal "ab hello\nworld"
+        , test "undo restores the caret and redo re-applies" <|
+            \_ ->
+                let
+                    edited =
+                        opened |> press Editor.Right |> type_ "X"
+
+                    undone =
+                        Editor.update Editor.Undo edited
+                in
+                Expect.equal
+                    ( ( "hello\nworld", { line = 0, col = 1 } ), ( "hXello\nworld", { line = 0, col = 2 } ) )
+                    ( ( undone.content, undone.cursor ), (Editor.update Editor.Redo undone |> (\m -> ( m.content, m.cursor ))) )
+        , test "a new edit clears the redo stack" <|
+            \_ ->
+                opened |> type_ "a" |> Editor.update Editor.Undo |> type_ "b" |> Editor.update Editor.Redo |> .content |> Expect.equal "bhello\nworld"
+        , test "enter, tab and shift-tab" <|
+            \_ ->
+                opened
+                    |> press Editor.End
+                    |> press Editor.Enter
+                    |> press Editor.Tab
+                    |> type_ "x"
+                    |> press Editor.ShiftTab
+                    |> .content
+                    |> Expect.equal "hello\nx\nworld"
+        , test "pasted multi-line text lands the caret after it" <|
+            \_ -> opened |> Editor.update (Editor.InsertText "1\n22") |> (\m -> ( m.content, m.cursor )) |> Expect.equal ( "1\n22hello\nworld", { line = 1, col = 2 } )
+        , test "a pointer press maps pixels to a line and column" <|
+            \_ ->
+                opened
+                    |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 400, viewportWidth = 400 })
+                    |> Editor.update (Editor.PointerDown 33 25)
+                    |> .cursor
+                    |> Expect.equal { line = 1, col = 3 }
+        , test "opening a file resets the caret and history" <|
+            \_ -> opened |> type_ "zzz" |> Editor.setContent "/n/b.md" "new" "r2" False |> (\m -> ( m.cursor, m.undo )) |> Expect.equal ( { line = 0, col = 0 }, [] )
+        , test "the key decoder maps editing keys and lets app shortcuts through" <|
+            \_ ->
+                [ decode "a" [] |> Maybe.map Tuple.first
+                , decode "Enter" [] |> Maybe.map Tuple.first
+                , decode "z" [ "metaKey" ] |> Maybe.map Tuple.first
+                , decode "z" [ "metaKey", "shiftKey" ] |> Maybe.map Tuple.first
+                , decode "s" [ "metaKey" ] |> Maybe.map Tuple.first
+                , decode "1" [ "metaKey" ] |> Maybe.map Tuple.first
+                , decode "Shift" [] |> Maybe.map Tuple.first
+                ]
+                    |> Expect.equal [ Just (Editor.KeyPressed (Editor.Char "a")), Just (Editor.KeyPressed Editor.Enter), Just Editor.Undo, Just Editor.Redo, Nothing, Nothing, Nothing ]
+        , test "the caret scroll target is only set when the caret leaves the viewport" <|
+            \_ ->
+                let
+                    m =
+                        Editor.setContent "/n/a.md" (String.repeat 100 "l\n") "r" False Editor.init
+                            |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 200, viewportWidth = 400 })
+                in
+                ( Editor.caretScroll m, Editor.caretScroll (press Editor.DocEnd m) |> Maybe.map .top ) |> Expect.equal ( Nothing, Just (100 * 20 + 20 + 32 - 200) )
         ]

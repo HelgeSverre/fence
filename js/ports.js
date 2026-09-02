@@ -2,6 +2,7 @@ import { setupEditorKeys } from "./editor-keys.js";
 import { reRenderMermaid } from "./mermaid-init.js";
 import { applyFontFamily, applyFontSizesFromState } from "./font-settings.js";
 import { setupEditorMetrics, remeasureEditorMetrics } from "./editor-metrics.js";
+import { setupVirtualInput } from "./virtual-input.js";
 
 export function wirePorts(app) {
   if (!app.ports) return;
@@ -79,4 +80,5 @@ export function wirePorts(app) {
 
   setupEditorKeys();
   setupEditorMetrics(app);
+  setupVirtualInput();
 }

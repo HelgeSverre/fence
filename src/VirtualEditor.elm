@@ -1,5 +1,7 @@
 module VirtualEditor exposing
-    ( Metrics
+    ( Config
+    , Metrics
+    , caretPosition
     , defaultMetrics
     , metricsDecoder
     , view
@@ -13,10 +15,12 @@ docs/plans/2026-09-02-virtualized-editor.md.
 -}
 
 import Array exposing (Array)
-import Html exposing (Html, div)
-import Html.Attributes exposing (attribute, class, id, style)
-import Html.Events exposing (on)
+import Html exposing (Html, div, textarea)
+import Html.Attributes exposing (attribute, class, id, spellcheck, style, value)
+import Html.Events exposing (on, preventDefaultOn)
+import Html.Lazy
 import Json.Decode as D
+import TextBuffer exposing (Cursor)
 
 
 {-| Measured once per font/size change by js/editor-metrics.js. -}
@@ -24,20 +28,45 @@ type alias Metrics =
     { lineHeight : Float
     , charWidth : Float
     , viewportHeight : Float
+    , viewportWidth : Float
     }
 
 
 defaultMetrics : Metrics
 defaultMetrics =
-    { lineHeight = 22.4, charWidth = 8.4, viewportHeight = 800 }
+    { lineHeight = 22.4, charWidth = 8.4, viewportHeight = 800, viewportWidth = 800 }
 
 
 metricsDecoder : D.Decoder Metrics
 metricsDecoder =
-    D.map3 Metrics
+    D.map4 Metrics
         (D.field "lineHeight" D.float)
         (D.field "charWidth" D.float)
         (D.field "viewportHeight" D.float)
+        (D.field "viewportWidth" D.float)
+
+
+{-| Pixel position of the caret inside the spacer (before padding). -}
+caretPosition : Metrics -> Array String -> Cursor -> { x : Float, y : Float }
+caretPosition metrics lines cursor =
+    let
+        line =
+            Array.get cursor.line lines |> Maybe.withDefault ""
+    in
+    { x = toFloat (TextBuffer.visualColumn line cursor.col) * metrics.charWidth
+    , y = toFloat cursor.line * metrics.lineHeight
+    }
+
+
+type alias Config msg =
+    { onScroll : Float -> msg
+    , highlightLine : String -> Html msg
+    , keyDecoder : D.Decoder ( msg, Bool )
+    , onInput : String -> msg
+    , onPaste : String -> msg
+    , onPointerDown : Float -> Float -> msg
+    , cursor : Cursor
+    }
 
 
 {-| Rows to render for a scroll position: the visible ones plus `overscan`
@@ -62,13 +91,7 @@ overscan =
     10
 
 
-view :
-    { onScroll : Float -> msg, highlightLine : String -> Html msg }
-    -> Metrics
-    -> Float
-    -> Int
-    -> Array String
-    -> Html msg
+view : Config msg -> Metrics -> Float -> Int -> Array String -> Html msg
 view config metrics scrollTop maxLineLength lines =
     let
         lineCount =
@@ -79,6 +102,9 @@ view config metrics scrollTop maxLineLength lines =
 
         px n =
             String.fromFloat n ++ "px"
+
+        caret =
+            caretPosition metrics lines config.cursor
     in
     div
         [ class "veditor"
@@ -89,7 +115,10 @@ view config metrics scrollTop maxLineLength lines =
         [ div
             [ class "veditor-spacer"
             , style "height" (px (toFloat lineCount * metrics.lineHeight))
-            , style "min-width" (px (toFloat maxLineLength * metrics.charWidth))
+            , style "min-width" (px (toFloat (maxLineLength + 1) * metrics.charWidth))
+
+            -- rows have pointer-events: none, so offsets are relative to the spacer
+            , preventDefaultOn "mousedown" (D.map2 (\x y -> ( config.onPointerDown x y, True )) (D.field "offsetX" D.float) (D.field "offsetY" D.float))
             ]
             [ div
                 [ class "veditor-rows"
@@ -98,7 +127,46 @@ view config metrics scrollTop maxLineLength lines =
                 ]
                 (Array.slice from to lines
                     |> Array.toList
-                    |> List.map (\line -> div [ class "veditor-row", style "height" (px metrics.lineHeight) ] [ config.highlightLine line ])
+                    -- lazy: only the edited row re-tokenizes and re-diffs
+                    |> List.map (\line -> div [ class "veditor-row", style "height" (px metrics.lineHeight) ] [ Html.Lazy.lazy config.highlightLine line ])
                 )
+            , div
+                [ class "veditor-caret"
+                , attribute "data-testid" "veditor-caret"
+                , style "left" (px caret.x)
+                , style "top" (px caret.y)
+                , style "height" (px metrics.lineHeight)
+                ]
+                []
+            , -- Hidden input under the caret: receives keys, IME composition (so
+              -- the candidate window appears in place) and paste. Cleared by
+              -- js/virtual-input.js after each committed input.
+              textarea
+                [ class "veditor-input"
+                , id "veditor-input"
+                , attribute "data-testid" "veditor-input"
+                , style "left" (px caret.x)
+                , style "top" (px caret.y)
+                , style "height" (px metrics.lineHeight)
+                , spellcheck False
+                , attribute "autocomplete" "off"
+                , attribute "autocorrect" "off"
+                , attribute "autocapitalize" "off"
+                , attribute "aria-label" "Editor"
+                , preventDefaultOn "keydown" config.keyDecoder
+                , on "input"
+                    (D.field "isComposing" D.bool
+                        |> D.andThen
+                            (\composing ->
+                                if composing then
+                                    D.fail "still composing"
+
+                                else
+                                    D.map config.onInput (D.at [ "target", "value" ] D.string)
+                            )
+                    )
+                , on "fencepaste" (D.map config.onPaste (D.field "detail" D.string))
+                ]
+                []
             ]
         ]

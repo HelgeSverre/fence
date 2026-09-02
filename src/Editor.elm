@@ -4,7 +4,10 @@ module Editor exposing
     , Token
     , chunksOf
     , init
+    , Key(..)
+    , caretScroll
     , highlightLine
+    , keyDecoder
     , lineTokens
     , overlayPending
     , markSaved
@@ -21,6 +24,7 @@ import Html.Events exposing (..)
 import Html.Lazy
 import Json.Decode as D
 import Regex
+import TextBuffer exposing (Cursor)
 import Types exposing (..)
 import VirtualEditor
 
@@ -35,7 +39,40 @@ type alias Model =
     , lines : Array String -- the content split by line, for the virtual view
     , maxLineLength : Int
     , metrics : VirtualEditor.Metrics
+    , cursor : Cursor
+    , undo : List Snapshot
+    , redo : List Snapshot
+    , coalesce : Coalesce -- what kind of edit the top undo entry may absorb
     }
+
+
+type alias Snapshot =
+    { lines : Array String, cursor : Cursor }
+
+
+type Coalesce
+    = NoCoalesce
+    | Typing
+    | Deleting
+
+
+type Key
+    = Left
+    | Right
+    | Up
+    | Down
+    | Home
+    | End
+    | DocStart
+    | DocEnd
+    | PageUp
+    | PageDown
+    | Backspace
+    | DeleteKey
+    | Enter
+    | Tab
+    | ShiftTab
+    | Char String
 
 
 type Msg
@@ -43,6 +80,11 @@ type Msg
     | ScrollChanged Float
     | OverlayStep
     | MetricsChanged VirtualEditor.Metrics
+    | KeyPressed Key
+    | InsertText String
+    | PointerDown Float Float
+    | Undo
+    | Redo
 
 
 init : Model
@@ -56,6 +98,10 @@ init =
     , lines = Array.empty
     , maxLineLength = 0
     , metrics = VirtualEditor.defaultMetrics
+    , cursor = TextBuffer.docStart
+    , undo = []
+    , redo = []
+    , coalesce = NoCoalesce
     }
 
 
@@ -75,6 +121,10 @@ setContent path content revision dirty model =
         , overlayLines = initialOverlay content
         , lines = splitLines content
         , maxLineLength = longestLine content
+        , cursor = TextBuffer.docStart
+        , undo = []
+        , redo = []
+        , coalesce = NoCoalesce
     }
 
 
@@ -97,13 +147,57 @@ update msg model =
         ContentChanged content ->
             -- ponytail: re-splits the whole document per keystroke (~ms at 10k
             -- lines); slice 2 of the virtual editor edits lines in place.
-            { model | content = content, dirtyState = Dirty, lines = splitLines content, maxLineLength = longestLine content }
+            { model | content = content, dirtyState = Dirty, lines = splitLines content, maxLineLength = longestLine content, cursor = TextBuffer.clampCursor (splitLines content) model.cursor }
 
         ScrollChanged scrollTop ->
             { model | scrollTop = scrollTop }
 
         MetricsChanged metrics ->
             { model | metrics = metrics }
+
+        KeyPressed key ->
+            keyPressed key model
+
+        InsertText text ->
+            if String.isEmpty text then
+                model
+
+            else
+                edit
+                    (if String.length text == 1 && text /= "\n" && text /= " " then
+                        Typing
+
+                     else
+                        NoCoalesce
+                    )
+                    (TextBuffer.insert text)
+                    model
+
+        PointerDown x y ->
+            let
+                line =
+                    clamp 0 (Basics.max 0 (Array.length model.lines - 1)) (floor (y / model.metrics.lineHeight))
+
+                text =
+                    Array.get line model.lines |> Maybe.withDefault ""
+            in
+            { model | cursor = { line = line, col = TextBuffer.columnFromVisual text (round (x / model.metrics.charWidth)) }, coalesce = NoCoalesce }
+
+        Undo ->
+            case model.undo of
+                snapshot :: rest ->
+                    restore snapshot { model | undo = rest, redo = { lines = model.lines, cursor = model.cursor } :: model.redo }
+
+                [] ->
+                    model
+
+        Redo ->
+            case model.redo of
+                snapshot :: rest ->
+                    restore snapshot { model | redo = rest, undo = { lines = model.lines, cursor = model.cursor } :: model.undo }
+
+                [] ->
+                    model
 
         OverlayStep ->
             case model.overlayLines of
@@ -124,6 +218,236 @@ update msg model =
                 Nothing ->
                     model
 
+
+keyPressed : Key -> Model -> Model
+keyPressed key model =
+    let
+        move f =
+            { model | cursor = f model.cursor model.lines, coalesce = NoCoalesce }
+
+        pageRows =
+            Basics.max 1 (floor (model.metrics.viewportHeight / model.metrics.lineHeight) - 1)
+    in
+    case key of
+        Left ->
+            move TextBuffer.moveLeft
+
+        Right ->
+            move TextBuffer.moveRight
+
+        Up ->
+            move (TextBuffer.moveUp 1)
+
+        Down ->
+            move (TextBuffer.moveDown 1)
+
+        PageUp ->
+            move (TextBuffer.moveUp pageRows)
+
+        PageDown ->
+            move (TextBuffer.moveDown pageRows)
+
+        Home ->
+            move (\c _ -> TextBuffer.lineStart c)
+
+        End ->
+            move TextBuffer.lineEnd
+
+        DocStart ->
+            move (\_ _ -> TextBuffer.docStart)
+
+        DocEnd ->
+            move (\_ lines -> TextBuffer.docEnd lines)
+
+        Char c ->
+            edit Typing (TextBuffer.insert c) model
+
+        Enter ->
+            edit NoCoalesce (TextBuffer.insert "\n") model
+
+        Tab ->
+            edit NoCoalesce (TextBuffer.insert "\t") model
+
+        ShiftTab ->
+            edit NoCoalesce TextBuffer.unindentLine model
+
+        Backspace ->
+            edit Deleting TextBuffer.backspace model
+
+        DeleteKey ->
+            edit Deleting TextBuffer.deleteForward model
+
+
+{-| Apply a buffer edit, recording an undo snapshot unless it coalesces with
+the previous edit of the same kind (a run of typed characters or deletions).
+-}
+edit : Coalesce -> (Cursor -> Array String -> ( Array String, Cursor )) -> Model -> Model
+edit kind op model =
+    let
+        ( lines, cursor ) =
+            op model.cursor model.lines
+
+        undo =
+            if kind /= NoCoalesce && kind == model.coalesce then
+                model.undo
+
+            else
+                { lines = model.lines, cursor = model.cursor } :: List.take undoLimit model.undo
+    in
+    if lines == model.lines then
+        { model | cursor = cursor }
+
+    else
+        { model
+            | lines = lines
+            , cursor = cursor
+            , content = TextBuffer.toString lines -- ponytail: O(n) join per keystroke (~1ms at 10k lines)
+            , maxLineLength = Basics.max model.maxLineLength (String.length (Array.get cursor.line lines |> Maybe.withDefault ""))
+            , dirtyState = Dirty
+            , undo = undo
+            , redo = []
+            , coalesce = kind
+        }
+
+
+restore : Snapshot -> Model -> Model
+restore snapshot model =
+    { model
+        | lines = snapshot.lines
+        , cursor = TextBuffer.clampCursor snapshot.lines snapshot.cursor
+        , content = TextBuffer.toString snapshot.lines
+        , maxLineLength = Array.foldl (\l m -> Basics.max m (String.length l)) 0 snapshot.lines
+        , dirtyState = Dirty
+        , coalesce = NoCoalesce
+    }
+
+
+undoLimit : Int
+undoLimit =
+    200
+
+
+{-| Where the virtual editor must scroll so the caret is visible, if it is
+not already. -}
+caretScroll : Model -> Maybe { left : Float, top : Float }
+caretScroll model =
+    let
+        m =
+            model.metrics
+
+        caret =
+            VirtualEditor.caretPosition m model.lines model.cursor
+
+        top =
+            if caret.y < model.scrollTop then
+                Just caret.y
+
+            else if caret.y + m.lineHeight > model.scrollTop + m.viewportHeight - virtualPadding * 2 then
+                Just (caret.y + m.lineHeight + virtualPadding * 2 - m.viewportHeight)
+
+            else
+                Nothing
+    in
+    Maybe.map (\t -> { left = 0, top = Basics.max 0 t }) top
+
+
+virtualPadding : Float
+virtualPadding =
+    16
+
+
+{-| Keys the virtual editor handles itself; anything else (Cmd+S, the
+sidebar shortcuts) bubbles to the app. -}
+keyDecoder : D.Decoder ( Msg, Bool )
+keyDecoder =
+    D.map5
+        (\key meta ctrl shift alt -> { key = key, mod = meta || ctrl, shift = shift, alt = alt })
+        (D.field "key" D.string)
+        (D.field "metaKey" D.bool)
+        (D.field "ctrlKey" D.bool)
+        (D.field "shiftKey" D.bool)
+        (D.field "altKey" D.bool)
+        |> D.andThen
+            (\{ key, mod, shift, alt } ->
+                let
+                    handled k =
+                        D.succeed ( KeyPressed k, True )
+                in
+                case ( key, mod, shift ) of
+                    ( "z", True, False ) ->
+                        D.succeed ( Undo, True )
+
+                    ( "z", True, True ) ->
+                        D.succeed ( Redo, True )
+
+                    ( "ArrowLeft", True, _ ) ->
+                        handled Home
+
+                    ( "ArrowRight", True, _ ) ->
+                        handled End
+
+                    ( "ArrowUp", True, _ ) ->
+                        handled DocStart
+
+                    ( "ArrowDown", True, _ ) ->
+                        handled DocEnd
+
+                    ( "Home", True, _ ) ->
+                        handled DocStart
+
+                    ( "End", True, _ ) ->
+                        handled DocEnd
+
+                    ( _, True, _ ) ->
+                        D.fail "app shortcut"
+
+                    ( "ArrowLeft", _, _ ) ->
+                        handled Left
+
+                    ( "ArrowRight", _, _ ) ->
+                        handled Right
+
+                    ( "ArrowUp", _, _ ) ->
+                        handled Up
+
+                    ( "ArrowDown", _, _ ) ->
+                        handled Down
+
+                    ( "Home", _, _ ) ->
+                        handled Home
+
+                    ( "End", _, _ ) ->
+                        handled End
+
+                    ( "PageUp", _, _ ) ->
+                        handled PageUp
+
+                    ( "PageDown", _, _ ) ->
+                        handled PageDown
+
+                    ( "Backspace", _, _ ) ->
+                        handled Backspace
+
+                    ( "Delete", _, _ ) ->
+                        handled DeleteKey
+
+                    ( "Enter", _, _ ) ->
+                        handled Enter
+
+                    ( "Tab", _, True ) ->
+                        handled ShiftTab
+
+                    ( "Tab", _, False ) ->
+                        handled Tab
+
+                    _ ->
+                        if String.length key == 1 && not alt then
+                            handled (Char key)
+
+                        else
+                            -- dead keys, IME, function keys: let the input event handle it
+                            D.fail "not an editing key"
+            )
 
 {-| A large document paints with the textarea's own text first and builds
 the highlight overlay a few thousand lines per frame behind it (see
@@ -183,7 +507,20 @@ view options model =
             ]
         , if options.virtual then
             div [ class "editor-container" ]
-                [ VirtualEditor.view { onScroll = ScrollChanged, highlightLine = highlightLine } model.metrics model.scrollTop model.maxLineLength model.lines ]
+                [ VirtualEditor.view
+                    { onScroll = ScrollChanged
+                    , highlightLine = highlightLine
+                    , keyDecoder = keyDecoder
+                    , onInput = InsertText
+                    , onPaste = InsertText
+                    , onPointerDown = PointerDown
+                    , cursor = model.cursor
+                    }
+                    model.metrics
+                    model.scrollTop
+                    model.maxLineLength
+                    model.lines
+                ]
 
           else
             div

@@ -18,6 +18,7 @@ function measure() {
     lineHeight: parseFloat(getComputedStyle(probe).lineHeight) || rect.height,
     charWidth: rect.width / 100,
     viewportHeight: container ? container.clientHeight : window.innerHeight,
+    viewportWidth: container ? container.clientWidth : window.innerWidth,
   });
 }
 

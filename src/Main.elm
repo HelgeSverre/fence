@@ -585,34 +585,57 @@ update msg model =
             let
                 newEditor =
                     Editor.update subMsg model.editor
+
+                -- keep the caret on screen and the hidden input focused
+                virtualCmds =
+                    if model.virtualEditor then
+                        Cmd.batch
+                            [ case ( newEditor.cursor /= model.editor.cursor, Editor.caretScroll newEditor ) of
+                                ( True, Just target ) ->
+                                    Task.attempt (\_ -> NoOp) (Browser.Dom.setViewportOf "veditor" target.left target.top)
+
+                                _ ->
+                                    Cmd.none
+                            , case subMsg of
+                                Editor.PointerDown _ _ ->
+                                    focusSilently "veditor-input"
+
+                                _ ->
+                                    Cmd.none
+                            ]
+
+                    else
+                        Cmd.none
             in
-            case subMsg of
-                Editor.ContentChanged _ ->
-                    let
+            if newEditor.content /= model.editor.content then
+                let
                         gen =
                             model.debounceGeneration + 1
 
                         recoveryGen =
                             model.recoveryGeneration + 1
                     in
-                    ( { model
-                        | editor = newEditor
-                        , debounceGeneration = gen
-                        , recoveryGeneration = recoveryGen
-                      }
-                    , Cmd.batch
-                        [ Task.perform (\_ -> DebouncedParse gen) (Process.sleep (previewDelay newEditor.content))
-                        , Task.perform (\_ -> RecoveryDraftDue recoveryGen) (Process.sleep 1000)
-                        , setTitleCmd newEditor
-                        , setDirtyCmd True
-                        ]
-                    )
+                ( { model
+                    | editor = newEditor
+                    , debounceGeneration = gen
+                    , recoveryGeneration = recoveryGen
+                  }
+                , Cmd.batch
+                    [ Task.perform (\_ -> DebouncedParse gen) (Process.sleep (previewDelay newEditor.content))
+                    , Task.perform (\_ -> RecoveryDraftDue recoveryGen) (Process.sleep 1000)
+                    , setTitleCmd newEditor
+                    , setDirtyCmd True
+                    , virtualCmds
+                    ]
+                )
 
-                Editor.OverlayStep ->
-                    ( { model | editor = newEditor, framePainted = False }, Cmd.none )
+            else
+                case subMsg of
+                    Editor.OverlayStep ->
+                        ( { model | editor = newEditor, framePainted = False }, Cmd.none )
 
-                _ ->
-                    ( { model | editor = newEditor }, Cmd.none )
+                    _ ->
+                        ( { model | editor = newEditor }, virtualCmds )
 
         DebouncedParse gen ->
             if gen == model.debounceGeneration then

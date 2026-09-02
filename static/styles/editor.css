@@ -123,6 +123,39 @@
 .veditor-row {
   white-space: pre;
   overflow: hidden;
+  pointer-events: none; /* clicks land on the spacer, whose offsets map to lines */
+}
+
+.veditor-caret {
+  position: absolute;
+  width: 2px;
+  background: var(--text-primary);
+  pointer-events: none;
+  animation: veditor-blink 1s steps(2, start) infinite;
+}
+
+.veditor:focus-within .veditor-caret {
+  visibility: visible;
+}
+
+@keyframes veditor-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.veditor-input {
+  position: absolute;
+  width: 1px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  opacity: 0;
+  overflow: hidden;
+  font: inherit;
+  line-height: inherit;
 }
 
 .veditor-row .editor-line {

@@ -49,6 +49,15 @@ the document and **draws only the visible rows**.
 3. **Accessibility:** the hidden textarea can mirror the current line for
    screen readers; full document reading is lost. Acceptable for v1?
 
+## Status
+
+- Slice 1 done (7229424): first frame 43ms on the 712KB file, 46 rows in DOM.
+- Slice 2 done: typing, newline, deletion, arrows/home/end/page, Tab and
+  Shift+Tab, undo/redo, click-to-place, paste and IME through the hidden
+  input; e2e/virtual-editing.test.js.
+- Decisions taken: no wrap + horizontal scroll; native spellcheck, native
+  undo and full screen-reader access accepted as v1 losses.
+
 ## Slices (each independently shippable and gated)
 
 1. **Read-only virtual view.** New `Editor2` module behind a setting flag:

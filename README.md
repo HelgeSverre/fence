@@ -46,7 +46,7 @@ Or grab a DMG from the [releases page](https://github.com/HelgeSverre/fence/rele
 
 - [Bun](https://bun.sh/)
 
-### Installation
+### Setup from source
 
 ```bash
 git clone https://github.com/helgesverre/fence.git

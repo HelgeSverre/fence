@@ -46,7 +46,8 @@ async function traceOpen(fence, name) {
 describe("opening a large real-world document", { skip: !fs.existsSync(SOURCE) && `no ${path.basename(SOURCE)}` }, () => {
   test(`opens ${path.basename(SOURCE)} to a painted first screen in under ${BUDGET_MS}ms`, async () => {
     const content = fs.readFileSync(SOURCE, "utf-8");
-    const fence = await launchFence({ files: { "warmup.md": "# warm\n", "big.md": content }, open: "warmup.md" });
+    // The textarea editor stays available behind the setting; this is its gate.
+    const fence = await launchFence({ files: { "warmup.md": "# warm\n", "big.md": content }, open: "warmup.md", state: { virtualEditor: false } });
     try {
       const t = await traceOpen(fence, "big.md");
       const state = await fence.window.evaluate(() => ({

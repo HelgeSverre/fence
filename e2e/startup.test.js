@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
-const { launchFence } = require("./helpers");
+const { launchFence, editorText } = require("./helpers");
 
 describe("startup", () => {
   test("launching with a file opens its folder as the workspace and loads the file", async () => {
@@ -30,7 +30,7 @@ describe("startup", () => {
       const { window } = fence;
       await window.getByTestId("tree-file").filter({ hasText: "a.md" }).waitFor();
       assert.equal(await window.getByTestId("titlebar-filename").count(), 0);
-      assert.equal(await window.getByTestId("editor-textarea").inputValue(), "");
+      assert.equal(await editorText(window), "");
       await window.getByTestId("preview-welcome").waitFor();
 
       // Only markdown files and directories that contain some are listed;

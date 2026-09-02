@@ -5,7 +5,7 @@ module Editor exposing
     , chunksOf
     , init
     , Key(..)
-    , caretScroll
+    , caretPixel
     , dragging
     , highlightLine
     , keyDecoder
@@ -77,6 +77,7 @@ type Key
     | Enter
     | Tab
     | ShiftTab
+    | Escape
     | Char String
 
 
@@ -342,6 +343,9 @@ keyPressed key model =
         DeleteKey ->
             edit Deleting TextBuffer.deleteForward model
 
+        Escape ->
+            { model | anchor = Nothing }
+
 
 {-| A selection spanning more than one line, as (first, last) line indexes. -}
 multiLineSelection : Model -> Maybe ( Int, Int )
@@ -494,33 +498,10 @@ undoLimit =
     200
 
 
-{-| Where the virtual editor must scroll so the caret is visible, if it is
-not already. -}
-caretScroll : Model -> Maybe { left : Float, top : Float }
-caretScroll model =
-    let
-        m =
-            model.metrics
-
-        caret =
-            VirtualEditor.caretPosition m model.lines model.cursor
-
-        top =
-            if caret.y < model.scrollTop then
-                Just caret.y
-
-            else if caret.y + m.lineHeight > model.scrollTop + m.viewportHeight - virtualPadding * 2 then
-                Just (caret.y + m.lineHeight + virtualPadding * 2 - m.viewportHeight)
-
-            else
-                Nothing
-    in
-    Maybe.map (\t -> { left = 0, top = Basics.max 0 t }) top
-
-
-virtualPadding : Float
-virtualPadding =
-    16
+{-| Caret position in pixels inside the virtual editor's spacer. -}
+caretPixel : Model -> { x : Float, y : Float }
+caretPixel model =
+    VirtualEditor.caretPosition model.metrics model.lines model.cursor
 
 
 {-| Keys the virtual editor handles itself; anything else (Cmd+S, the
@@ -620,6 +601,9 @@ keyDecoder =
                     ( "Tab", _, False ) ->
                         handled Tab
 
+                    ( "Escape", _, _ ) ->
+                        handled Escape
+
                     _ ->
                         if String.length key == 1 && not alt then
                             handled (Char key)
@@ -699,6 +683,7 @@ view options model =
                     , cursor = model.cursor
                     , selection = selection model
                     , selectedText = selectedText model
+                    , contentLength = String.length model.content
                     }
                     model.metrics
                     model.scrollTop

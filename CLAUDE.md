@@ -80,6 +80,10 @@ Drag state tracks mouse delta relative to window width. Sidebar clamped to 8-40%
 
 All file I/O and window operations go through `Ports.elm` → `preload.js` contextBridge → `electron/main.js`. No direct Node access from renderer.
 
+### Editor engines
+
+Default is the virtual editor (`src/VirtualEditor.elm` view, `src/TextBuffer.elm` edits, cursor/selection/undo in `src/Editor.elm`): only visible rows exist in the DOM, a hidden textarea under the caret takes keys, IME and paste (`js/virtual-input.js`), and `js/editor-metrics.js` measures the monospace metrics. No wrapping; long lines scroll horizontally. The classic `<textarea>` + highlight overlay remains behind Settings > Editor engine (`virtualEditor` in state.json) for one release; e2e tests pin it with `state: { virtualEditor: false }`.
+
 ### Progressive Markdown Parsing
 
 Editor changes use a generation counter (50-400ms debounce by size) to discard stale parses. Documents are split at top-level headings (`Markdown.splitChunks`) and parsed chunk by chunk with a per-chunk cache; `Markdown.begin`/`step` render within a character budget and Main continues in `Frame` messages (one step every other animation frame) so a large file paints its first screen in ~150ms. The editor overlay is built the same way (`Editor.OverlayStep`); the textarea's own text shows until it is complete. `e2e/open-large-file.test.js` is the acceptance gate.

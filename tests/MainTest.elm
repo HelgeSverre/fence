@@ -75,6 +75,7 @@ initSuite =
                     , \_ -> fresh.editorFraction |> Expect.within (Expect.Absolute 0.0001) 0.5
                     , \_ -> fresh.rightSidebarFraction |> Expect.within (Expect.Absolute 0.0001) 0.18
                     , \_ -> ( fresh.leftSidebarVisible, fresh.rightSidebarVisible, fresh.outlineMaxLevel ) |> Expect.equal ( True, False, 3 )
+                    , \_ -> fresh.virtualEditor |> Expect.equal True
                     , \_ -> fresh.theme |> Expect.equal "github-dark"
                     ]
                     ()

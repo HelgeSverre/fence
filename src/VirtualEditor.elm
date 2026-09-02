@@ -70,6 +70,7 @@ type alias Config msg =
     , cursor : Cursor
     , selection : Maybe ( Cursor, Cursor )
     , selectedText : String
+    , contentLength : Int -- exposed as data-length so tests can check large documents
     }
 
 
@@ -114,6 +115,7 @@ view config metrics scrollTop maxLineLength lines =
         [ class "veditor"
         , id "veditor"
         , attribute "data-testid" "veditor"
+        , attribute "data-length" (String.fromInt config.contentLength)
         , on "scroll" (D.map config.onScroll (D.at [ "target", "scrollTop" ] D.float))
         ]
         [ div

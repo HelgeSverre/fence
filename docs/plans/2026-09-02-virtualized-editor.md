@@ -60,6 +60,11 @@ the document and **draws only the visible rows**.
   via the copy/cut events (menu and keyboard), IME commit via
   compositionend; fuzz test against a plain-string reference model;
   e2e/virtual-selection.test.js.
+- Slice 4 done: the virtual editor is the default engine; the textarea
+  editor stays behind Settings > Editor engine for one release, with its
+  own gates (e2e/open-large-file.test.js, e2e/performance.test.js) pinned
+  to `virtualEditor: false`. Caret follow scrolls both axes from the
+  current position; Escape clears the selection.
 - Decisions taken: no wrap + horizontal scroll; native spellcheck, native
   undo and full screen-reader access accepted as v1 losses.
 

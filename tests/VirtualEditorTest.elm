@@ -65,6 +65,7 @@ suite =
                     , cursor = { line = 95, col = 3 }
                     , selection = Just ( { line = 94, col = 2 }, { line = 95, col = 3 } )
                     , selectedText = "ne 94\nlin"
+                    , contentLength = 0
                     }
                     metrics
                     2000

@@ -4,7 +4,7 @@ const { launchFence, waitForFile, save } = require("./helpers");
 
 describe("performance", () => {
   test("a 300KB document loads into the editor, previews, and saves without stalling", async () => {
-    const fence = await launchFence();
+    const fence = await launchFence({ state: { virtualEditor: false } }); // textarea editor gate
     try {
       const { window } = fence;
       const content = `# Large Document\n\n${"word ".repeat(60000)}`;
@@ -27,7 +27,7 @@ describe("performance", () => {
   });
 
   test("keystrokes in a large document stay under a frame", async () => {
-    const fence = await launchFence();
+    const fence = await launchFence({ state: { virtualEditor: false } }); // textarea editor gate
     try {
       const { window } = fence;
       const lines = Array.from({ length: 4000 }, (_, i) => `- item ${i} with some **bold** text and \`code\``);

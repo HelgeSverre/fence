@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
-const { launchFence, setEditorContent, waitForFile, save } = require("./helpers");
+const { launchFence, setEditorContent, waitForEditorValue, waitForFile, save } = require("./helpers");
 
 describe("editing and saving", () => {
   test("typing updates the preview after the debounce", async () => {
@@ -58,11 +58,7 @@ describe("editing and saving", () => {
     try {
       const { window } = fence;
       await require("node:fs").promises.writeFile(fence.file("note.md"), "# From outside\n", "utf-8");
-      await window.waitForFunction(
-        () => document.querySelector("[data-testid=editor-textarea]").value === "# From outside\n",
-        undefined,
-        { timeout: 10000 },
-      );
+      await waitForEditorValue(window, "# From outside\n", 10000);
       await window.getByTestId("preview-content").locator("h1", { hasText: "From outside" }).waitFor();
     } finally {
       await fence.close();

@@ -257,14 +257,8 @@ editingSuite =
                 , decode "Shift" [] |> Maybe.map Tuple.first
                 ]
                     |> Expect.equal [ Just (Editor.KeyPressed (Editor.Char "a")), Just (Editor.KeyPressed Editor.Enter), Just Editor.Undo, Just Editor.Redo, Nothing, Nothing, Nothing ]
-        , test "the caret scroll target is only set when the caret leaves the viewport" <|
-            \_ ->
-                let
-                    m =
-                        Editor.setContent "/n/a.md" (String.repeat 100 "l\n") "r" False Editor.init
-                            |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 200, viewportWidth = 400 })
-                in
-                ( Editor.caretScroll m, Editor.caretScroll (press Editor.DocEnd m) |> Maybe.map .top ) |> Expect.equal ( Nothing, Just (100 * 20 + 20 + 32 - 200) )
+        , test "Escape clears the selection without moving the caret" <|
+            \_ -> opened |> press Editor.Right |> Editor.update (Editor.Select Editor.Right) |> press Editor.Escape |> (\m -> ( Editor.selection m, m.cursor )) |> Expect.equal ( Nothing, { line = 0, col = 2 } )
         ]
 
 

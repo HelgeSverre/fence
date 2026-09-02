@@ -320,7 +320,7 @@ init flagsValue =
       , rebinding = Nothing
       , errorMessage = Nothing
       , closeAfterSave = False
-      , virtualEditor = flag "virtualEditor" D.bool False
+      , virtualEditor = flag "virtualEditor" D.bool True
       }
     , Cmd.none
     )
@@ -590,12 +590,11 @@ update msg model =
                 virtualCmds =
                     if model.virtualEditor then
                         Cmd.batch
-                            [ case ( newEditor.cursor /= model.editor.cursor, Editor.caretScroll newEditor ) of
-                                ( True, Just target ) ->
-                                    Task.attempt (\_ -> NoOp) (Browser.Dom.setViewportOf "veditor" target.left target.top)
+                            [ if newEditor.cursor /= model.editor.cursor then
+                                followCaretCmd newEditor
 
-                                _ ->
-                                    Cmd.none
+                              else
+                                Cmd.none
                             , case subMsg of
                                 Editor.PointerDown _ ->
                                     focusSilently "veditor-input"
@@ -771,6 +770,50 @@ continueParse budget progress model =
       }
     , Cmd.none
     )
+
+
+{-| Scroll the virtual editor just enough to keep the caret visible, in
+both axes, from its current scroll position. -}
+followCaretCmd : Editor.Model -> Cmd Msg
+followCaretCmd editor =
+    let
+        caret =
+            Editor.caretPixel editor
+
+        m =
+            editor.metrics
+
+        pad =
+            16
+
+        within lo size lo0 span =
+            -- keep [lo, lo+size] inside the window [lo0, lo0+span]
+            if lo < lo0 then
+                lo
+
+            else if lo + size > lo0 + span then
+                lo + size - span
+
+            else
+                lo0
+    in
+    Browser.Dom.getViewportOf "veditor"
+        |> Task.andThen
+            (\{ viewport } ->
+                let
+                    x =
+                        within caret.x (m.charWidth + pad * 2) viewport.x viewport.width
+
+                    y =
+                        within caret.y (m.lineHeight + pad * 2) viewport.y viewport.height
+                in
+                if x == viewport.x && y == viewport.y then
+                    Task.succeed ()
+
+                else
+                    Browser.Dom.setViewportOf "veditor" (Basics.max 0 x) (Basics.max 0 y)
+            )
+        |> Task.attempt (\_ -> NoOp)
 
 
 {-| Characters of uncached source parsed before the first paint. -}
@@ -1592,9 +1635,9 @@ viewSettingsDropdown model =
             , viewRebindRow "Toggle left sidebar" model.leftToggleKey RebindLeft model.rebinding
             , viewRebindRow "Toggle right sidebar" model.rightToggleKey RebindRight model.rebinding
             , div [ class "settings-dropdown-divider" ] []
-            , div [ class "settings-dropdown-label" ] [ text "Experimental" ]
+            , div [ class "settings-dropdown-label" ] [ text "Editor engine" ]
             , div [ class "settings-dropdown-row" ]
-                [ span [ class "settings-dropdown-row-label" ] [ text "Virtual editor (read-only)" ]
+                [ span [ class "settings-dropdown-row-label" ] [ text "Virtual editor" ]
                 , button
                     [ class "rebind-btn"
                     , classList [ ( "capturing", model.virtualEditor ) ]

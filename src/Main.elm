@@ -1,4 +1,15 @@
-module Main exposing (main)
+module Main exposing
+    ( DragTarget(..)
+    , KeyBinding
+    , Model
+    , Msg(..)
+    , init
+    , keyBindingLabel
+    , main
+    , matchesBinding
+    , previewDelay
+    , update
+    )
 
 import Browser
 import Browser.Dom

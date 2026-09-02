@@ -341,29 +341,17 @@ parseInline remaining acc =
         parseInline (String.dropLeft n remaining) (plain (String.left n remaining) :: acc)
 
 
+{-| Code-unit index of the next inline delimiter, or the string length.
+Must be code-unit based (like `String.left`/`String.dropLeft`), not a
+`String.toList` position: splitting a string inside a surrogate pair leaves a
+lone surrogate, on which elm/core's string folds never terminate.
+-}
 findNextSpecial : String -> Int
 findNextSpecial str =
-    let
-        chars =
-            String.toList str
-
-        helper index cs =
-            case cs of
-                [] ->
-                    String.length str
-
-                c :: _ ->
-                    if c == '*' || c == '`' || c == '[' then
-                        if index == 0 then
-                            0
-
-                        else
-                            index
-
-                    else
-                        helper (index + 1) (List.drop 1 cs)
-    in
-    helper 0 chars
+    [ "*", "`", "[" ]
+        |> List.filterMap (\delimiter -> List.head (String.indexes delimiter str))
+        |> List.minimum
+        |> Maybe.withDefault (String.length str)
 
 
 findClosing : String -> String -> Maybe ( String, String )

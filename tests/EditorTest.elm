@@ -94,6 +94,10 @@ overlaySuite =
                 , "**"
                 , "*"
                 , "`"
+                , "😀*" -- astral char before a delimiter: used to split the surrogate pair and hang
+                , "😀`"
+                , "😀["
+                , "a😀b*c*"
                 ]
                     |> List.map (\line -> ( line, joined line ))
                     |> List.filter (\( a, b ) -> a /= b)

@@ -597,7 +597,7 @@ update msg model =
                                 _ ->
                                     Cmd.none
                             , case subMsg of
-                                Editor.PointerDown _ _ ->
+                                Editor.PointerDown _ ->
                                     focusSilently "veditor-input"
 
                                 _ ->
@@ -1327,6 +1327,11 @@ subscriptions model =
 
             Nothing ->
                 Sub.none
+        , if Editor.dragging model.editor then
+            Browser.Events.onMouseUp (D.succeed (EditorMsg Editor.PointerUp))
+
+          else
+            Sub.none
         ]
 
 

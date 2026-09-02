@@ -126,6 +126,17 @@
   pointer-events: none; /* clicks land on the spacer, whose offsets map to lines */
 }
 
+.veditor-selection-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.veditor-selection {
+  position: absolute;
+  background: var(--selection);
+}
+
 .veditor-caret {
   position: absolute;
   width: 2px;
@@ -134,7 +145,18 @@
   animation: veditor-blink 1s steps(2, start) infinite;
 }
 
-.veditor:focus-within .veditor-caret {
+.veditor:focus-within .veditor-selection-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.veditor-selection {
+  position: absolute;
+  background: var(--selection);
+}
+
+.veditor-caret {
   visibility: visible;
 }
 

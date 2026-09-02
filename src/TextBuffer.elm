@@ -3,21 +3,30 @@ module TextBuffer exposing
     , backspace
     , clampCursor
     , columnFromVisual
+    , cursorAt
     , deleteForward
+    , deleteRange
     , docEnd
     , docStart
     , fromString
+    , indentLines
     , insert
     , lineEnd
+    , lineRange
     , lineStart
     , moveDown
     , moveLeft
     , moveRight
     , moveUp
+    , offsetOf
+    , order
+    , sliceRange
     , tabWidth
     , toString
     , unindentLine
+    , unindentLines
     , visualColumn
+    , wordRange
     )
 
 {-| Pure editing operations on a document stored as an array of lines with a
@@ -300,3 +309,149 @@ columnFromVisual line target =
 
         ( col, _, Nothing ) ->
             col
+
+
+
+-- RANGES
+
+
+{-| The two ends of a selection in document order. -}
+order : Cursor -> Cursor -> ( Cursor, Cursor )
+order a b =
+    if ( a.line, a.col ) <= ( b.line, b.col ) then
+        ( a, b )
+
+    else
+        ( b, a )
+
+
+sliceRange : Cursor -> Cursor -> Array String -> String
+sliceRange a b lines =
+    let
+        ( s, e ) =
+            order a b
+    in
+    if s.line == e.line then
+        String.slice s.col e.col (lineAt s.line lines)
+
+    else
+        String.join "\n"
+            (String.dropLeft s.col (lineAt s.line lines)
+                :: (Array.slice (s.line + 1) e.line lines |> Array.toList)
+                ++ [ String.left e.col (lineAt e.line lines) ]
+            )
+
+
+deleteRange : Cursor -> Cursor -> Array String -> ( Array String, Cursor )
+deleteRange a b lines =
+    let
+        ( s, e ) =
+            order a b
+
+        joined =
+            String.left s.col (lineAt s.line lines) ++ String.dropLeft e.col (lineAt e.line lines)
+    in
+    ( Array.append (Array.push joined (Array.slice 0 s.line lines)) (Array.slice (e.line + 1) (Array.length lines) lines), s )
+
+
+{-| The word (letters, digits, underscore) under the cursor, or the run of
+other characters there, for double-click selection. -}
+wordRange : Cursor -> Array String -> ( Cursor, Cursor )
+wordRange cursor lines =
+    let
+        line =
+            lineAt cursor.line lines
+
+        chars =
+            Array.fromList (String.toList line)
+
+        isWord c =
+            Char.isAlphaNum c || c == '_'
+
+        classAt i =
+            Array.get i chars |> Maybe.map isWord
+
+        cls =
+            classAt cursor.col |> Maybe.withDefault (classAt (cursor.col - 1) |> Maybe.withDefault False)
+
+        extend step i =
+            if classAt (i + step) == Just cls then
+                extend step (i + step)
+
+            else
+                i
+
+        startCol =
+            if classAt cursor.col == Just cls then
+                extend -1 cursor.col
+
+            else
+                extend -1 (cursor.col - 1)
+
+        endCol =
+            if classAt cursor.col == Just cls then
+                extend 1 cursor.col + 1
+
+            else
+                cursor.col
+    in
+    ( { cursor | col = Basics.max 0 startCol }, { cursor | col = Basics.min (String.length line) endCol } )
+
+
+{-| The whole line including its line break, for triple-click selection. -}
+lineRange : Cursor -> Array String -> ( Cursor, Cursor )
+lineRange cursor lines =
+    if cursor.line < Array.length lines - 1 then
+        ( { line = cursor.line, col = 0 }, { line = cursor.line + 1, col = 0 } )
+
+    else
+        ( { line = cursor.line, col = 0 }, lineEnd cursor lines )
+
+
+indentLines : Int -> Int -> Array String -> Array String
+indentLines from to lines =
+    Array.indexedMap
+        (\i l ->
+            if i >= from && i <= to then
+                "\t" ++ l
+
+            else
+                l
+        )
+        lines
+
+
+unindentLines : Int -> Int -> Array String -> Array String
+unindentLines from to lines =
+    Array.indexedMap
+        (\i l ->
+            if i >= from && i <= to then
+                Tuple.first (unindentLine { line = 0, col = 0 } (Array.fromList [ l ])) |> Array.get 0 |> Maybe.withDefault l
+
+            else
+                l
+        )
+        lines
+
+
+{-| Code-unit offset of a cursor into `toString lines`. -}
+offsetOf : Array String -> Cursor -> Int
+offsetOf lines cursor =
+    (Array.slice 0 cursor.line lines |> Array.foldl (\l acc -> acc + String.length l + 1) 0) + cursor.col
+
+
+cursorAt : Array String -> Int -> Cursor
+cursorAt lines offset =
+    let
+        go line remaining =
+            let
+                len =
+                    String.length (lineAt line lines)
+            in
+            if remaining <= len || line >= Array.length lines - 1 then
+                { line = line, col = Basics.min len remaining }
+
+            else
+                go (line + 1) (remaining - len - 1)
+    in
+    go 0 (Basics.max 0 offset)

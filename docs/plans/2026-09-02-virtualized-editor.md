@@ -55,6 +55,11 @@ the document and **draws only the visible rows**.
 - Slice 2 done: typing, newline, deletion, arrows/home/end/page, Tab and
   Shift+Tab, undo/redo, click-to-place, paste and IME through the hidden
   input; e2e/virtual-editing.test.js.
+- Slice 3 done: shift-movement, mouse drag, double/triple click, select-all,
+  typing/paste over a selection, Tab/Shift+Tab on selected lines, copy/cut
+  via the copy/cut events (menu and keyboard), IME commit via
+  compositionend; fuzz test against a plain-string reference model;
+  e2e/virtual-selection.test.js.
 - Decisions taken: no wrap + horizontal scroll; native spellcheck, native
   undo and full screen-reader access accepted as v1 losses.
 

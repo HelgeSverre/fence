@@ -81,6 +81,20 @@ suite =
                     in
                     TB.columnFromVisual line (TB.visualColumn line col) |> Expect.equal col
             ]
+        , describe "ranges"
+            [ test "sliceRange within a line and across lines" <|
+                \_ -> ( TB.sliceRange (at 0 1) (at 0 4) doc, TB.sliceRange (at 1 5) (at 3 1) doc ) |> Expect.equal ( "lph", "gamma\n\n\t" )
+            , test "deleteRange joins the ends and lands the cursor at the start" <|
+                \_ -> TB.deleteRange (at 3 1) (at 0 2) doc |> Tuple.mapFirst TB.toString |> Expect.equal ( "alindented", at 0 2 )
+            , test "wordRange finds word boundaries and punctuation runs" <|
+                \_ -> ( TB.wordRange (at 1 7) doc, TB.wordRange (at 1 4) doc ) |> Expect.equal ( ( at 1 5, at 1 10 ), ( at 1 4, at 1 5 ) )
+            , test "lineRange includes the line break except on the last line" <|
+                \_ -> ( TB.lineRange (at 0 3) doc, TB.lineRange (at 3 0) doc ) |> Expect.equal ( ( at 0 0, at 1 0 ), ( at 3 0, at 3 9 ) )
+            , test "indent and unindent a range of lines" <|
+                \_ -> TB.indentLines 0 1 doc |> TB.unindentLines 0 1 |> TB.toString |> Expect.equal (TB.toString doc)
+            , fuzz (Fuzz.intRange 0 40) "offsetOf and cursorAt are inverse" <|
+                \offset -> TB.offsetOf doc (TB.cursorAt doc offset) |> Expect.equal (Basics.min offset (String.length (TB.toString doc)))
+            ]
         , fuzz (Fuzz.listOfLengthBetween 0 30 (Fuzz.oneOfValues [ "a", "b", " ", "\n", "\t" ]) |> Fuzz.map String.concat) "the lines array and the string always agree" <|
             \content -> TB.toString (TB.fromString content) |> Expect.equal content
         ]

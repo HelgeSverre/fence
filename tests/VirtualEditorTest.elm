@@ -59,8 +59,12 @@ suite =
                     , keyDecoder = D.fail "n/a"
                     , onInput = always ()
                     , onPaste = always ()
-                    , onPointerDown = \_ _ -> ()
+                    , onPointerDown = always ()
+                    , onPointerMove = \_ _ -> ()
+                    , onCut = ()
                     , cursor = { line = 95, col = 3 }
+                    , selection = Just ( { line = 94, col = 2 }, { line = 95, col = 3 } )
+                    , selectedText = "ne 94\nlin"
                     }
                     metrics
                     2000
@@ -73,5 +77,7 @@ suite =
                         , Query.find [ Selector.class "veditor-rows" ] >> Query.has [ Selector.style "top" "1800px" ]
                         , Query.findAll [ Selector.class "veditor-row" ] >> Query.first >> Query.has [ Selector.text "line 90" ]
                         , Query.find [ Selector.class "veditor-caret" ] >> Query.has [ Selector.style "left" "24px", Selector.style "top" "1900px" ]
+                        , Query.findAll [ Selector.class "veditor-selection" ] >> Query.count (Expect.equal 2)
+                        , Query.findAll [ Selector.class "veditor-selection" ] >> Query.first >> Query.has [ Selector.style "left" "16px", Selector.style "width" "48px" ]
                         ]
         ]

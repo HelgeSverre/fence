@@ -6,8 +6,11 @@ module Editor exposing
     , init
     , Key(..)
     , caretScroll
+    , dragging
     , highlightLine
     , keyDecoder
+    , selectedText
+    , selection
     , lineTokens
     , overlayPending
     , markSaved
@@ -40,6 +43,8 @@ type alias Model =
     , maxLineLength : Int
     , metrics : VirtualEditor.Metrics
     , cursor : Cursor
+    , anchor : Maybe Cursor -- other end of the selection, when there is one
+    , dragging : Bool
     , undo : List Snapshot
     , redo : List Snapshot
     , coalesce : Coalesce -- what kind of edit the top undo entry may absorb
@@ -81,8 +86,13 @@ type Msg
     | OverlayStep
     | MetricsChanged VirtualEditor.Metrics
     | KeyPressed Key
+    | Select Key -- shift + a movement key extends the selection
     | InsertText String
-    | PointerDown Float Float
+    | PointerDown { x : Float, y : Float, shift : Bool, clicks : Int }
+    | PointerMove Float Float
+    | PointerUp
+    | SelectAll
+    | CutSelection
     | Undo
     | Redo
 
@@ -99,6 +109,8 @@ init =
     , maxLineLength = 0
     , metrics = VirtualEditor.defaultMetrics
     , cursor = TextBuffer.docStart
+    , anchor = Nothing
+    , dragging = False
     , undo = []
     , redo = []
     , coalesce = NoCoalesce
@@ -122,6 +134,8 @@ setContent path content revision dirty model =
         , lines = splitLines content
         , maxLineLength = longestLine content
         , cursor = TextBuffer.docStart
+        , anchor = Nothing
+        , dragging = False
         , undo = []
         , redo = []
         , coalesce = NoCoalesce
@@ -158,6 +172,16 @@ update msg model =
         KeyPressed key ->
             keyPressed key model
 
+        Select key ->
+            let
+                anchored =
+                    { model | anchor = Just (Maybe.withDefault model.cursor model.anchor) }
+
+                moved =
+                    keyPressed key anchored
+            in
+            { moved | anchor = anchored.anchor }
+
         InsertText text ->
             if String.isEmpty text then
                 model
@@ -173,15 +197,46 @@ update msg model =
                     (TextBuffer.insert text)
                     model
 
-        PointerDown x y ->
+        PointerDown { x, y, shift, clicks } ->
             let
-                line =
-                    clamp 0 (Basics.max 0 (Array.length model.lines - 1)) (floor (y / model.metrics.lineHeight))
+                at =
+                    cursorAtPixel x y model
 
-                text =
-                    Array.get line model.lines |> Maybe.withDefault ""
+                ( anchor, cursor ) =
+                    if shift then
+                        ( Just (Maybe.withDefault model.cursor model.anchor), at )
+
+                    else if clicks == 2 then
+                        TextBuffer.wordRange at model.lines |> Tuple.mapFirst Just
+
+                    else if clicks >= 3 then
+                        TextBuffer.lineRange at model.lines |> Tuple.mapFirst Just
+
+                    else
+                        ( Nothing, at )
             in
-            { model | cursor = { line = line, col = TextBuffer.columnFromVisual text (round (x / model.metrics.charWidth)) }, coalesce = NoCoalesce }
+            { model | cursor = cursor, anchor = anchor, dragging = clicks == 1 && not shift, coalesce = NoCoalesce }
+
+        PointerMove x y ->
+            if model.dragging then
+                { model | anchor = Just (Maybe.withDefault model.cursor model.anchor), cursor = cursorAtPixel x y model }
+
+            else
+                model
+
+        PointerUp ->
+            { model | dragging = False, anchor = model.anchor |> Maybe.andThen (\a -> if a == model.cursor then Nothing else Just a) }
+
+        SelectAll ->
+            { model | anchor = Just TextBuffer.docStart, cursor = TextBuffer.docEnd model.lines, coalesce = NoCoalesce }
+
+        CutSelection ->
+            case selection model of
+                Just ( s, e ) ->
+                    edit NoCoalesce (\_ lines -> TextBuffer.deleteRange s e lines) { model | anchor = Nothing }
+
+                Nothing ->
+                    model
 
         Undo ->
             case model.undo of
@@ -223,7 +278,7 @@ keyPressed : Key -> Model -> Model
 keyPressed key model =
     let
         move f =
-            { model | cursor = f model.cursor model.lines, coalesce = NoCoalesce }
+            { model | cursor = f model.cursor model.lines, anchor = Nothing, coalesce = NoCoalesce }
 
         pageRows =
             Basics.max 1 (floor (model.metrics.viewportHeight / model.metrics.lineHeight) - 1)
@@ -266,10 +321,20 @@ keyPressed key model =
             edit NoCoalesce (TextBuffer.insert "\n") model
 
         Tab ->
-            edit NoCoalesce (TextBuffer.insert "\t") model
+            case multiLineSelection model of
+                Just ( from, to ) ->
+                    editLines (TextBuffer.indentLines from to) model
+
+                Nothing ->
+                    edit NoCoalesce (TextBuffer.insert "\t") model
 
         ShiftTab ->
-            edit NoCoalesce TextBuffer.unindentLine model
+            case multiLineSelection model of
+                Just ( from, to ) ->
+                    editLines (TextBuffer.unindentLines from to) model
+
+                Nothing ->
+                    edit NoCoalesce TextBuffer.unindentLine model
 
         Backspace ->
             edit Deleting TextBuffer.backspace model
@@ -278,35 +343,136 @@ keyPressed key model =
             edit Deleting TextBuffer.deleteForward model
 
 
+{-| A selection spanning more than one line, as (first, last) line indexes. -}
+multiLineSelection : Model -> Maybe ( Int, Int )
+multiLineSelection model =
+    selection model
+        |> Maybe.andThen
+            (\( s, e ) ->
+                if e.line > s.line then
+                    Just ( s.line, e.line - (if e.col == 0 then 1 else 0) )
+
+                else
+                    Nothing
+            )
+
+
+{-| Re-indent whole lines, keeping the selection on them. -}
+editLines : (Array String -> Array String) -> Model -> Model
+editLines f model =
+    let
+        lines =
+            f model.lines
+
+        fix c =
+            TextBuffer.clampCursor lines { c | col = c.col + (String.length (Array.get c.line lines |> Maybe.withDefault "") - String.length (Array.get c.line model.lines |> Maybe.withDefault "")) }
+    in
+    if lines == model.lines then
+        model
+
+    else
+        { model
+            | lines = lines
+            , content = TextBuffer.toString lines
+            , cursor = fix model.cursor
+            , anchor = Maybe.map fix model.anchor
+            , maxLineLength = Array.foldl (\l m -> Basics.max m (String.length l)) 0 lines
+            , dirtyState = Dirty
+            , undo = { lines = model.lines, cursor = model.cursor } :: List.take undoLimit model.undo
+            , redo = []
+            , coalesce = NoCoalesce
+        }
+
+
+cursorAtPixel : Float -> Float -> Model -> Cursor
+cursorAtPixel x y model =
+    let
+        line =
+            clamp 0 (Basics.max 0 (Array.length model.lines - 1)) (floor (y / model.metrics.lineHeight))
+
+        text =
+            Array.get line model.lines |> Maybe.withDefault ""
+    in
+    { line = line, col = TextBuffer.columnFromVisual text (round (x / model.metrics.charWidth)) }
+
+
+{-| The selection in document order, if any text is selected. -}
+selection : Model -> Maybe ( Cursor, Cursor )
+selection model =
+    model.anchor
+        |> Maybe.andThen
+            (\a ->
+                if a == model.cursor then
+                    Nothing
+
+                else
+                    Just (TextBuffer.order a model.cursor)
+            )
+
+
+selectedText : Model -> String
+selectedText model =
+    selection model |> Maybe.map (\( s, e ) -> TextBuffer.sliceRange s e model.lines) |> Maybe.withDefault ""
+
+
+dragging : Model -> Bool
+dragging model =
+    model.dragging
+
+
 {-| Apply a buffer edit, recording an undo snapshot unless it coalesces with
 the previous edit of the same kind (a run of typed characters or deletions).
 -}
 edit : Coalesce -> (Cursor -> Array String -> ( Array String, Cursor )) -> Model -> Model
 edit kind op model =
     let
+        -- an edit with a selection first removes the selection (for
+        -- deletions that is the whole edit)
+        ( baseLines, baseCursor, hadSelection ) =
+            case selection model of
+                Just ( s, e ) ->
+                    let
+                        ( l, c ) =
+                            TextBuffer.deleteRange s e model.lines
+                    in
+                    ( l, c, True )
+
+                Nothing ->
+                    ( model.lines, model.cursor, False )
+
         ( lines, cursor ) =
-            op model.cursor model.lines
+            if hadSelection && kind == Deleting then
+                ( baseLines, baseCursor )
+
+            else
+                op baseCursor baseLines
 
         undo =
-            if kind /= NoCoalesce && kind == model.coalesce then
+            if kind /= NoCoalesce && kind == model.coalesce && not hadSelection then
                 model.undo
 
             else
                 { lines = model.lines, cursor = model.cursor } :: List.take undoLimit model.undo
     in
     if lines == model.lines then
-        { model | cursor = cursor }
+        { model | cursor = cursor, anchor = Nothing }
 
     else
         { model
             | lines = lines
             , cursor = cursor
+            , anchor = Nothing
             , content = TextBuffer.toString lines -- ponytail: O(n) join per keystroke (~1ms at 10k lines)
             , maxLineLength = Basics.max model.maxLineLength (String.length (Array.get cursor.line lines |> Maybe.withDefault ""))
             , dirtyState = Dirty
             , undo = undo
             , redo = []
-            , coalesce = kind
+            , coalesce =
+                if hadSelection then
+                    NoCoalesce
+
+                else
+                    kind
         }
 
 
@@ -316,6 +482,7 @@ restore snapshot model =
         | lines = snapshot.lines
         , cursor = TextBuffer.clampCursor snapshot.lines snapshot.cursor
         , content = TextBuffer.toString snapshot.lines
+        , anchor = Nothing
         , maxLineLength = Array.foldl (\l m -> Basics.max m (String.length l)) 0 snapshot.lines
         , dirtyState = Dirty
         , coalesce = NoCoalesce
@@ -372,6 +539,16 @@ keyDecoder =
                 let
                     handled k =
                         D.succeed ( KeyPressed k, True )
+
+                    movement k =
+                        D.succeed
+                            ( if shift then
+                                Select k
+
+                              else
+                                KeyPressed k
+                            , True
+                            )
                 in
                 case ( key, mod, shift ) of
                     ( "z", True, False ) ->
@@ -380,50 +557,53 @@ keyDecoder =
                     ( "z", True, True ) ->
                         D.succeed ( Redo, True )
 
+                    ( "a", True, False ) ->
+                        D.succeed ( SelectAll, True )
+
                     ( "ArrowLeft", True, _ ) ->
-                        handled Home
+                        movement Home
 
                     ( "ArrowRight", True, _ ) ->
-                        handled End
+                        movement End
 
                     ( "ArrowUp", True, _ ) ->
-                        handled DocStart
+                        movement DocStart
 
                     ( "ArrowDown", True, _ ) ->
-                        handled DocEnd
+                        movement DocEnd
 
                     ( "Home", True, _ ) ->
-                        handled DocStart
+                        movement DocStart
 
                     ( "End", True, _ ) ->
-                        handled DocEnd
+                        movement DocEnd
 
                     ( _, True, _ ) ->
                         D.fail "app shortcut"
 
                     ( "ArrowLeft", _, _ ) ->
-                        handled Left
+                        movement Left
 
                     ( "ArrowRight", _, _ ) ->
-                        handled Right
+                        movement Right
 
                     ( "ArrowUp", _, _ ) ->
-                        handled Up
+                        movement Up
 
                     ( "ArrowDown", _, _ ) ->
-                        handled Down
+                        movement Down
 
                     ( "Home", _, _ ) ->
-                        handled Home
+                        movement Home
 
                     ( "End", _, _ ) ->
-                        handled End
+                        movement End
 
                     ( "PageUp", _, _ ) ->
-                        handled PageUp
+                        movement PageUp
 
                     ( "PageDown", _, _ ) ->
-                        handled PageDown
+                        movement PageDown
 
                     ( "Backspace", _, _ ) ->
                         handled Backspace
@@ -514,7 +694,11 @@ view options model =
                     , onInput = InsertText
                     , onPaste = InsertText
                     , onPointerDown = PointerDown
+                    , onPointerMove = PointerMove
+                    , onCut = CutSelection
                     , cursor = model.cursor
+                    , selection = selection model
+                    , selectedText = selectedText model
                     }
                     model.metrics
                     model.scrollTop

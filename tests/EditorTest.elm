@@ -3,16 +3,18 @@ module EditorTest exposing (suite)
 import Editor
 import Json.Decode as D
 import Json.Encode as E
+import Fuzz
+import TextBuffer
 import Expect
 import Fuzz
-import Test exposing (Test, describe, fuzz, test)
+import Test exposing (Test, describe, fuzz, fuzzWith, noDistribution, test)
 import Types exposing (DirtyState(..))
 
 
 suite : Test
 suite =
     describe "Editor"
-        [ stateSuite, overlaySuite, progressiveOverlaySuite, editingSuite ]
+        [ stateSuite, overlaySuite, progressiveOverlaySuite, editingSuite, selectionSuite, referenceSuite ]
 
 
 stateSuite : Test
@@ -239,7 +241,7 @@ editingSuite =
             \_ ->
                 opened
                     |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 400, viewportWidth = 400 })
-                    |> Editor.update (Editor.PointerDown 33 25)
+                    |> Editor.update (Editor.PointerDown { x = 33, y = 25, shift = False, clicks = 1 })
                     |> .cursor
                     |> Expect.equal { line = 1, col = 3 }
         , test "opening a file resets the caret and history" <|
@@ -264,3 +266,252 @@ editingSuite =
                 in
                 ( Editor.caretScroll m, Editor.caretScroll (press Editor.DocEnd m) |> Maybe.map .top ) |> Expect.equal ( Nothing, Just (100 * 20 + 20 + 32 - 200) )
         ]
+
+
+
+selectionSuite : Test
+selectionSuite =
+    let
+        opened =
+            Editor.setContent "/n/a.md" "hello world\nsecond line\nthird" "r" False Editor.init
+
+        press key =
+            Editor.update (Editor.KeyPressed key)
+
+        select key =
+            Editor.update (Editor.Select key)
+
+        type_ chars m =
+            List.foldl (\c -> Editor.update (Editor.KeyPressed (Editor.Char c))) m (String.split "" chars)
+
+        metrics =
+            Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 400, viewportWidth = 400 })
+
+        click clicks x y shift =
+            Editor.update (Editor.PointerDown { x = x, y = y, shift = shift, clicks = clicks })
+    in
+    describe "selection"
+        [ test "shift+right extends and the selected text is exposed" <|
+            \_ -> opened |> select Editor.Right |> select Editor.Right |> Editor.selectedText |> Expect.equal "he"
+        , test "a plain movement clears the selection" <|
+            \_ -> opened |> select Editor.Right |> press Editor.Left |> Editor.selection |> Expect.equal Nothing
+        , test "typing replaces the selection in one undo step" <|
+            \_ ->
+                let
+                    m =
+                        opened |> select Editor.End |> type_ "X"
+                in
+                ( m.content, Editor.update Editor.Undo m |> .content ) |> Expect.equal ( "X\nsecond line\nthird", "hello world\nsecond line\nthird" )
+        , test "backspace with a selection deletes only the selection" <|
+            \_ -> opened |> select Editor.Right |> select Editor.Right |> press Editor.Backspace |> .content |> Expect.equal "llo world\nsecond line\nthird"
+        , test "select all then delete empties the document" <|
+            \_ -> opened |> Editor.update Editor.SelectAll |> press Editor.DeleteKey |> .content |> Expect.equal ""
+        , test "a multi-line selection spanning lines is sliced with line breaks" <|
+            \_ -> opened |> press Editor.End |> select Editor.Down |> Editor.selectedText |> Expect.equal "\nsecond line"
+        , test "Tab on a multi-line selection indents those lines and keeps them selected" <|
+            \_ ->
+                let
+                    m =
+                        opened |> select Editor.Down |> press Editor.Tab
+                in
+                -- a selection ending at column 0 of the next line does not include that line
+                ( m.content, Editor.selection m |> Maybe.map (\( s, e ) -> ( s.line, e.line )) ) |> Expect.equal ( "\thello world\nsecond line\nthird", Just ( 0, 1 ) )
+        , test "Shift+Tab on a multi-line selection unindents" <|
+            \_ -> opened |> select Editor.Down |> press Editor.Tab |> press Editor.ShiftTab |> .content |> Expect.equal "hello world\nsecond line\nthird"
+        , test "cut removes the selection" <|
+            \_ -> opened |> select Editor.Right |> Editor.update Editor.CutSelection |> .content |> Expect.equal "ello world\nsecond line\nthird"
+        , test "double-click selects the word under the pointer" <|
+            \_ -> opened |> metrics |> click 2 75 10 False |> Editor.selectedText |> Expect.equal "world"
+        , test "triple-click selects the whole line including its break" <|
+            \_ -> opened |> metrics |> click 3 20 10 False |> Editor.selectedText |> Expect.equal "hello world\n"
+        , test "shift-click extends from the caret" <|
+            \_ -> opened |> metrics |> click 1 0 0 False |> click 1 50 30 True |> Editor.selectedText |> Expect.equal "hello world\nsecon"
+        , test "dragging selects and releasing keeps the selection" <|
+            \_ ->
+                opened
+                    |> metrics
+                    |> click 1 0 0 False
+                    |> Editor.update (Editor.PointerMove 30 0)
+                    |> Editor.update Editor.PointerUp
+                    |> (\m -> ( Editor.dragging m, Editor.selectedText m ))
+                    |> Expect.equal ( False, "hel" )
+        , test "a click without movement leaves no selection" <|
+            \_ -> opened |> metrics |> click 1 0 0 False |> Editor.update Editor.PointerUp |> Editor.selection |> Expect.equal Nothing
+        , test "the key decoder turns shift+movement into Select and Cmd+A into SelectAll" <|
+            \_ ->
+                let
+                    ev key mods =
+                        E.object ([ ( "key", E.string key ), ( "metaKey", E.bool False ), ( "ctrlKey", E.bool False ), ( "shiftKey", E.bool False ), ( "altKey", E.bool False ) ] |> List.map (\( k, v ) -> ( k, if List.member k mods then E.bool True else v )))
+                in
+                [ D.decodeValue Editor.keyDecoder (ev "ArrowRight" [ "shiftKey" ]) |> Result.toMaybe |> Maybe.map Tuple.first
+                , D.decodeValue Editor.keyDecoder (ev "a" [ "metaKey" ]) |> Result.toMaybe |> Maybe.map Tuple.first
+                , D.decodeValue Editor.keyDecoder (ev "c" [ "metaKey" ]) |> Result.toMaybe |> Maybe.map Tuple.first
+                ]
+                    |> Expect.equal [ Just (Editor.Select Editor.Right), Just Editor.SelectAll, Nothing ]
+        ]
+
+
+
+-- REFERENCE MODEL: a plain string with integer offsets, used to fuzz the editor
+
+
+type Op
+    = TypeChar String
+    | Newline
+    | BackspaceOp
+    | DeleteOp
+    | LeftOp Bool
+    | RightOp Bool
+    | HomeOp Bool
+    | EndOp Bool
+    | SelectAllOp
+    | PasteOp String
+
+
+type alias Ref =
+    { text : String, cursor : Int, anchor : Maybe Int }
+
+
+refApply : Op -> Ref -> Ref
+refApply op ref =
+    let
+        sel =
+            ref.anchor |> Maybe.andThen (\a -> if a == ref.cursor then Nothing else Just ( Basics.min a ref.cursor, Basics.max a ref.cursor ))
+
+        deleteSel =
+            case sel of
+                Just ( s, e ) ->
+                    { text = String.left s ref.text ++ String.dropLeft e ref.text, cursor = s, anchor = Nothing }
+
+                Nothing ->
+                    { ref | anchor = Nothing }
+
+        insertAt str r =
+            { r | text = String.left r.cursor r.text ++ str ++ String.dropLeft r.cursor r.text, cursor = r.cursor + String.length str }
+
+        move extend target =
+            { ref | cursor = target, anchor = if extend then Just (Maybe.withDefault ref.cursor ref.anchor) else Nothing }
+
+        lineStartOf i =
+            String.left i ref.text |> String.indexes "\n" |> List.reverse |> List.head |> Maybe.map ((+) 1) |> Maybe.withDefault 0
+
+        lineEndOf i =
+            String.dropLeft i ref.text |> String.indexes "\n" |> List.head |> Maybe.map ((+) i) |> Maybe.withDefault (String.length ref.text)
+    in
+    case op of
+        TypeChar c ->
+            insertAt c deleteSel
+
+        PasteOp str ->
+            insertAt str deleteSel
+
+        Newline ->
+            insertAt "\n" deleteSel
+
+        BackspaceOp ->
+            case sel of
+                Just _ ->
+                    deleteSel
+
+                Nothing ->
+                    if ref.cursor > 0 then
+                        { ref | text = String.left (ref.cursor - 1) ref.text ++ String.dropLeft ref.cursor ref.text, cursor = ref.cursor - 1, anchor = Nothing }
+
+                    else
+                        { ref | anchor = Nothing }
+
+        DeleteOp ->
+            case sel of
+                Just _ ->
+                    deleteSel
+
+                Nothing ->
+                    { ref | text = String.left ref.cursor ref.text ++ String.dropLeft (ref.cursor + 1) ref.text, anchor = Nothing }
+
+        LeftOp extend ->
+            move extend (Basics.max 0 (ref.cursor - 1))
+
+        RightOp extend ->
+            move extend (Basics.min (String.length ref.text) (ref.cursor + 1))
+
+        HomeOp extend ->
+            move extend (lineStartOf ref.cursor)
+
+        EndOp extend ->
+            move extend (lineEndOf ref.cursor)
+
+        SelectAllOp ->
+            { ref | anchor = Just 0, cursor = String.length ref.text }
+
+
+editorApply : Op -> Editor.Model -> Editor.Model
+editorApply op =
+    let
+        key extend k =
+            Editor.update (if extend then Editor.Select k else Editor.KeyPressed k)
+    in
+    case op of
+        TypeChar c ->
+            Editor.update (Editor.KeyPressed (Editor.Char c))
+
+        PasteOp str ->
+            Editor.update (Editor.InsertText str)
+
+        Newline ->
+            Editor.update (Editor.KeyPressed Editor.Enter)
+
+        BackspaceOp ->
+            Editor.update (Editor.KeyPressed Editor.Backspace)
+
+        DeleteOp ->
+            Editor.update (Editor.KeyPressed Editor.DeleteKey)
+
+        LeftOp extend ->
+            key extend Editor.Left
+
+        RightOp extend ->
+            key extend Editor.Right
+
+        HomeOp extend ->
+            key extend Editor.Home
+
+        EndOp extend ->
+            key extend Editor.End
+
+        SelectAllOp ->
+            Editor.update Editor.SelectAll
+
+
+opFuzzer : Fuzz.Fuzzer Op
+opFuzzer =
+    Fuzz.frequency
+        [ ( 5, Fuzz.map TypeChar (Fuzz.oneOfValues [ "a", "b", " ", "*", "\t", "é", "😀" ]) )
+        , ( 2, Fuzz.constant Newline )
+        , ( 3, Fuzz.constant BackspaceOp )
+        , ( 1, Fuzz.constant DeleteOp )
+        , ( 3, Fuzz.map LeftOp Fuzz.bool )
+        , ( 3, Fuzz.map RightOp Fuzz.bool )
+        , ( 1, Fuzz.map HomeOp Fuzz.bool )
+        , ( 1, Fuzz.map EndOp Fuzz.bool )
+        , ( 1, Fuzz.constant SelectAllOp )
+        , ( 1, Fuzz.map PasteOp (Fuzz.oneOfValues [ "x\ny", "\n\n", "one two" ]) )
+        ]
+
+
+referenceSuite : Test
+referenceSuite =
+    fuzzWith { runs = 300, distribution = noDistribution } (Fuzz.listOfLengthBetween 0 40 opFuzzer) "random edit sequences match a plain-string reference model" <|
+        \ops ->
+            let
+                start =
+                    "ab\ncd"
+
+                ref =
+                    List.foldl refApply { text = start, cursor = 0, anchor = Nothing } ops
+
+                editor =
+                    List.foldl editorApply (Editor.setContent "/n/a.md" start "r" False Editor.init) ops
+            in
+            Expect.equal
+                ( ref.text, ref.cursor, ref.anchor |> Maybe.andThen (\a -> if a == ref.cursor then Nothing else Just (Basics.min a ref.cursor)) )
+                ( editor.content, TextBuffer.offsetOf editor.lines editor.cursor, Editor.selection editor |> Maybe.map (\( s, _ ) -> TextBuffer.offsetOf editor.lines s) )

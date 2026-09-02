@@ -64,8 +64,12 @@ type alias Config msg =
     , keyDecoder : D.Decoder ( msg, Bool )
     , onInput : String -> msg
     , onPaste : String -> msg
-    , onPointerDown : Float -> Float -> msg
+    , onPointerDown : { x : Float, y : Float, shift : Bool, clicks : Int } -> msg
+    , onPointerMove : Float -> Float -> msg
+    , onCut : msg
     , cursor : Cursor
+    , selection : Maybe ( Cursor, Cursor )
+    , selectedText : String
     }
 
 
@@ -118,9 +122,17 @@ view config metrics scrollTop maxLineLength lines =
             , style "min-width" (px (toFloat (maxLineLength + 1) * metrics.charWidth))
 
             -- rows have pointer-events: none, so offsets are relative to the spacer
-            , preventDefaultOn "mousedown" (D.map2 (\x y -> ( config.onPointerDown x y, True )) (D.field "offsetX" D.float) (D.field "offsetY" D.float))
+            , preventDefaultOn "mousedown"
+                (D.map4 (\x y shift clicks -> ( config.onPointerDown { x = x, y = y, shift = shift, clicks = clicks }, True ))
+                    (D.field "offsetX" D.float)
+                    (D.field "offsetY" D.float)
+                    (D.field "shiftKey" D.bool)
+                    (D.field "detail" D.int)
+                )
+            , on "mousemove" (D.map2 config.onPointerMove (D.field "offsetX" D.float) (D.field "offsetY" D.float))
             ]
-            [ div
+            [ div [ class "veditor-selection-layer" ] (selectionRects config.selection metrics lines from to)
+            , div
                 [ class "veditor-rows"
                 , style "top" (px (toFloat from * metrics.lineHeight))
                 , style "line-height" (px metrics.lineHeight)
@@ -153,6 +165,8 @@ view config metrics scrollTop maxLineLength lines =
                 , attribute "autocorrect" "off"
                 , attribute "autocapitalize" "off"
                 , attribute "aria-label" "Editor"
+                , attribute "data-selection" config.selectedText -- read by js/virtual-input.js for copy/cut
+                , on "fencecut" (D.succeed config.onCut)
                 , preventDefaultOn "keydown" config.keyDecoder
                 , on "input"
                     (D.field "isComposing" D.bool
@@ -166,7 +180,55 @@ view config metrics scrollTop maxLineLength lines =
                             )
                     )
                 , on "fencepaste" (D.map config.onPaste (D.field "detail" D.string))
+
+                -- an IME commit arrives as compositionend (its input event is
+                -- still flagged composing), carrying the composed text
+                , on "compositionend" (D.map config.onInput (D.field "data" D.string))
                 ]
                 []
             ]
         ]
+
+
+{-| One highlight box per visible selected row; rows ending inside the
+selection get an extra cell for the line break. -}
+selectionRects : Maybe ( Cursor, Cursor ) -> Metrics -> Array String -> Int -> Int -> List (Html msg)
+selectionRects maybeSelection metrics lines from to =
+    case maybeSelection of
+        Nothing ->
+            []
+
+        Just ( s, e ) ->
+            List.range (Basics.max from s.line) (Basics.min (to - 1) e.line)
+                |> List.map
+                    (\row ->
+                        let
+                            line =
+                                Array.get row lines |> Maybe.withDefault ""
+
+                            startCell =
+                                if row == s.line then
+                                    TextBuffer.visualColumn line s.col
+
+                                else
+                                    0
+
+                            endCell =
+                                if row == e.line then
+                                    TextBuffer.visualColumn line e.col
+
+                                else
+                                    TextBuffer.visualColumn line (String.length line) + 1
+
+                            px n =
+                                String.fromFloat n ++ "px"
+                        in
+                        div
+                            [ class "veditor-selection"
+                            , style "left" (px (toFloat startCell * metrics.charWidth))
+                            , style "top" (px (toFloat row * metrics.lineHeight))
+                            , style "width" (px (toFloat (endCell - startCell) * metrics.charWidth))
+                            , style "height" (px metrics.lineHeight)
+                            ]
+                            []
+                    )

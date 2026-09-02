@@ -316,22 +316,18 @@ dl.frontmatter-grid dd {
   font-style: italic;
 }
 
-/* Skip layout and paint for off-screen blocks. Editing one block otherwise
-   reflows the whole document (~50ms at 200KB). Mermaid blocks are excluded
-   because mermaid measures text with getBBox while rendering off-screen. */
-.preview-chunk > :not(.mermaid) {
+/* Skip layout and paint for off-screen sections. Each chunk (a heading and
+   what follows it) is the containment unit: with containment on the blocks
+   inside instead, Blink kept re-laying out every table whenever any other
+   scroller on the page moved (~12k objects per editor scroll). Mermaid
+   blocks measure text while rendering, so their chunks stay uncontained. */
+.preview-chunk:not(:has(.mermaid)) {
   content-visibility: auto;
-  contain-intrinsic-size: auto 2em;
+  contain-intrinsic-size: auto 20em;
 }
 
-/* Containment stops the first/last item's margin collapsing through the
-   list's own margin; drop them so list spacing is unchanged. */
-.preview-chunk > ul > li:first-child,
-.preview-chunk > ol > li:first-child {
-  margin-top: 0;
-}
-
-.preview-chunk > ul > li:last-child,
-.preview-chunk > ol > li:last-child {
+/* Containment stops the last block's bottom margin collapsing with the next
+   chunk's heading margin; drop it so section spacing is unchanged. */
+.preview-chunk > :last-child {
   margin-bottom: 0;
 }

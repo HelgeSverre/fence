@@ -522,7 +522,7 @@ registerIpc("fence:save-splits", (data) => {
       updates[key] = data[key];
     }
   }
-  for (const key of ["leftSidebarVisible", "rightSidebarVisible"]) {
+  for (const key of ["leftSidebarVisible", "rightSidebarVisible", "virtualEditor"]) {
     if (typeof data[key] === "boolean") updates[key] = data[key];
   }
   if (

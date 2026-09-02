@@ -26,6 +26,7 @@ const app = Elm.Main.init({
     leftSidebarVisible: initialState.leftSidebarVisible ?? null,
     rightSidebarVisible: initialState.rightSidebarVisible ?? null,
     outlineMaxLevel: initialState.outlineMaxLevel ?? null,
+    virtualEditor: initialState.virtualEditor ?? null,
     leftToggleKey: initialState.leftToggleKey ?? null,
     rightToggleKey: initialState.rightToggleKey ?? null,
   },

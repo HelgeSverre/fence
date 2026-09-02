@@ -29,6 +29,7 @@ import Preview
 import Process
 import Task
 import Types exposing (..)
+import VirtualEditor
 import Yaml
 
 
@@ -91,6 +92,7 @@ type alias Model =
     , rightSidebarVisible : Bool
     , rightSidebarFraction : Float
     , outlineMaxLevel : Int
+    , virtualEditor : Bool -- experimental read-only virtualized editor
     , leftToggleKey : KeyBinding
     , rightToggleKey : KeyBinding
     , rebinding : Maybe RebindTarget
@@ -124,6 +126,7 @@ type Msg
     | ToggleLeftSidebar
     | ToggleRightSidebar
     | SetOutlineMaxLevel Int
+    | ToggleVirtualEditor
     | ScrollToHeading String
     | StartRebind RebindTarget
     | DismissError
@@ -317,6 +320,7 @@ init flagsValue =
       , rebinding = Nothing
       , errorMessage = Nothing
       , closeAfterSave = False
+      , virtualEditor = flag "virtualEditor" D.bool False
       }
     , Cmd.none
     )
@@ -537,6 +541,13 @@ update msg model =
             let
                 newModel =
                     { model | outlineMaxLevel = clamp outlineMinLevel outlineMaxLevelLimit level }
+            in
+            ( newModel, saveSplitsCmd newModel )
+
+        ToggleVirtualEditor ->
+            let
+                newModel =
+                    { model | virtualEditor = not model.virtualEditor }
             in
             ( newModel, saveSplitsCmd newModel )
 
@@ -937,6 +948,14 @@ handlePortMessage tag value model =
             , Cmd.none
             )
 
+        "editorMetrics" ->
+            case D.decodeValue VirtualEditor.metricsDecoder value of
+                Ok metrics ->
+                    ( { model | editor = Editor.update (Editor.MetricsChanged metrics) model.editor }, Cmd.none )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
         "toggleSettings" ->
             update ToggleSettings model
 
@@ -1093,6 +1112,7 @@ saveSplitsCmd model =
             , ( "leftSidebarVisible", E.bool model.leftSidebarVisible )
             , ( "rightSidebarVisible", E.bool model.rightSidebarVisible )
             , ( "outlineMaxLevel", E.int model.outlineMaxLevel )
+            , ( "virtualEditor", E.bool model.virtualEditor )
             , ( "leftToggleKey", encodeKeyBinding model.leftToggleKey )
             , ( "rightToggleKey", encodeKeyBinding model.rightToggleKey )
             ]
@@ -1355,7 +1375,7 @@ view model =
                 []
 
         middleSection =
-            [ ( pct editorTrack, Html.map EditorMsg (Editor.view model.editor) )
+            [ ( pct editorTrack, Html.map EditorMsg (Editor.view { virtual = model.virtualEditor } model.editor) )
             , ( "2px", viewDivider DraggingEditor )
             , ( "1fr", Html.Lazy.lazy2 Preview.view model.frontmatter model.previewHtml )
             ]
@@ -1543,6 +1563,25 @@ viewSettingsDropdown model =
             , div [ class "settings-dropdown-label" ] [ text "Shortcuts" ]
             , viewRebindRow "Toggle left sidebar" model.leftToggleKey RebindLeft model.rebinding
             , viewRebindRow "Toggle right sidebar" model.rightToggleKey RebindRight model.rebinding
+            , div [ class "settings-dropdown-divider" ] []
+            , div [ class "settings-dropdown-label" ] [ text "Experimental" ]
+            , div [ class "settings-dropdown-row" ]
+                [ span [ class "settings-dropdown-row-label" ] [ text "Virtual editor (read-only)" ]
+                , button
+                    [ class "rebind-btn"
+                    , classList [ ( "capturing", model.virtualEditor ) ]
+                    , attribute "data-testid" "toggle-virtual-editor"
+                    , onClick ToggleVirtualEditor
+                    ]
+                    [ text
+                        (if model.virtualEditor then
+                            "On"
+
+                         else
+                            "Off"
+                        )
+                    ]
+                ]
             ]
         ]
 

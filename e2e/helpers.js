@@ -12,7 +12,7 @@ const { _electron: electron } = require("playwright");
 const projectRoot = path.resolve(__dirname, "..");
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
-async function launchFence({ files = { "note.md": "# Original\n" }, open = "note.md", userDataDir } = {}) {
+async function launchFence({ files = { "note.md": "# Original\n" }, open = "note.md", userDataDir, state } = {}) {
   const workspace = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-e2e-"));
   for (const [rel, content] of Object.entries(files)) {
     const target = path.join(workspace, rel);
@@ -20,6 +20,8 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
     await fs.promises.writeFile(target, content, "utf-8");
   }
   const stateDir = userDataDir ?? (await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-e2e-state-")));
+  // Pre-seed persisted settings (state.json) for tests that need a non-default setup.
+  if (state) await fs.promises.writeFile(path.join(stateDir, "state.json"), JSON.stringify(state), "utf-8");
 
   const app = await electron.launch({
     args: [path.join(projectRoot, "dist-electron/main.js"), open ? path.join(workspace, open) : workspace],
@@ -27,8 +29,12 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "true", FENCE_USER_DATA: stateDir },
   });
   const window = await app.firstWindow();
-  await window.getByTestId("editor-textarea").waitFor();
-  if (open) await waitForEditorValue(window, files[open]);
+  if (state?.virtualEditor) {
+    await window.getByTestId("veditor").waitFor();
+  } else {
+    await window.getByTestId("editor-textarea").waitFor();
+    if (open) await waitForEditorValue(window, files[open]);
+  }
 
   return {
     app,

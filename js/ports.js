@@ -1,6 +1,7 @@
 import { setupEditorKeys } from "./editor-keys.js";
 import { reRenderMermaid } from "./mermaid-init.js";
 import { applyFontFamily, applyFontSizesFromState } from "./font-settings.js";
+import { setupEditorMetrics, remeasureEditorMetrics } from "./editor-metrics.js";
 
 export function wirePorts(app) {
   if (!app.ports) return;
@@ -19,8 +20,10 @@ export function wirePorts(app) {
         reRenderMermaid();
       } else if (data.tag === "setFont") {
         applyFontFamily(data.font);
+        remeasureEditorMetrics();
       } else if (data.tag === "setFontSize") {
         applyFontSizesFromState(data);
+        remeasureEditorMetrics();
       }
 
       if (window.electronAPI) {
@@ -75,4 +78,5 @@ export function wirePorts(app) {
   });
 
   setupEditorKeys();
+  setupEditorMetrics(app);
 }

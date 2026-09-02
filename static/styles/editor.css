@@ -94,3 +94,49 @@
   font-variant-ligatures: none;
   font-kerning: none;
 }
+
+/* Virtual editor (experimental, read-only): only visible rows exist in the DOM. */
+.veditor {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-editor);
+  line-height: var(--editor-line-height);
+  tab-size: 2;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  scrollbar-gutter: stable;
+}
+
+.veditor-spacer {
+  position: relative;
+}
+
+.veditor-rows {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.veditor-row {
+  white-space: pre;
+  overflow: hidden;
+}
+
+.veditor-row .editor-line {
+  min-height: 0;
+}
+
+/* Off-screen probe with the editor's font, measured by js/editor-metrics.js. */
+.editor-metrics-probe {
+  position: absolute;
+  top: -1000px;
+  left: 0;
+  visibility: hidden;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-editor);
+  line-height: var(--editor-line-height);
+}

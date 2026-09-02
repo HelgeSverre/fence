@@ -4,6 +4,7 @@ module Editor exposing
     , Token
     , chunksOf
     , init
+    , highlightLine
     , lineTokens
     , overlayPending
     , markSaved
@@ -13,6 +14,7 @@ module Editor exposing
     , view
     )
 
+import Array exposing (Array)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
@@ -20,6 +22,7 @@ import Html.Lazy
 import Json.Decode as D
 import Regex
 import Types exposing (..)
+import VirtualEditor
 
 
 type alias Model =
@@ -29,6 +32,9 @@ type alias Model =
     , revision : Maybe String
     , scrollTop : Float
     , overlayLines : Maybe Int -- Just n: only the first n lines are highlighted so far
+    , lines : Array String -- the content split by line, for the virtual view
+    , maxLineLength : Int
+    , metrics : VirtualEditor.Metrics
     }
 
 
@@ -36,6 +42,7 @@ type Msg
     = ContentChanged String
     | ScrollChanged Float
     | OverlayStep
+    | MetricsChanged VirtualEditor.Metrics
 
 
 init : Model
@@ -46,6 +53,9 @@ init =
     , revision = Nothing
     , scrollTop = 0
     , overlayLines = Nothing
+    , lines = Array.empty
+    , maxLineLength = 0
+    , metrics = VirtualEditor.defaultMetrics
     }
 
 
@@ -63,6 +73,8 @@ setContent path content revision dirty model =
         , revision = Just revision
         , scrollTop = 0
         , overlayLines = initialOverlay content
+        , lines = splitLines content
+        , maxLineLength = longestLine content
     }
 
 
@@ -83,10 +95,15 @@ update : Msg -> Model -> Model
 update msg model =
     case msg of
         ContentChanged content ->
-            { model | content = content, dirtyState = Dirty }
+            -- ponytail: re-splits the whole document per keystroke (~ms at 10k
+            -- lines); slice 2 of the virtual editor edits lines in place.
+            { model | content = content, dirtyState = Dirty, lines = splitLines content, maxLineLength = longestLine content }
 
         ScrollChanged scrollTop ->
             { model | scrollTop = scrollTop }
+
+        MetricsChanged metrics ->
+            { model | metrics = metrics }
 
         OverlayStep ->
             case model.overlayLines of
@@ -147,14 +164,29 @@ overlayStepLines =
     2048
 
 
-view : Model -> Html Msg
-view model =
+splitLines : String -> Array String
+splitLines content =
+    Array.fromList (String.split "\n" content)
+
+
+longestLine : String -> Int
+longestLine content =
+    String.split "\n" content |> List.map String.length |> List.maximum |> Maybe.withDefault 0
+
+
+view : { virtual : Bool } -> Model -> Html Msg
+view options model =
     div [ class "editor-pane", attribute "data-testid" "editor-pane" ]
         [ div [ class "pane-header", attribute "data-testid" "editor-header" ]
             [ span []
                 [ text (headerText model) ]
             ]
-        , div
+        , if options.virtual then
+            div [ class "editor-container" ]
+                [ VirtualEditor.view { onScroll = ScrollChanged, highlightLine = highlightLine } model.metrics model.scrollTop model.maxLineLength model.lines ]
+
+          else
+            div
             [ class "editor-container"
             , classList
                 [ ( "overlay-pending", overlayPending model )

@@ -1,16 +1,13 @@
-App Icons for Fence
+App icons for Fence
 ===================
 
-electron-builder looks in this directory for app icons.
+Source of truth: src/icon.svg (1024x1024, macOS squircle with the standard
+transparent margin). Regenerate every platform icon with:
 
-Required files:
+  bash scripts/build-icons.sh
 
-  icon.icns   - macOS    (512x512 or larger)
-  icon.ico    - Windows  (256x256)
-  icon.png    - Linux    (512x512 or larger)
+Outputs (used by electron-builder, see package.json "build"):
 
-To generate all formats from a single 1024x1024 source PNG:
-
-  bunx electron-icon-builder --input=icon-source.png --output=build/icons/
-
-Until icons are added, electron-builder uses the default Electron icon.
+  icon.icns   macOS   (from the padded source)
+  icon.png    Linux   (margin cropped so it fills its slot)
+  icon.ico    Windows (from icon.png, 16-256px)

@@ -14,6 +14,13 @@
     "email": "helge.sverre@gmail.com",
     "url": "https://helgesver.re"
   },
+  "homepage": "https://github.com/HelgeSverre/fence",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HelgeSverre/fence.git"
+  },
+  "bugs": "https://github.com/HelgeSverre/fence/issues",
+  "license": "MIT",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -30,6 +37,17 @@
   "build": {
     "appId": "no.helgesverre.fence",
     "productName": "Fence",
+    "copyright": "Copyright © 2026 Helge Sverre",
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown", "mdown", "mkd"],
+        "name": "Markdown Document",
+        "description": "Markdown Document",
+        "mimeType": "text/markdown",
+        "role": "Editor",
+        "rank": "Alternate"
+      }
+    ],
     "directories": {
       "output": "release"
     },
@@ -72,7 +90,16 @@
         "AppImage",
         "deb"
       ],
-      "category": "Development"
+      "category": "Development;TextEditor",
+      "maintainer": "Helge Sverre <helge.sverre@gmail.com>",
+      "synopsis": "Split-view Markdown editor",
+      "mimeTypes": ["text/markdown"],
+      "desktop": {
+        "entry": {
+          "Comment": "Split-view Markdown editor with live preview",
+          "Keywords": "markdown;editor;notes;"
+        }
+      }
     },
     "nsis": {
       "oneClick": true,

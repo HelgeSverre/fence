@@ -82,6 +82,8 @@ async function loadRecoveryDraft(filePath) {
 }
 
 let mainWindow;
+let pendingOpenPath = null; // open-file path received before the renderer loaded
+let rendererReady = false;
 
 // Open a folder as the active workspace: point fs-ops at it, push the
 // listing to the renderer, and record it in the recents list.
@@ -252,9 +254,11 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 
-  // Open the CLI-supplied path, or restore the last workspace
+  // Open the Finder/CLI-supplied path, or restore the last workspace
   mainWindow.webContents.on("did-finish-load", async () => {
-    const cliPath = cliPathFrom(process.argv, process.cwd());
+    rendererReady = true;
+    const cliPath = pendingOpenPath || cliPathFrom(process.argv, process.cwd());
+    pendingOpenPath = null;
     if (cliPath) {
       await openCliPath(cliPath);
       return;
@@ -558,6 +562,18 @@ registerIpc("fence:save-recovery-draft", saveRecoveryDraft);
 
 const gotLock = app.requestSingleInstanceLock();
 
+// macOS delivers Finder double-clicks and "Open With" via open-file, not
+// argv; it can fire before the window exists, so hold the path until then.
+app.on("open-file", (event, filePath) => {
+  event.preventDefault();
+  if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.focus();
+    openCliPath(filePath);
+  } else {
+    pendingOpenPath = filePath;
+  }
+});
+
 if (!gotLock) {
   app.quit();
 } else {
@@ -578,7 +594,6 @@ if (!gotLock) {
       applicationVersion: app.getVersion(),
       copyright: "Copyright © 2026 Helge Sverre",
       website: "https://github.com/HelgeSverre/fence",
-      iconPath: path.join(__dirname, "../build/icons/icon.png"),
     });
 
     buildMenu();

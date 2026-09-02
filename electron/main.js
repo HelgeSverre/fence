@@ -476,10 +476,14 @@ registerIpc("fence:read-file", async (data) => {
 registerIpc("fence:write-file", saveDocument);
 
 registerIpc("fence:watch-dir", async (data) => {
-  await fsOps.watchDir(
-    requireString(data, "path", 32768),
-    (event, filePath) => sendToRenderer({ tag: "fsEvent", event, path: filePath }),
-  );
+  await fsOps.watchDir(requireString(data, "path", 32768), async (event, filePath) => {
+    // Mirror readDir's filtering: a new directory only appears once it
+    // holds a markdown file (re-expand the parent to refresh), and
+    // non-markdown files never appear.
+    if (event === "addDir" && !(await fsOps.containsMarkdown(filePath))) return;
+    if ((event === "add" || event === "change") && !fsOps.isMarkdownFile(filePath)) return;
+    sendToRenderer({ tag: "fsEvent", event, path: filePath });
+  });
 });
 
 registerIpc("fence:unwatch-dir", async (data) => {

@@ -22,7 +22,10 @@ describe("startup", () => {
   });
 
   test("launching with a folder shows the tree, an empty editor, and the welcome preview", async () => {
-    const fence = await launchFence({ files: { "a.md": "# A\n", "notes/b.md": "# B\n", "ignored.txt": "x" }, open: null });
+    const fence = await launchFence({
+      files: { "a.md": "# A\n", "notes/b.md": "# B\n", "ignored.txt": "x", "src/app.js": "x", "node_modules/pkg/README.md": "# noise\n" },
+      open: null,
+    });
     try {
       const { window } = fence;
       await window.getByTestId("tree-file").filter({ hasText: "a.md" }).waitFor();
@@ -30,7 +33,8 @@ describe("startup", () => {
       assert.equal(await window.getByTestId("editor-textarea").inputValue(), "");
       await window.getByTestId("preview-welcome").waitFor();
 
-      // Only markdown files and directories are listed; the directory is collapsed.
+      // Only markdown files and directories that contain some are listed;
+      // src/ (no markdown) and node_modules/ (noise) are hidden.
       assert.deepEqual(await window.getByTestId("tree-file").allTextContents(), ["a.md"]);
       assert.deepEqual(await window.getByTestId("tree-dir").allTextContents(), [fence.workspace.split("/").pop(), "notes"]);
     } finally {

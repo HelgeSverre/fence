@@ -21,6 +21,37 @@ describe("workspace filesystem operations", () => {
     await fs.promises.rm(outside, { recursive: true, force: true });
   });
 
+  test("lists only markdown files and directories that lead to some", async () => {
+    const mk = (rel) => fs.promises.mkdir(path.join(workspace, rel), { recursive: true });
+    const touch = (rel) => fs.promises.writeFile(path.join(workspace, rel), "", "utf-8");
+    await mk("docs");
+    await touch("docs/guide.md");
+    await mk("src");
+    await touch("src/app.js");
+    await mk("deep/a/b/c");
+    await touch("deep/a/b/c/notes.markdown");
+    await mk("node_modules/pkg");
+    await touch("node_modules/pkg/README.md");
+    await mk(".hidden");
+    await touch(".hidden/secret.md");
+    await mk("empty");
+    await touch("top.md");
+    await touch("top.txt");
+    await touch("notes.MKD");
+
+    const names = (await fsOps.readDir(workspace)).map((e) => e.name);
+
+    assert.deepEqual(names, ["deep", "docs", "notes.MKD", "top.md"]);
+  });
+
+  test("a huge directory tree is shown rather than scanned exhaustively", async () => {
+    // Above the walk budget the check gives up and reports "yes".
+    const dir = path.join(workspace, "big");
+    await fs.promises.mkdir(dir);
+    await Promise.all(Array.from({ length: 6000 }, (_, i) => fs.promises.writeFile(path.join(dir, `f${i}.txt`), "")));
+    assert.equal(await fsOps.containsMarkdown(dir), true);
+  });
+
   test("reads content with a stable revision", async () => {
     const filePath = path.join(workspace, "note.md");
     await fs.promises.writeFile(filePath, "hello", "utf-8");
@@ -56,6 +87,7 @@ describe("workspace filesystem operations", () => {
     await fs.promises.writeFile(path.join(workspace, "z.md"), "", "utf-8");
     await fs.promises.writeFile(path.join(workspace, ".secret"), "", "utf-8");
     await fs.promises.mkdir(path.join(workspace, "docs"));
+    await fs.promises.writeFile(path.join(workspace, "docs", "a.md"), "", "utf-8");
 
     const entries = await fsOps.readDir(workspace);
     assert.deepEqual(entries.map((entry) => entry.name), ["docs", "z.md"]);

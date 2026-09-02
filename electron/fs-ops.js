@@ -58,11 +58,54 @@ async function resolvePath(target) {
   return pathWithinWorkspace(target);
 }
 
+const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown", ".mdown", ".mkd"]);
+
+// Directories that never hold a user's notes but can hold thousands of
+// READMEs; pruned from the "contains markdown" walk so they stay hidden.
+const NOISE_DIRS = new Set(["node_modules", "vendor", "dist", "build", "target", "out", "coverage", "__pycache__"]);
+const WALK_MAX_DEPTH = 12;
+const WALK_MAX_ENTRIES = 5000;
+
+function isMarkdownFile(name) {
+  return MARKDOWN_EXTENSIONS.has(path.extname(name).toLowerCase());
+}
+
+// Does this directory (recursively) contain a markdown file? Hidden and
+// noise directories are skipped. Huge trees give up early and count as
+// "yes" so a big workspace is never silently hidden.
+async function containsMarkdown(dirPath, budget = { entries: WALK_MAX_ENTRIES }, depth = 0) {
+  if (depth > WALK_MAX_DEPTH || budget.entries <= 0) return true;
+  let entries;
+  try {
+    entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  if (entries.some((entry) => entry.isFile() && isMarkdownFile(entry.name))) return true;
+  budget.entries -= entries.length;
+  if (budget.entries <= 0) return true;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".") || NOISE_DIRS.has(entry.name)) continue;
+    if (await containsMarkdown(path.join(dirPath, entry.name), budget, depth + 1)) return true;
+  }
+  return false;
+}
+
 async function readDir(dirPath) {
   const canonical = await pathWithinWorkspace(dirPath);
   const entries = await fs.promises.readdir(canonical, { withFileTypes: true });
+  // Only markdown files and directories that lead to some are worth showing.
+  const relevant = await Promise.all(
+    entries.map(async (entry) => {
+      if (entry.name.startsWith(".")) return false;
+      if (entry.isDirectory()) {
+        return !NOISE_DIRS.has(entry.name) && (await containsMarkdown(path.join(canonical, entry.name)));
+      }
+      return isMarkdownFile(entry.name);
+    }),
+  );
   return entries
-    .filter((entry) => !entry.name.startsWith("."))
+    .filter((_, i) => relevant[i])
     .sort((a, b) => {
       if (a.isDirectory() && !b.isDirectory()) return -1;
       if (!a.isDirectory() && b.isDirectory()) return 1;
@@ -152,6 +195,8 @@ async function unwatchDir(dirPath) {
 
 module.exports = {
   FileConflictError,
+  containsMarkdown,
+  isMarkdownFile,
   readDir,
   readFile,
   resolvePath,

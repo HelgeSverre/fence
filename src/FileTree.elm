@@ -699,5 +699,5 @@ isMarkdownOrDir entry =
                 name =
                     String.toLower (fileEntryName entry)
             in
-            String.endsWith ".md" name
-                || String.endsWith ".markdown" name
+            -- keep in sync with MARKDOWN_EXTENSIONS in electron/fs-ops.js
+            List.any (\ext -> String.endsWith ext name) [ ".md", ".markdown", ".mdown", ".mkd" ]

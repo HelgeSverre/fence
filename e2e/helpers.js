@@ -74,13 +74,34 @@ function waitForEditorValue(window, expected, timeout = 10000) {
   );
 }
 
-// Replace the whole document: focus, select all, and insert the text as one input.
-async function setEditorContent(window, content) {
+// Put the caret in the document and the focus on the hidden input that
+// receives keys, which is what a click does.
+async function focusEditor(window) {
   await window.locator(".veditor-spacer").click({ position: { x: 2, y: 2 } });
   await window.waitForFunction(() => document.activeElement?.id === "veditor-input");
+}
+
+// Replace the whole document: focus, select all, and insert the text as one input.
+async function setEditorContent(window, content) {
+  await focusEditor(window);
   await window.keyboard.press(`${MOD}+a`);
   await window.keyboard.insertText(content);
   await waitForEditorValue(window, content, 5000);
+}
+
+// Elm renders on the next animation frame, so poll rather than reading straight
+// after a keystroke. Falls back to a plain assert so failures show both texts.
+async function expectEditorText(window, expected) {
+  await window
+    .waitForFunction((want) => [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n") === want, expected, { timeout: 3000 })
+    .catch(async () => assert.equal(await editorText(window), expected));
+}
+
+// A ready-to-type editor holding `content`, for tests that only need one file.
+async function openEditor(content) {
+  const fence = await launchFence({ files: { "note.md": content }, open: "note.md" });
+  await focusEditor(fence.window);
+  return fence;
 }
 
 async function waitForFile(filePath, expected, timeoutMs = 5000) {
@@ -94,4 +115,4 @@ async function waitForFile(filePath, expected, timeoutMs = 5000) {
 
 const save = (window) => window.keyboard.press(`${MOD}+s`);
 
-module.exports = { MOD, launchFence, editorText, waitForEditorValue, setEditorContent, waitForFile, save };
+module.exports = { MOD, launchFence, openEditor, focusEditor, editorText, expectEditorText, waitForEditorValue, setEditorContent, waitForFile, save };

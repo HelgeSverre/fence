@@ -1,35 +1,12 @@
-// Slice 2 gate: editing in the virtual editor through the hidden input,
-// plus the cost of a keystroke in the 712KB reference document.
+// Editing through the hidden input: typing, deletion, motion, undo, paste,
+// and the cost of a keystroke in a very large document.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test, describe } = require("node:test");
-const { launchFence, waitForFile, save, MOD } = require("./helpers");
+const { launchFence, openEditor, focusEditor, editorText, expectEditorText, waitForFile, save, MOD } = require("./helpers");
 
 const SOURCE = process.env.FENCE_LARGE_FILE || "/Users/helge/code/access-virus-archive/Access-Virus-Soundsets.md";
-
-const editorText = (window) =>
-  window.evaluate(() => [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n"));
-
-// Elm renders on the next animation frame, so poll instead of reading right after a key.
-async function expectEditorText(window, expected) {
-  await window.waitForFunction(
-    (want) => [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n") === want,
-    expected,
-    { timeout: 3000 },
-  ).catch(async () => assert.equal(await editorText(window), expected));
-}
-
-async function focusEditor(window) {
-  await window.locator(".veditor-spacer").click({ position: { x: 5, y: 5 } });
-  await window.waitForFunction(() => document.activeElement?.id === "veditor-input");
-}
-
-async function open(content) {
-  const fence = await launchFence({ files: { "note.md": content }, open: "note.md" });
-  await focusEditor(fence.window);
-  return fence;
-}
 
 describe("virtual editor: editing", () => {
   test("typing, newlines, deletion and arrows edit the document and update the preview", async () => {
@@ -93,7 +70,7 @@ describe("virtual editor: editing", () => {
   });
 
   test("Option and Ctrl arrows move, select and delete by word", async () => {
-    const fence = await open("alpha beta gamma");
+    const fence = await openEditor("alpha beta gamma");
     try {
       const { window } = fence;
       // Option+Right stops at the end of the word
@@ -120,7 +97,7 @@ describe("virtual editor: editing", () => {
   });
 
   test("the editor shows a text cursor, like the text field it replaced", async () => {
-    const fence = await open("hello");
+    const fence = await openEditor("hello");
     try {
       const cursors = await fence.window.evaluate(() => ({
         editor: getComputedStyle(document.querySelector("[data-testid=veditor]")).cursor,

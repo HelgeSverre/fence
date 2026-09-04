@@ -364,8 +364,12 @@ editLines f model =
         lines =
             f model.lines
 
-        fix c =
-            TextBuffer.clampCursor lines { c | col = c.col + (String.length (Array.get c.line lines |> Maybe.withDefault "") - String.length (Array.get c.line model.lines |> Maybe.withDefault "")) }
+        lengthOf source index =
+            Array.get index source |> Maybe.withDefault "" |> String.length
+
+        -- an indent or unindent shifts everything on that line sideways
+        followLine cursor =
+            TextBuffer.clampCursor lines { cursor | col = cursor.col + lengthOf lines cursor.line - lengthOf model.lines cursor.line }
     in
     if lines == model.lines then
         model
@@ -374,8 +378,8 @@ editLines f model =
         { model
             | lines = lines
             , content = TextBuffer.toString lines
-            , cursor = fix model.cursor
-            , anchor = Maybe.map fix model.anchor
+            , cursor = followLine model.cursor
+            , anchor = Maybe.map followLine model.anchor
             , maxLineLength = longestOf lines
             , dirtyState = Dirty
             , undo = { lines = model.lines, cursor = model.cursor } :: List.take undoLimit model.undo

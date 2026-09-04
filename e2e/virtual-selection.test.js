@@ -1,31 +1,13 @@
-// Slice 3 gate: selection, clipboard and IME composition in the virtual editor.
+// Selection, clipboard and IME composition.
 const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
-const { launchFence, MOD } = require("./helpers");
-
-const editorText = (window) =>
-  window.evaluate(() => [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n"));
-
-async function expectEditorText(window, expected) {
-  await window.waitForFunction(
-    (want) => [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n") === want,
-    expected,
-    { timeout: 3000 },
-  ).catch(async () => assert.equal(await editorText(window), expected));
-}
-
-async function open(content) {
-  const fence = await launchFence({ files: { "note.md": content }, open: "note.md" });
-  await fence.window.locator(".veditor-spacer").click({ position: { x: 2, y: 2 } });
-  await fence.window.waitForFunction(() => document.activeElement?.id === "veditor-input");
-  return fence;
-}
+const { openEditor, editorText, expectEditorText, MOD } = require("./helpers");
 
 const selectionRects = (window) => window.locator(".veditor-selection").count();
 
 describe("virtual editor: selection and clipboard", () => {
   test("shift+arrows select, the selection is drawn, and typing replaces it", async () => {
-    const fence = await open("hello world");
+    const fence = await openEditor("hello world");
     try {
       const { window } = fence;
       for (let i = 0; i < 5; i++) await window.keyboard.press("Shift+ArrowRight");
@@ -39,7 +21,7 @@ describe("virtual editor: selection and clipboard", () => {
   });
 
   test("Cmd+A selects everything and Backspace clears it; undo brings it back", async () => {
-    const fence = await open("one\ntwo\nthree");
+    const fence = await openEditor("one\ntwo\nthree");
     try {
       const { window } = fence;
       await window.keyboard.press(`${MOD}+a`);
@@ -54,7 +36,7 @@ describe("virtual editor: selection and clipboard", () => {
   });
 
   test("double-click selects a word and triple-click a line", async () => {
-    const fence = await open("alpha beta\nsecond");
+    const fence = await openEditor("alpha beta\nsecond");
     try {
       const { window } = fence;
       const cw = await window.evaluate(() => parseFloat(document.querySelector(".veditor-caret").style.left) || 0);
@@ -70,7 +52,7 @@ describe("virtual editor: selection and clipboard", () => {
   });
 
   test("dragging with the mouse selects text", async () => {
-    const fence = await open("drag me please");
+    const fence = await openEditor("drag me please");
     try {
       const { window } = fence;
       const box = await window.locator(".veditor-spacer").boundingBox();
@@ -91,7 +73,7 @@ describe("virtual editor: selection and clipboard", () => {
   });
 
   test("Cmd+C copies and Cmd+X cuts the selection to the system clipboard", async () => {
-    const fence = await open("copy this\nkeep");
+    const fence = await openEditor("copy this\nkeep");
     try {
       const { window, app } = fence;
       await app.evaluate(({ clipboard }) => clipboard.writeText(""));
@@ -116,7 +98,7 @@ describe("virtual editor: selection and clipboard", () => {
   });
 
   test("Tab indents every selected line and Shift+Tab reverts it", async () => {
-    const fence = await open("a\nb\nc");
+    const fence = await openEditor("a\nb\nc");
     try {
       const { window } = fence;
       await window.keyboard.press("Shift+ArrowDown");
@@ -132,7 +114,7 @@ describe("virtual editor: selection and clipboard", () => {
   });
 
   test("IME composition commits the composed text only", async () => {
-    const fence = await open("");
+    const fence = await openEditor("");
     try {
       const { window, app } = fence;
       const cdp = await app.context().newCDPSession(window);
@@ -148,7 +130,7 @@ describe("virtual editor: selection and clipboard", () => {
   });
 
   test("clicking, scrolling, then clicking again places the caret without jumping the view", async () => {
-    const fence = await open(Array.from({ length: 400 }, (_, i) => `line ${i}`).join("\n"));
+    const fence = await openEditor(Array.from({ length: 400 }, (_, i) => `line ${i}`).join("\n"));
     try {
       const { window } = fence;
       const lh = await window.evaluate(() => parseFloat(document.querySelector(".veditor-caret").style.height));

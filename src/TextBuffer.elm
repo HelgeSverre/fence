@@ -345,32 +345,37 @@ wordRight cursor lines =
         { cursor | col = wordEndAfter line cursor.col }
 
 
-wordEndAfter : String -> Int -> Int
-wordEndAfter line col =
-    case List.filter (\run -> run.end > col) (runsOf line) of
+{-| The edge of the next word in `runs`: the first run's edge when it is a
+word, otherwise the run after it, so one stretch of spaces or punctuation is
+skipped on the way.
+-}
+wordBoundary : ({ start : Int, end : Int, word : Bool } -> Int) -> Int -> List { start : Int, end : Int, word : Bool } -> Int
+wordBoundary edge endOfLine runs =
+    case runs of
         run :: rest ->
             if run.word then
-                run.end
+                edge run
 
             else
-                List.head rest |> Maybe.map .end |> Maybe.withDefault (String.length line)
+                List.head rest |> Maybe.map edge |> Maybe.withDefault endOfLine
 
         [] ->
-            String.length line
+            endOfLine
+
+
+wordEndAfter : String -> Int -> Int
+wordEndAfter line col =
+    runsOf line
+        |> List.filter (\run -> run.end > col)
+        |> wordBoundary .end (String.length line)
 
 
 wordStartBefore : String -> Int -> Int
 wordStartBefore line col =
-    case List.reverse (List.filter (\run -> run.start < col) (runsOf line)) of
-        run :: rest ->
-            if run.word then
-                run.start
-
-            else
-                List.head rest |> Maybe.map .start |> Maybe.withDefault 0
-
-        [] ->
-            0
+    runsOf line
+        |> List.filter (\run -> run.start < col)
+        |> List.reverse
+        |> wordBoundary .start 0
 
 
 lineStart : Cursor -> Cursor

@@ -1,7 +1,5 @@
-// Acceptance gate for the virtualized editor (slice 1, read-only): the 712KB
-// reference document opens with only the visible rows in the DOM, paints its
-// first screen well under the textarea editor's floor, and scrolls to the end
-// without any long layout.
+// The editor renders only the rows in view: it must open a 700KB document
+// fast, keep the DOM small, and scroll it without relaying out the document.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");

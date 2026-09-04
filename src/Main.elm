@@ -276,7 +276,7 @@ settingsItemId n =
 
 focusSilently : String -> Cmd Msg
 focusSilently elementId =
-    Task.attempt (\_ -> NoOp) (Browser.Dom.focus elementId)
+    ignoreResult (Browser.Dom.focus elementId)
 
 
 init : D.Value -> ( Model, Cmd Msg )
@@ -345,22 +345,12 @@ update msg model =
 
         SetTheme themeValue ->
             ( { model | theme = themeValue }
-            , Ports.toElectron
-                (E.object
-                    [ ( "tag", E.string "setTheme" )
-                    , ( "theme", E.string themeValue )
-                    ]
-                )
+            , command "setTheme" [ ( "theme", E.string themeValue ) ]
             )
 
         SetFont fontValue ->
             ( { model | font = fontValue }
-            , Ports.toElectron
-                (E.object
-                    [ ( "tag", E.string "setFont" )
-                    , ( "font", E.string fontValue )
-                    ]
-                )
+            , command "setFont" [ ( "font", E.string fontValue ) ]
             )
 
         SetEditorFontSize size ->
@@ -369,12 +359,7 @@ update msg model =
                     clamp editorFontMin editorFontMax size
             in
             ( { model | editorFontSize = clamped }
-            , Ports.toElectron
-                (E.object
-                    [ ( "tag", E.string "setFontSize" )
-                    , ( "editorFontSize", E.float clamped )
-                    ]
-                )
+            , command "setFontSize" [ ( "editorFontSize", E.float clamped ) ]
             )
 
         SetPreviewFontSize size ->
@@ -383,12 +368,7 @@ update msg model =
                     clamp editorFontMin editorFontMax size
             in
             ( { model | previewFontSize = clamped }
-            , Ports.toElectron
-                (E.object
-                    [ ( "tag", E.string "setFontSize" )
-                    , ( "previewFontSize", E.float clamped )
-                    ]
-                )
+            , command "setFontSize" [ ( "previewFontSize", E.float clamped ) ]
             )
 
         SetUIFontSize size ->
@@ -397,12 +377,7 @@ update msg model =
                     clamp uiFontMin uiFontMax size
             in
             ( { model | uiFontSize = clamped }
-            , Ports.toElectron
-                (E.object
-                    [ ( "tag", E.string "setFontSize" )
-                    , ( "uiFontSize", E.float clamped )
-                    ]
-                )
+            , command "setFontSize" [ ( "uiFontSize", E.float clamped ) ]
             )
 
         CloseSettings ->
@@ -578,10 +553,10 @@ update msg model =
                     Editor.update subMsg model.editor
 
                 -- keep the caret on screen after it moves
-                virtualCmds =
+                followCaret =
                     case ( newEditor.cursor /= model.editor.cursor, Editor.caretFollow newEditor ) of
                         ( True, Just target ) ->
-                            Task.attempt (\_ -> NoOp) (Browser.Dom.setViewportOf "veditor" target.left target.top)
+                            ignoreResult (Browser.Dom.setViewportOf "veditor" target.left target.top)
 
                         _ ->
                             Cmd.none
@@ -604,12 +579,12 @@ update msg model =
                     , Task.perform (\_ -> RecoveryDraftDue recoveryGen) (Process.sleep 1000)
                     , setTitleCmd newEditor
                     , setDirtyCmd True
-                    , virtualCmds
+                    , followCaret
                     ]
                 )
 
             else
-                ( { model | editor = newEditor }, virtualCmds )
+                ( { model | editor = newEditor }, followCaret )
 
         DebouncedParse gen ->
             if gen == model.debounceGeneration then
@@ -783,18 +758,11 @@ saveFile model =
     case ( model.editor.filePath, model.savingContent ) of
         ( Just path, Nothing ) ->
             ( { model | savingContent = Just model.editor.content }
-            , Ports.toElectron
-                (E.object
-                    [ ( "tag", E.string "writeFile" )
-                    , ( "path", E.string path )
-                    , ( "content", E.string model.editor.content )
-                    , ( "expectedRevision"
-                      , model.editor.revision
-                            |> Maybe.map E.string
-                            |> Maybe.withDefault E.null
-                      )
-                    ]
-                )
+            , command "writeFile"
+                [ ( "path", E.string path )
+                , ( "content", E.string model.editor.content )
+                , ( "expectedRevision", model.editor.revision |> Maybe.map E.string |> Maybe.withDefault E.null )
+                ]
             )
 
         _ ->
@@ -917,12 +885,7 @@ handlePortMessage tag value model =
                     in
                     ( { model | fileTree = newTree }
                     , if shouldReload then
-                        Ports.toElectron
-                            (E.object
-                                [ ( "tag", E.string "readFile" )
-                                , ( "path", E.string path )
-                                ]
-                            )
+                        command "readFile" [ ( "path", E.string path ) ]
 
                       else
                         Cmd.none
@@ -955,7 +918,7 @@ handlePortMessage tag value model =
 
         "triggerOpenFolder" ->
             ( model
-            , Ports.toElectron (E.object [ ( "tag", E.string "openFolder" ) ])
+            , command "openFolder" []
             )
 
         "error" ->
@@ -995,45 +958,28 @@ setTitleCmd editor =
                 Nothing ->
                     "Fence"
     in
-    Ports.toElectron
-        (E.object
-            [ ( "tag", E.string "setTitle" )
-            , ( "title", E.string title )
-            ]
-        )
+    command "setTitle" [ ( "title", E.string title ) ]
 
 
 setDirtyCmd : Bool -> Cmd Msg
 setDirtyCmd dirty =
-    Ports.toElectron
-        (E.object
-            [ ( "tag", E.string "setDirty" )
-            , ( "dirty", E.bool dirty )
-            ]
-        )
+    command "setDirty" [ ( "dirty", E.bool dirty ) ]
 
 
 closeWindowCmd : Cmd Msg
 closeWindowCmd =
-    Ports.toElectron (E.object [ ( "tag", E.string "closeWindow" ) ])
+    command "closeWindow" []
 
 
 saveRecoveryDraftCmd : Editor.Model -> Cmd Msg
 saveRecoveryDraftCmd editor =
     case editor.filePath of
         Just path ->
-            Ports.toElectron
-                (E.object
-                    [ ( "tag", E.string "saveRecoveryDraft" )
-                    , ( "path", E.string path )
-                    , ( "content", E.string editor.content )
-                    , ( "revision"
-                      , editor.revision
-                            |> Maybe.map E.string
-                            |> Maybe.withDefault E.null
-                      )
-                    ]
-                )
+            command "saveRecoveryDraft"
+                [ ( "path", E.string path )
+                , ( "content", E.string editor.content )
+                , ( "revision", editor.revision |> Maybe.map E.string |> Maybe.withDefault E.null )
+                ]
 
         Nothing ->
             Cmd.none
@@ -1095,21 +1041,32 @@ computeDrag d clientX model =
             { model | rightSidebarFraction = newFraction }
 
 
+{-| A message to the main process: a tag naming the command, plus its fields.
+-}
+command : String -> List ( String, E.Value ) -> Cmd Msg
+command tag fields =
+    Ports.toElectron (E.object (( "tag", E.string tag ) :: fields))
+
+
+{-| Run a task purely for its effect.
+-}
+ignoreResult : Task.Task x a -> Cmd Msg
+ignoreResult =
+    Task.attempt (\_ -> NoOp)
+
+
 saveSplitsCmd : Model -> Cmd Msg
 saveSplitsCmd model =
-    Ports.toElectron
-        (E.object
-            [ ( "tag", E.string "saveSplits" )
-            , ( "sidebarFraction", E.float model.sidebarFraction )
-            , ( "editorFraction", E.float model.editorFraction )
-            , ( "rightSidebarFraction", E.float model.rightSidebarFraction )
-            , ( "leftSidebarVisible", E.bool model.leftSidebarVisible )
-            , ( "rightSidebarVisible", E.bool model.rightSidebarVisible )
-            , ( "outlineMaxLevel", E.int model.outlineMaxLevel )
-            , ( "leftToggleKey", encodeKeyBinding model.leftToggleKey )
-            , ( "rightToggleKey", encodeKeyBinding model.rightToggleKey )
-            ]
-        )
+    command "saveSplits"
+        [ ( "sidebarFraction", E.float model.sidebarFraction )
+        , ( "editorFraction", E.float model.editorFraction )
+        , ( "rightSidebarFraction", E.float model.rightSidebarFraction )
+        , ( "leftSidebarVisible", E.bool model.leftSidebarVisible )
+        , ( "rightSidebarVisible", E.bool model.rightSidebarVisible )
+        , ( "outlineMaxLevel", E.int model.outlineMaxLevel )
+        , ( "leftToggleKey", encodeKeyBinding model.leftToggleKey )
+        , ( "rightToggleKey", encodeKeyBinding model.rightToggleKey )
+        ]
 
 
 {-| Scroll the preview pane so the heading with `anchorId` is at the top.
@@ -1126,7 +1083,7 @@ scrollToHeadingCmd anchorId =
         (Browser.Dom.getElement "preview-container")
         (Browser.Dom.getViewportOf "preview-container")
         |> Task.andThen (\y -> Browser.Dom.setViewportOf "preview-container" 0 y)
-        |> Task.attempt (\_ -> NoOp)
+        |> ignoreResult
 
 
 {-| Is this `event.key` value a bare modifier key (no real character)?
@@ -1142,46 +1099,30 @@ isModifierKey key =
 
 outCmdsToPortCmds : List FileTree.OutCmd -> Cmd Msg
 outCmdsToPortCmds cmds =
-    cmds
-        |> List.filterMap outCmdToValue
-        |> List.map Ports.toElectron
-        |> Cmd.batch
+    Cmd.batch (List.map outCmdToCommand cmds)
 
 
-outCmdToValue : FileTree.OutCmd -> Maybe E.Value
-outCmdToValue cmd =
+outCmdToCommand : FileTree.OutCmd -> Cmd Msg
+outCmdToCommand cmd =
+    let
+        forPath tag path =
+            command tag [ ( "path", E.string path ) ]
+    in
     case cmd of
         FileTree.CmdOpenFolder ->
-            Just <| E.object [ ( "tag", E.string "openFolder" ) ]
+            command "openFolder" []
 
         FileTree.CmdReadDir path ->
-            Just <|
-                E.object
-                    [ ( "tag", E.string "readDir" )
-                    , ( "path", E.string path )
-                    ]
+            forPath "readDir" path
 
         FileTree.CmdReadFile path ->
-            Just <|
-                E.object
-                    [ ( "tag", E.string "readFile" )
-                    , ( "path", E.string path )
-                    ]
+            forPath "readFile" path
 
         FileTree.CmdWatchDir path ->
-            Just <|
-                E.object
-                    [ ( "tag", E.string "watchDir" )
-                    , ( "path", E.string path )
-                    ]
+            forPath "watchDir" path
 
         FileTree.CmdUnwatchDir path ->
-            Just <|
-                E.object
-                    [ ( "tag", E.string "unwatchDir" )
-                    , ( "path", E.string path )
-                    ]
-
+            forPath "unwatchDir" path
 
 
 -- DECODERS

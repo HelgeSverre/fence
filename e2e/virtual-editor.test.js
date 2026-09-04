@@ -73,7 +73,11 @@ describe("virtual editor", { skip: !fs.existsSync(SOURCE) && `no ${path.basename
       const layoutsDuringScroll = events.filter((e) => e.name === "Layout" && e.ts > scrollStart && e.ts < scrollEnd);
       const worst = layoutsDuringScroll.sort((a, b) => b.dur - a.dur)[0];
       const worstLayout = worst ? worst.dur / 1000 : 0;
-      const worstInfo = worst ? ` (dirty ${worst.args?.beginData?.dirtyObjects}/${worst.args?.beginData?.totalObjects} objects)` : "";
+      // Dirty objects is what virtualization actually controls and is
+      // deterministic; the wall-clock reading of the same work swings 2x with
+      // machine load, so it only guards against a catastrophic regression.
+      const worstDirty = worst ? worst.args?.beginData?.dirtyObjects ?? 0 : 0;
+      const worstInfo = worst ? ` (dirty ${worstDirty}/${worst.args?.beginData?.totalObjects} objects)` : "";
 
       const dom = await window.evaluate(() => ({
         rows: document.querySelectorAll(".veditor-row").length,
@@ -83,7 +87,8 @@ describe("virtual editor", { skip: !fs.existsSync(SOURCE) && `no ${path.basename
       console.log(`virtual-editor: first frame ${paintedMs}ms, ${dom.rows} rows in DOM for ${lineCount} lines, worst layout during scroll ${worstLayout.toFixed(1)}ms${worstInfo}`);
       assert.ok(paintedMs < 150, `first frame painted after ${paintedMs}ms`);
       assert.ok(dom.rows < 200, `${dom.rows} rows rendered`);
-      assert.ok(worstLayout < 16, `a layout during scroll took ${worstLayout.toFixed(1)}ms`);
+      assert.ok(worstDirty < 5000, `scrolling dirtied ${worstDirty} layout objects, so rows are not virtualized`);
+      assert.ok(worstLayout < 50, `a layout during scroll took ${worstLayout.toFixed(1)}ms`);
       assert.equal(dom.lastRowText, content.split("\n").filter((l, i, a) => i === a.length - 1 || l !== "").pop() ?? "", "last line is not rendered at the end");
     } finally {
       await fence.close();

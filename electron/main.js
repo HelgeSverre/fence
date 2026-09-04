@@ -236,6 +236,7 @@ async function openCliPath(cliPath) {
 }
 
 function createWindow() {
+  rendererReady = false;
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -313,8 +314,11 @@ function createWindow() {
             sendToRenderer({ tag: "saveAndClose" });
           } else if (response === 1) {
             // Don't save — force close
-            mainWindow._isDirty = false;
-            mainWindow.close();
+            const win = liveWindow();
+            if (win) {
+              win._isDirty = false;
+              win.close();
+            }
           }
           // Cancel — do nothing
         });
@@ -358,19 +362,19 @@ function openExternalIfSafe(candidate) {
   }
 }
 
+// On macOS the app outlives its window, so `mainWindow` can reference a
+// destroyed object. Every use has to go through this.
+function liveWindow() {
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+}
+
 function sendToRenderer(data) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("fromElm", data);
-  }
+  liveWindow()?.webContents.send("fromElm", data);
 }
 
 function isTrustedIpcEvent(event) {
-  return Boolean(
-    mainWindow &&
-      !mainWindow.isDestroyed() &&
-      event.sender === mainWindow.webContents &&
-      event.senderFrame === mainWindow.webContents.mainFrame,
-  );
+  const win = liveWindow();
+  return Boolean(win && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame);
 }
 
 function requireString(payload, key, maxLength = 100 * 1024 * 1024) {
@@ -583,13 +587,27 @@ const gotLock = app.requestSingleInstanceLock();
 // argv; it can fire before the window exists, so hold the path until then.
 app.on("open-file", (event, filePath) => {
   event.preventDefault();
-  if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
-    if (!QUIET_WINDOW) mainWindow.focus();
-    openCliPath(filePath);
-  } else {
-    pendingOpenPath = filePath;
-  }
+  revealPath(filePath);
 });
+
+// Show `target` (a file or folder, possibly null) in a window, opening one if
+// the app is running without a window, as macOS allows. Before the renderer
+// has loaded, the path is parked for `did-finish-load` to pick up.
+function revealPath(target) {
+  const win = liveWindow();
+  if (!win) {
+    pendingOpenPath = target;
+    if (app.isReady()) createWindow();
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  if (!QUIET_WINDOW) win.focus();
+  if (!rendererReady) {
+    pendingOpenPath = target;
+  } else if (target) {
+    openCliPath(target);
+  }
+}
 
 if (!gotLock) {
   app.quit();
@@ -597,12 +615,7 @@ if (!gotLock) {
   // `fence <path>` while the app is running: the new process forwards its
   // argv here and exits; open the path in the existing window.
   app.on("second-instance", (_event, argv, workingDirectory) => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      if (!QUIET_WINDOW) mainWindow.focus();
-    }
-    const cliPath = cliPathFrom(argv, workingDirectory);
-    if (cliPath) openCliPath(cliPath);
+    revealPath(cliPathFrom(argv, workingDirectory));
   });
 
   app.whenReady().then(() => {
@@ -630,8 +643,6 @@ if (!gotLock) {
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    if (!liveWindow()) createWindow();
   });
 }

@@ -95,6 +95,74 @@ suite =
             , fuzz (Fuzz.intRange 0 40) "offsetOf and cursorAt are inverse" <|
                 \offset -> TB.offsetOf doc (TB.cursorAt doc offset) |> Expect.equal (Basics.min offset (String.length (TB.toString doc)))
             ]
+        , describe "word motion"
+            [ test "right goes to the end of the word, then over the next" <|
+                \_ ->
+                    let
+                        lines =
+                            TB.fromString "alpha beta, gamma"
+                    in
+                    List.map .col [ TB.wordRight (at 0 0) lines, TB.wordRight (at 0 5) lines, TB.wordRight (at 0 10) lines ]
+                        |> Expect.equal [ 5, 10, 17 ]
+            , test "left goes to the start of the word, then over the previous" <|
+                \_ ->
+                    let
+                        lines =
+                            TB.fromString "alpha beta, gamma"
+                    in
+                    List.map .col [ TB.wordLeft (at 0 17) lines, TB.wordLeft (at 0 12) lines, TB.wordLeft (at 0 6) lines ]
+                        |> Expect.equal [ 12, 6, 0 ]
+            , test "right at the end of a line crosses to the next" <|
+                \_ -> TB.wordRight (at 0 5) (TB.fromString "alpha\nbeta") |> Expect.equal (at 1 0)
+            , test "left at the start of a line crosses to the previous" <|
+                \_ -> TB.wordLeft (at 1 0) (TB.fromString "alpha\nbeta") |> Expect.equal (at 0 5)
+            , test "both stop at the document edges" <|
+                \_ ->
+                    let
+                        lines =
+                            TB.fromString "one"
+                    in
+                    ( TB.wordLeft (at 0 0) lines, TB.wordRight (at 0 3) lines ) |> Expect.equal ( at 0 0, at 0 3 )
+            , test "a word containing an astral character stays on boundaries" <|
+                \_ -> TB.wordRight (at 0 0) (TB.fromString "a\u{1F600}b cd") |> Expect.equal (at 0 1)
+            ]
+        , describe "characters outside the BMP occupy two columns and are never split"
+            [ test "moving right steps over the whole character" <|
+                \_ ->
+                    let
+                        lines =
+                            TB.fromString "a\u{1F600}b"
+
+                        walk c =
+                            TB.moveRight c lines
+                    in
+                    List.map .col [ at 0 0, walk (at 0 0), walk (walk (at 0 0)), walk (walk (walk (at 0 0))) ]
+                        |> Expect.equal [ 0, 1, 3, 4 ]
+            , test "moving left steps back over the whole character" <|
+                \_ -> TB.moveLeft (at 0 3) (TB.fromString "a\u{1F600}b") |> Expect.equal (at 0 1)
+            , test "inserting after it leaves it intact" <|
+                \_ -> TB.insert "X" (at 0 3) (TB.fromString "a\u{1F600}b") |> Tuple.first |> TB.toString |> Expect.equal "a\u{1F600}Xb"
+            , test "backspace deletes it whole" <|
+                \_ -> TB.backspace (at 0 3) (TB.fromString "a\u{1F600}b") |> Tuple.mapFirst TB.toString |> Expect.equal ( "ab", at 0 1 )
+            , test "delete forward deletes it whole" <|
+                \_ -> TB.deleteForward (at 0 1) (TB.fromString "a\u{1F600}b") |> Tuple.mapFirst TB.toString |> Expect.equal ( "ab", at 0 1 )
+            , test "clicking never lands between the halves" <|
+                \_ -> List.map (TB.columnFromVisual "a\u{1F600}b") (List.range 0 4) |> Expect.equal [ 0, 1, 3, 4, 4 ]
+            , test "a stale cursor is snapped off the middle of one" <|
+                \_ -> TB.clampCursor (TB.fromString "a\u{1F600}b") (at 0 2) |> Expect.equal (at 0 1)
+            , test "word selection measures in columns, not characters" <|
+                \_ -> TB.wordRange (at 0 5) (TB.fromString "\u{1F600} hello world") |> Expect.equal ( at 0 3, at 0 8 )
+            , fuzz (Fuzz.listOfLengthBetween 0 12 (Fuzz.oneOfValues [ "a", "\u{1F600}", "\t", "é" ]) |> Fuzz.map String.concat) "every column a click can produce is a character boundary" <|
+                \line ->
+                    let
+                        lines =
+                            TB.fromString line
+                    in
+                    List.range 0 20
+                        |> List.map (TB.columnFromVisual line)
+                        |> List.filter (\col -> TB.clampCursor lines (at 0 col) /= at 0 col)
+                        |> Expect.equal []
+            ]
         , fuzz (Fuzz.listOfLengthBetween 0 30 (Fuzz.oneOfValues [ "a", "b", " ", "\n", "\t" ]) |> Fuzz.map String.concat) "the lines array and the string always agree" <|
             \content -> TB.toString (TB.fromString content) |> Expect.equal content
         ]

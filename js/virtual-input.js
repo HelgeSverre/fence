@@ -32,7 +32,11 @@ export function setupVirtualInput() {
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (text) t.dispatchEvent(new CustomEvent("fencepaste", { detail: text, bubbles: true }));
   });
+  document.addEventListener("copy", (e) => handleClipboard(e, false));
+  document.addEventListener("cut", (e) => handleClipboard(e, true));
+  document.addEventListener("keydown", copyOnShortcut);
 }
+
 
 // Copy/cut: Elm exposes the selected text on the hidden input. Both the Edit
 // menu's copy/cut roles (webContents.copy()) and Cmd+C/X in the focused
@@ -48,13 +52,11 @@ function handleClipboard(e, cut) {
   e.clipboardData.setData("text/plain", text);
   if (cut) t.dispatchEvent(new CustomEvent("fencecut", { bubbles: true }));
 }
-document.addEventListener("copy", (e) => handleClipboard(e, false));
-document.addEventListener("cut", (e) => handleClipboard(e, true));
 
 // The keyboard shortcut also reaches the renderer; its default action would
 // copy the hidden input's (empty) native selection after the menu path ran.
 // Copy the selected text ourselves within the gesture instead.
-document.addEventListener("keydown", (e) => {
+function copyOnShortcut(e) {
   const t = e.target;
   if (!t?.classList?.contains("veditor-input") || !(e.metaKey || e.ctrlKey) || e.altKey) return;
   const key = e.key.toLowerCase();
@@ -67,4 +69,4 @@ document.addEventListener("keydown", (e) => {
   document.execCommand("copy"); // fires our copy handler above, which sets the clipboard text
   t.value = "";
   if (key === "x") t.dispatchEvent(new CustomEvent("fencecut", { bubbles: true }));
-});
+}

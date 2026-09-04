@@ -25,6 +25,12 @@ async function focusEditor(window) {
   await window.waitForFunction(() => document.activeElement?.id === "veditor-input");
 }
 
+async function open(content) {
+  const fence = await launchFence({ files: { "note.md": content }, open: "note.md" });
+  await focusEditor(fence.window);
+  return fence;
+}
+
 describe("virtual editor: editing", () => {
   test("typing, newlines, deletion and arrows edit the document and update the preview", async () => {
     const fence = await launchFence({ files: { "note.md": "" }, open: "note.md" });
@@ -81,6 +87,47 @@ describe("virtual editor: editing", () => {
       await fence.app.evaluate(({ clipboard }) => clipboard.writeText("X\nY"));
       await window.keyboard.press(`${MOD}+v`);
       await expectEditorText(window, "aX\nY\nb");
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("Option and Ctrl arrows move, select and delete by word", async () => {
+    const fence = await open("alpha beta gamma");
+    try {
+      const { window } = fence;
+      // Option+Right stops at the end of the word
+      await window.keyboard.press("Alt+ArrowRight");
+      await window.keyboard.type("|");
+      await expectEditorText(window, "alpha| beta gamma");
+
+      // Ctrl+Right is the same motion, for Windows and Linux keyboards
+      await window.keyboard.press("Control+ArrowRight");
+      await window.keyboard.type("|");
+      await expectEditorText(window, "alpha| beta| gamma");
+
+      // Option+Shift+Right selects through the end of the next word
+      await window.keyboard.press("Alt+Shift+ArrowRight");
+      await window.keyboard.type("X");
+      await expectEditorText(window, "alpha| beta|X");
+
+      // Option+Backspace removes the word behind the caret
+      await window.keyboard.press("Alt+Backspace");
+      await expectEditorText(window, "alpha| beta|");
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("the editor shows a text cursor, like the text field it replaced", async () => {
+    const fence = await open("hello");
+    try {
+      const cursors = await fence.window.evaluate(() => ({
+        editor: getComputedStyle(document.querySelector("[data-testid=veditor]")).cursor,
+        preview: getComputedStyle(document.querySelector("[data-testid=preview-content]")).cursor,
+      }));
+      assert.equal(cursors.editor, "text");
+      assert.notEqual(cursors.preview, "text");
     } finally {
       await fence.close();
     }

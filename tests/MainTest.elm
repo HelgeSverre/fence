@@ -49,9 +49,11 @@ openFile path content =
         )
 
 
+{-| Replace the document the way a user would: select everything, then type.
+-}
 edit : String -> Main.Model -> Main.Model
 edit content =
-    step (EditorMsg (Editor.ContentChanged content))
+    step (EditorMsg Editor.SelectAll) >> step (EditorMsg (Editor.InsertText content))
 
 
 keyDown : String -> Bool -> Msg

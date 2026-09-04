@@ -68,8 +68,13 @@ type Key
     | DocEnd
     | PageUp
     | PageDown
+    | WordLeft
+    | WordRight
     | Backspace
     | DeleteKey
+    | DeleteWordBack
+    | DeleteWordForward
+    | DeleteToLineStart
     | Enter
     | Tab
     | ShiftTab
@@ -78,8 +83,7 @@ type Key
 
 
 type Msg
-    = ContentChanged String
-    | ScrollChanged Float Float -- scrollTop scrollLeft
+    = ScrollChanged Float Float -- scrollTop scrollLeft
     | MetricsChanged VirtualEditor.Metrics
     | KeyPressed Key
     | Select Key -- shift + a movement key extends the selection
@@ -101,7 +105,10 @@ init =
     , revision = Nothing
     , scrollTop = 0
     , scrollLeft = 0
-    , lines = Array.empty
+    -- one empty line, never a zero-length array: `lines` and `content` must
+    -- always describe the same document, and Array.set on an empty array is
+    -- silently a no-op, so typing here would do nothing
+    , lines = TextBuffer.fromString ""
     , maxLineLength = 0
     , metrics = VirtualEditor.defaultMetrics
     , cursor = TextBuffer.docStart
@@ -115,6 +122,10 @@ init =
 
 setContent : FilePath -> String -> String -> Bool -> Model -> Model
 setContent path content revision dirty model =
+    let
+        lines =
+            TextBuffer.fromString content
+    in
     { model
         | content = content
         , filePath = Just path
@@ -126,8 +137,8 @@ setContent path content revision dirty model =
                 Clean
         , revision = Just revision
         , scrollTop = 0
-        , lines = splitLines content
-        , maxLineLength = longestLine content
+        , lines = lines
+        , maxLineLength = longestOf lines
         , cursor = TextBuffer.docStart
         , anchor = Nothing
         , dragging = False
@@ -153,11 +164,6 @@ markSaved savedContent revision model =
 update : Msg -> Model -> Model
 update msg model =
     case msg of
-        ContentChanged content ->
-            -- ponytail: re-splits the whole document per keystroke (~ms at 10k
-            -- lines); slice 2 of the virtual editor edits lines in place.
-            { model | content = content, dirtyState = Dirty, lines = splitLines content, maxLineLength = longestLine content, cursor = TextBuffer.clampCursor (splitLines content) model.cursor }
-
         ScrollChanged scrollTop scrollLeft ->
             { model | scrollTop = scrollTop, scrollLeft = scrollLeft }
 
@@ -266,6 +272,12 @@ keyPressed key model =
         Right ->
             move TextBuffer.moveRight
 
+        WordLeft ->
+            move TextBuffer.wordLeft
+
+        WordRight ->
+            move TextBuffer.wordRight
+
         Up ->
             move (TextBuffer.moveUp 1)
 
@@ -313,10 +325,19 @@ keyPressed key model =
                     edit NoCoalesce TextBuffer.unindentLine model
 
         Backspace ->
-            edit Deleting TextBuffer.backspace model
+            deletion Deleting TextBuffer.backspace model
 
         DeleteKey ->
-            edit Deleting TextBuffer.deleteForward model
+            deletion Deleting TextBuffer.deleteForward model
+
+        DeleteWordBack ->
+            deletion NoCoalesce (\cursor lines -> TextBuffer.deleteRange (TextBuffer.wordLeft cursor lines) cursor lines) model
+
+        DeleteWordForward ->
+            deletion NoCoalesce (\cursor lines -> TextBuffer.deleteRange cursor (TextBuffer.wordRight cursor lines) lines) model
+
+        DeleteToLineStart ->
+            deletion NoCoalesce (\cursor lines -> TextBuffer.deleteRange { cursor | col = 0 } cursor lines) model
 
         Escape ->
             { model | anchor = Nothing }
@@ -355,7 +376,7 @@ editLines f model =
             , content = TextBuffer.toString lines
             , cursor = fix model.cursor
             , anchor = Maybe.map fix model.anchor
-            , maxLineLength = Array.foldl (\l m -> Basics.max m (String.length l)) 0 lines
+            , maxLineLength = longestOf lines
             , dirtyState = Dirty
             , undo = { lines = model.lines, cursor = model.cursor } :: List.take undoLimit model.undo
             , redo = []
@@ -420,11 +441,7 @@ edit kind op model =
                     ( model.lines, model.cursor, False )
 
         ( lines, cursor ) =
-            if hadSelection && kind == Deleting then
-                ( baseLines, baseCursor )
-
-            else
-                op baseCursor baseLines
+            op baseCursor baseLines
 
         undo =
             if kind /= NoCoalesce && kind == model.coalesce && not hadSelection then
@@ -432,6 +449,10 @@ edit kind op model =
 
             else
                 { lines = model.lines, cursor = model.cursor } :: List.take undoLimit model.undo
+
+        newContent =
+            -- ponytail: O(n) join per keystroke (~1ms at 10k lines)
+            TextBuffer.toString lines
     in
     if lines == model.lines then
         { model | cursor = cursor, anchor = Nothing }
@@ -441,8 +462,8 @@ edit kind op model =
             | lines = lines
             , cursor = cursor
             , anchor = Nothing
-            , content = TextBuffer.toString lines -- ponytail: O(n) join per keystroke (~1ms at 10k lines)
-            , maxLineLength = Basics.max model.maxLineLength (String.length (Array.get cursor.line lines |> Maybe.withDefault ""))
+            , content = newContent
+            , maxLineLength = widestLine model lines newContent
             , dirtyState = Dirty
             , undo = undo
             , redo = []
@@ -455,6 +476,37 @@ edit kind op model =
         }
 
 
+{-| A deletion. Removing a selection is the whole edit; `op` only runs when
+there is nothing selected, so Backspace with a selection deletes exactly it
+rather than it plus another character.
+-}
+deletion : Coalesce -> (Cursor -> Array String -> ( Array String, Cursor )) -> Model -> Model
+deletion kind op model =
+    if selection model == Nothing then
+        edit kind op model
+
+    else
+        edit kind (\cursor lines -> ( lines, cursor )) model
+
+
+{-| The longest line, which sets the horizontal scroll width. An insertion can
+only widen the edited line, so the old maximum answers it; a deletion may have
+removed the widest line, so that case is recomputed.
+-}
+widestLine : Model -> Array String -> String -> Int
+widestLine model lines newContent =
+    if String.length newContent < String.length model.content then
+        longestOf lines
+
+    else
+        Basics.max model.maxLineLength (String.length (Array.get model.cursor.line lines |> Maybe.withDefault ""))
+
+
+longestOf : Array String -> Int
+longestOf =
+    Array.foldl (\line widest -> Basics.max widest (String.length line)) 0
+
+
 restore : Snapshot -> Model -> Model
 restore snapshot model =
     { model
@@ -462,7 +514,7 @@ restore snapshot model =
         , cursor = TextBuffer.clampCursor snapshot.lines snapshot.cursor
         , content = TextBuffer.toString snapshot.lines
         , anchor = Nothing
-        , maxLineLength = Array.foldl (\l m -> Basics.max m (String.length l)) 0 snapshot.lines
+        , maxLineLength = longestOf snapshot.lines
         , dirtyState = Dirty
         , coalesce = NoCoalesce
     }
@@ -514,123 +566,153 @@ caretFollow model =
         Just { left = Basics.max 0 left, top = Basics.max 0 top }
 
 
-{-| Keys the virtual editor handles itself; anything else (Cmd+S, the
-sidebar shortcuts) bubbles to the app. -}
+{-| Keys the virtual editor handles itself. Anything it returns Nothing for
+bubbles to the application: Cmd+S, the sidebar toggles, and copy/cut/paste,
+which the browser and js/virtual-input.js handle.
+-}
 keyDecoder : D.Decoder ( Msg, Bool )
 keyDecoder =
     D.map5
-        (\key meta ctrl shift alt -> { key = key, mod = meta || ctrl, shift = shift, alt = alt })
+        (\key meta ctrl shift alt -> { key = key, meta = meta, ctrl = ctrl, shift = shift, alt = alt })
         (D.field "key" D.string)
         (D.field "metaKey" D.bool)
         (D.field "ctrlKey" D.bool)
         (D.field "shiftKey" D.bool)
         (D.field "altKey" D.bool)
         |> D.andThen
-            (\{ key, mod, shift, alt } ->
-                let
-                    handled k =
-                        D.succeed ( KeyPressed k, True )
+            (\event ->
+                case editorAction event of
+                    Just msg ->
+                        D.succeed ( msg, True )
 
-                    movement k =
-                        D.succeed
-                            ( if shift then
-                                Select k
-
-                              else
-                                KeyPressed k
-                            , True
-                            )
-                in
-                case ( key, mod, shift ) of
-                    ( "z", True, False ) ->
-                        D.succeed ( Undo, True )
-
-                    ( "z", True, True ) ->
-                        D.succeed ( Redo, True )
-
-                    ( "a", True, False ) ->
-                        D.succeed ( SelectAll, True )
-
-                    ( "ArrowLeft", True, _ ) ->
-                        movement Home
-
-                    ( "ArrowRight", True, _ ) ->
-                        movement End
-
-                    ( "ArrowUp", True, _ ) ->
-                        movement DocStart
-
-                    ( "ArrowDown", True, _ ) ->
-                        movement DocEnd
-
-                    ( "Home", True, _ ) ->
-                        movement DocStart
-
-                    ( "End", True, _ ) ->
-                        movement DocEnd
-
-                    ( _, True, _ ) ->
-                        D.fail "app shortcut"
-
-                    ( "ArrowLeft", _, _ ) ->
-                        movement Left
-
-                    ( "ArrowRight", _, _ ) ->
-                        movement Right
-
-                    ( "ArrowUp", _, _ ) ->
-                        movement Up
-
-                    ( "ArrowDown", _, _ ) ->
-                        movement Down
-
-                    ( "Home", _, _ ) ->
-                        movement Home
-
-                    ( "End", _, _ ) ->
-                        movement End
-
-                    ( "PageUp", _, _ ) ->
-                        movement PageUp
-
-                    ( "PageDown", _, _ ) ->
-                        movement PageDown
-
-                    ( "Backspace", _, _ ) ->
-                        handled Backspace
-
-                    ( "Delete", _, _ ) ->
-                        handled DeleteKey
-
-                    ( "Enter", _, _ ) ->
-                        handled Enter
-
-                    ( "Tab", _, True ) ->
-                        handled ShiftTab
-
-                    ( "Tab", _, False ) ->
-                        handled Tab
-
-                    ( "Escape", _, _ ) ->
-                        handled Escape
-
-                    _ ->
-                        if String.length key == 1 && not alt then
-                            handled (Char key)
-
-                        else
-                            -- dead keys, IME, function keys: let the input event handle it
-                            D.fail "not an editing key"
+                    Nothing ->
+                        D.fail "not an editing key"
             )
 
-splitLines : String -> Array String
-splitLines content =
-    Array.fromList (String.split "\n" content)
+
+type alias KeyEvent =
+    { key : String, meta : Bool, ctrl : Bool, shift : Bool, alt : Bool }
 
 
-longestLine : String -> Int
-longestLine content =
-    String.split "\n" content |> List.map String.length |> List.maximum |> Maybe.withDefault 0
+{-| Modifier conventions, chosen to fit both platforms at once: Cmd or Ctrl
+plus a letter are the usual shortcuts; for motion and deletion, Cmd is
+line-or-document scope (macOS) while Option and Ctrl are word scope (macOS
+and Windows/Linux respectively).
+-}
+editorAction : KeyEvent -> Maybe Msg
+editorAction { key, meta, ctrl, shift, alt } =
+    let
+        shortcut =
+            meta || ctrl
+
+        wordScope =
+            alt || ctrl
+
+        lineScope =
+            meta && not alt
+
+        motion editorKey =
+            Just
+                (if shift then
+                    Select editorKey
+
+                 else
+                    KeyPressed editorKey
+                )
+
+        press =
+            KeyPressed >> Just
+
+        typed =
+            if String.length key == 1 && not shortcut && not alt then
+                press (Char key)
+
+            else
+                -- dead keys, IME and function keys reach us as `input` instead
+                Nothing
+    in
+    case key of
+        "z" ->
+            if shortcut then
+                Just
+                    (if shift then
+                        Redo
+
+                     else
+                        Undo
+                    )
+
+            else
+                typed
+
+        "a" ->
+            if shortcut && not shift then
+                Just SelectAll
+
+            else
+                typed
+
+        "ArrowLeft" ->
+            motion (scoped wordScope WordLeft lineScope Home Left)
+
+        "ArrowRight" ->
+            motion (scoped wordScope WordRight lineScope End Right)
+
+        "ArrowUp" ->
+            motion (scoped False Up lineScope DocStart Up)
+
+        "ArrowDown" ->
+            motion (scoped False Down lineScope DocEnd Down)
+
+        "Home" ->
+            motion (scoped False Home shortcut DocStart Home)
+
+        "End" ->
+            motion (scoped False End shortcut DocEnd End)
+
+        "PageUp" ->
+            motion PageUp
+
+        "PageDown" ->
+            motion PageDown
+
+        "Backspace" ->
+            press (scoped wordScope DeleteWordBack lineScope DeleteToLineStart Backspace)
+
+        "Delete" ->
+            press (scoped wordScope DeleteWordForward False DeleteKey DeleteKey)
+
+        "Enter" ->
+            press Enter
+
+        "Tab" ->
+            press
+                (if shift then
+                    ShiftTab
+
+                 else
+                    Tab
+                )
+
+        "Escape" ->
+            press Escape
+
+        _ ->
+            typed
+
+
+{-| Pick the word-scope, line-scope or plain key for a keypress.
+-}
+scoped : Bool -> Key -> Bool -> Key -> Key -> Key
+scoped isWord wordKey isLine lineKey plainKey =
+    if isWord then
+        wordKey
+
+    else if isLine then
+        lineKey
+
+    else
+        plainKey
 
 
 view : Model -> Html Msg

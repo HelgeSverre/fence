@@ -104,6 +104,7 @@ type Msg
     = FileTreeMsg FileTree.Msg
     | EditorMsg Editor.Msg
     | FromElectron D.Value
+    | MetricsMeasured D.Value
     | KeyDown String Bool Bool Bool Bool
     | DebouncedParse Int
     | ParseStep Int
@@ -703,6 +704,14 @@ update msg model =
                 Err _ ->
                     ( model, Cmd.none )
 
+        MetricsMeasured value ->
+            case D.decodeValue VirtualEditor.metricsDecoder value of
+                Ok metrics ->
+                    ( { model | editor = Editor.update (Editor.MetricsChanged metrics) model.editor }, Cmd.none )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
 
 {-| Begin a progressive parse of the editor content: the first step is
 small so the first screen paints at once; the rest continues in
@@ -940,14 +949,6 @@ handlePortMessage tag value model =
             ( { model | closeAfterSave = False, savingContent = Nothing }
             , Cmd.none
             )
-
-        "editorMetrics" ->
-            case D.decodeValue VirtualEditor.metricsDecoder value of
-                Ok metrics ->
-                    ( { model | editor = Editor.update (Editor.MetricsChanged metrics) model.editor }, Cmd.none )
-
-                Err _ ->
-                    ( model, Cmd.none )
 
         "toggleSettings" ->
             update ToggleSettings model
@@ -1276,6 +1277,7 @@ subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
         [ Ports.fromElectron FromElectron
+        , Ports.editorMetrics MetricsMeasured
         , Browser.Events.onKeyDown keyDecoder
         , Browser.Events.onResize WindowResized
         , -- Background parse steps run one per painted frame, so a large

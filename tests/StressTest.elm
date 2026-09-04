@@ -218,7 +218,8 @@ mainMsg =
         , Fuzz.map Main.SetOutlineMaxLevel (Fuzz.intRange -5 12)
         , Fuzz.constant Main.ToggleSettings
         , Fuzz.constant Main.CloseSettings
-        , Fuzz.map (\s -> Main.EditorMsg (Editor.ContentChanged s)) markdownDoc
+        , Fuzz.map (\s -> Main.EditorMsg (Editor.InsertText s)) markdownDoc
+        , Fuzz.constant (Main.EditorMsg Editor.SelectAll)
         , Fuzz.map Main.DebouncedParse (Fuzz.intRange 0 5)
         , Fuzz.map (\k -> Main.KeyDown k True False False False) (Fuzz.oneOfValues [ "1", "3", "s", "Escape", "x" ])
         , Fuzz.map Main.SetTheme (Fuzz.oneOfValues [ "", "light", "dracula" ])

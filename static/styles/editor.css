@@ -7,6 +7,7 @@
 /* The editor: only visible rows exist in the DOM (see src/VirtualEditor.elm). */
 .veditor {
   position: absolute;
+  cursor: text;
   inset: 0;
   overflow: auto;
   padding: 16px;
@@ -23,6 +24,14 @@
   position: relative;
 }
 
+/* Clicks must reach the spacer: mousedown offsets are taken relative to the
+   event target, and only the spacer spans the whole document, so anything
+   layered over it (rows, caret, selection, the hidden input) would report
+   coordinates in its own space and place the caret on the wrong line. */
+.veditor-spacer * {
+  pointer-events: none;
+}
+
 .veditor-rows {
   position: absolute;
   left: 0;
@@ -30,19 +39,16 @@
   /* Every layer above the spacer is click-transparent: mousedown offsets
      must be relative to the spacer (the whole document), not the window of
      rendered rows, or clicks after scrolling land on the wrong line. */
-  pointer-events: none;
 }
 
 .veditor-row {
   white-space: pre;
   overflow: hidden;
-  pointer-events: none; /* clicks land on the spacer, whose offsets map to lines */
 }
 
 .veditor-selection-layer {
   position: absolute;
   inset: 0;
-  pointer-events: none;
 }
 
 .veditor-selection {
@@ -54,14 +60,12 @@
   position: absolute;
   width: 2px;
   background: var(--text-primary);
-  pointer-events: none;
   animation: veditor-blink 1s steps(2, start) infinite;
 }
 
 .veditor:focus-within .veditor-selection-layer {
   position: absolute;
   inset: 0;
-  pointer-events: none;
 }
 
 .veditor-selection {
@@ -81,7 +85,6 @@
 
 .veditor-input {
   position: absolute;
-  pointer-events: none; /* clicks must hit the spacer, whose offsets map to lines */
   width: 1px;
   padding: 0;
   margin: 0;

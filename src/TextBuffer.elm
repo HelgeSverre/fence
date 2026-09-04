@@ -21,17 +21,27 @@ module TextBuffer exposing
     , offsetOf
     , order
     , sliceRange
-    , tabWidth
     , toString
     , unindentLine
     , unindentLines
+    , wordLeft
+    , wordRight
     , visualColumn
     , wordRange
     )
 
 {-| Pure editing operations on a document stored as an array of lines with a
-single cursor. Columns are code-unit offsets into the line; `visualColumn`
-maps them to rendered cells (tabs expand to `tabWidth`).
+single cursor.
+
+Columns are UTF-16 code-unit offsets, matching `String.left`/`String.dropLeft`.
+A character outside the Basic Multilingual Plane (emoji, rarer CJK, some
+symbols) occupies two of them, so every function that produces a column steps
+by `charUnits` and never lands between the halves of a surrogate pair. Slicing
+there would split the character into two lone surrogates and destroy it.
+
+`visualColumn` maps a column to rendered cells, where a tab expands to
+`tabWidth`. Cells assume one column per character; a double-width glyph still
+counts as one, so the caret can sit half a glyph off next to wide emoji.
 -}
 
 import Array exposing (Array)
@@ -61,8 +71,76 @@ clampCursor lines cursor =
     let
         line =
             clamp 0 (Basics.max 0 (Array.length lines - 1)) cursor.line
+
+        text =
+            lineAt line lines
     in
-    { line = line, col = clamp 0 (String.length (lineAt line lines)) cursor.col }
+    { line = line, col = snapToBoundary text (clamp 0 (String.length text) cursor.col) }
+
+
+
+-- CODE UNITS
+--
+-- Columns index UTF-16 code units. These four helpers are the only places
+-- that know a character can be two units wide; everything else steps through
+-- them and so stays on character boundaries.
+
+
+{-| Code units occupied by a character: two outside the Basic Multilingual
+Plane, one otherwise.
+-}
+charUnits : Char -> Int
+charUnits char =
+    if Char.toCode char > 0xFFFF then
+        2
+
+    else
+        1
+
+
+{-| Units of the character starting at `col`, or 0 at the end of the line.
+-}
+unitsForward : String -> Int -> Int
+unitsForward line col =
+    String.dropLeft col line
+        |> String.uncons
+        |> Maybe.map (Tuple.first >> charUnits)
+        |> Maybe.withDefault 0
+
+
+{-| Units of the character ending at `col`, or 0 at the start of the line.
+-}
+unitsBackward : String -> Int -> Int
+unitsBackward line col =
+    if col <= 0 then
+        0
+
+    else if isTrailingUnit line (col - 1) then
+        2
+
+    else
+        1
+
+
+{-| Is the code unit at `index` the second half of a surrogate pair?
+-}
+isTrailingUnit : String -> Int -> Bool
+isTrailingUnit line index =
+    String.slice index (index + 1) line
+        |> String.uncons
+        |> Maybe.map (\( char, _ ) -> Char.toCode char >= 0xDC00 && Char.toCode char <= 0xDFFF)
+        |> Maybe.withDefault False
+
+
+{-| Move a column off the middle of a surrogate pair, towards the line start.
+-}
+snapToBoundary : String -> Int -> Int
+snapToBoundary line col =
+    if col > 0 && isTrailingUnit line col then
+        col - 1
+
+    else
+        col
 
 
 
@@ -116,9 +194,12 @@ backspace cursor lines =
         let
             current =
                 lineAt cursor.line lines
+
+            width =
+                unitsBackward current cursor.col
         in
-        ( Array.set cursor.line (String.left (cursor.col - 1) current ++ String.dropLeft cursor.col current) lines
-        , { cursor | col = cursor.col - 1 }
+        ( Array.set cursor.line (String.left (cursor.col - width) current ++ String.dropLeft cursor.col current) lines
+        , { cursor | col = cursor.col - width }
         )
 
     else if cursor.line > 0 then
@@ -136,7 +217,7 @@ deleteForward cursor lines =
             lineAt cursor.line lines
     in
     if cursor.col < String.length current then
-        ( Array.set cursor.line (String.left cursor.col current ++ String.dropLeft (cursor.col + 1) current) lines, cursor )
+        ( Array.set cursor.line (String.left cursor.col current ++ String.dropLeft (cursor.col + unitsForward current cursor.col) current) lines, cursor )
 
     else if cursor.line < Array.length lines - 1 then
         ( joinWithNext cursor.line lines, cursor )
@@ -188,7 +269,7 @@ splitAround i lines =
 moveLeft : Cursor -> Array String -> Cursor
 moveLeft cursor lines =
     if cursor.col > 0 then
-        { cursor | col = cursor.col - 1 }
+        { cursor | col = cursor.col - unitsBackward (lineAt cursor.line lines) cursor.col }
 
     else if cursor.line > 0 then
         { line = cursor.line - 1, col = String.length (lineAt (cursor.line - 1) lines) }
@@ -200,7 +281,7 @@ moveLeft cursor lines =
 moveRight : Cursor -> Array String -> Cursor
 moveRight cursor lines =
     if cursor.col < String.length (lineAt cursor.line lines) then
-        { cursor | col = cursor.col + 1 }
+        { cursor | col = cursor.col + unitsForward (lineAt cursor.line lines) cursor.col }
 
     else if cursor.line < Array.length lines - 1 then
         { line = cursor.line + 1, col = 0 }
@@ -227,6 +308,69 @@ moveVertical targetLine cursor lines =
             visualColumn (lineAt cursor.line lines) cursor.col
     in
     { line = targetLine, col = columnFromVisual (lineAt targetLine lines) visual }
+
+
+{-| Start of the previous word, crossing to the previous line at column 0.
+Non-word characters before the word are skipped, as on every platform.
+-}
+wordLeft : Cursor -> Array String -> Cursor
+wordLeft cursor lines =
+    if cursor.col == 0 then
+        if cursor.line > 0 then
+            lineEnd { cursor | line = cursor.line - 1 } lines
+
+        else
+            cursor
+
+    else
+        { cursor | col = wordStartBefore (lineAt cursor.line lines) cursor.col }
+
+
+{-| End of the next word, crossing to the next line at the end of this one.
+-}
+wordRight : Cursor -> Array String -> Cursor
+wordRight cursor lines =
+    let
+        line =
+            lineAt cursor.line lines
+    in
+    if cursor.col >= String.length line then
+        if cursor.line < Array.length lines - 1 then
+            { line = cursor.line + 1, col = 0 }
+
+        else
+            cursor
+
+    else
+        { cursor | col = wordEndAfter line cursor.col }
+
+
+wordEndAfter : String -> Int -> Int
+wordEndAfter line col =
+    case List.filter (\run -> run.end > col) (runsOf line) of
+        run :: rest ->
+            if run.word then
+                run.end
+
+            else
+                List.head rest |> Maybe.map .end |> Maybe.withDefault (String.length line)
+
+        [] ->
+            String.length line
+
+
+wordStartBefore : String -> Int -> Int
+wordStartBefore line col =
+    case List.reverse (List.filter (\run -> run.start < col) (runsOf line)) of
+        run :: rest ->
+            if run.word then
+                run.start
+
+            else
+                List.head rest |> Maybe.map .start |> Maybe.withDefault 0
+
+        [] ->
+            0
 
 
 lineStart : Cursor -> Cursor
@@ -279,29 +423,42 @@ visualColumn line col =
 
 
 {-| Inverse of `visualColumn`: the column whose cell is at or just before the
-visual offset (rounding to the nearest boundary). -}
+visual offset, rounded to the nearest character boundary.
+-}
 columnFromVisual : String -> Int -> Int
 columnFromVisual line target =
     let
-        step c ( col, vis, found ) =
+        step char ( col, vis, found ) =
             case found of
                 Just _ ->
                     ( col, vis, found )
 
                 Nothing ->
                     let
-                        width =
-                            if c == '\t' then
+                        cells =
+                            if char == '\t' then
                                 tabWidth - modBy tabWidth vis
 
                             else
                                 1
+
+                        units =
+                            charUnits char
                     in
-                    if vis + width > target then
-                        ( col, vis, Just (if target - vis >= (width + 1) // 2 then col + 1 else col) )
+                    if vis + cells > target then
+                        ( col
+                        , vis
+                        , Just
+                            (if target - vis >= (cells + 1) // 2 then
+                                col + units
+
+                             else
+                                col
+                            )
+                        )
 
                     else
-                        ( col + 1, vis + width, Nothing )
+                        ( col + units, vis + cells, Nothing )
     in
     case String.foldl step ( 0, 0, Nothing ) line of
         ( _, _, Just col ) ->
@@ -355,47 +512,64 @@ deleteRange a b lines =
 
 
 {-| The word (letters, digits, underscore) under the cursor, or the run of
-other characters there, for double-click selection. -}
+other characters there, for double-click selection.
+-}
 wordRange : Cursor -> Array String -> ( Cursor, Cursor )
 wordRange cursor lines =
     let
         line =
             lineAt cursor.line lines
 
-        chars =
-            Array.fromList (String.toList line)
-
-        isWord c =
-            Char.isAlphaNum c || c == '_'
-
-        classAt i =
-            Array.get i chars |> Maybe.map isWord
-
-        cls =
-            classAt cursor.col |> Maybe.withDefault (classAt (cursor.col - 1) |> Maybe.withDefault False)
-
-        extend step i =
-            if classAt (i + step) == Just cls then
-                extend step (i + step)
-
-            else
-                i
-
-        startCol =
-            if classAt cursor.col == Just cls then
-                extend -1 cursor.col
-
-            else
-                extend -1 (cursor.col - 1)
-
-        endCol =
-            if classAt cursor.col == Just cls then
-                extend 1 cursor.col + 1
-
-            else
-                cursor.col
+        containing =
+            runsOf line
+                |> List.filter (\run -> run.start <= cursor.col && cursor.col < run.end)
+                |> List.head
     in
-    ( { cursor | col = Basics.max 0 startCol }, { cursor | col = Basics.min (String.length line) endCol } )
+    case containing of
+        Just run ->
+            ( { cursor | col = run.start }, { cursor | col = run.end } )
+
+        Nothing ->
+            -- past the last character: take the run that ends there
+            case List.reverse (runsOf line) of
+                run :: _ ->
+                    ( { cursor | col = run.start }, { cursor | col = run.end } )
+
+                [] ->
+                    ( cursor, cursor )
+
+
+{-| Maximal runs of same-kind characters as column ranges, `word` marking
+runs of letters, digits and underscores.
+-}
+runsOf : String -> List { start : Int, end : Int, word : Bool }
+runsOf line =
+    let
+        isWord char =
+            Char.isAlphaNum char || char == '_'
+
+        step char ( col, acc ) =
+            let
+                next =
+                    col + charUnits char
+
+                word =
+                    isWord char
+            in
+            case acc of
+                run :: rest ->
+                    if run.word == word then
+                        ( next, { run | end = next } :: rest )
+
+                    else
+                        ( next, { start = col, end = next, word = word } :: acc )
+
+                [] ->
+                    ( next, [ { start = col, end = next, word = word } ] )
+    in
+    String.foldl step ( 0, [] ) line
+        |> Tuple.second
+        |> List.reverse
 
 
 {-| The whole line including its line break, for triple-click selection. -}

@@ -46,20 +46,22 @@ stateSuite =
             \_ ->
                 Editor.init
                     |> Editor.setContent "/notes/a.md" "one" "rev-1" False
-                    |> Editor.update (Editor.ContentChanged "two")
-                    |> Editor.update (Editor.ContentChanged "three")
-                    |> Editor.markSaved "two" "rev-2"
+                    |> Editor.update (Editor.KeyPressed Editor.DocEnd)
+                    |> Editor.update (Editor.InsertText "-two")
+                    |> Editor.update (Editor.InsertText "-three")
+                    |> Editor.markSaved "one-two" "rev-2"
                     |> (\model ->
                             Expect.equal
-                                ( Dirty, Just "rev-2", "three" )
+                                ( Dirty, Just "rev-2", "one-two-three" )
                                 ( model.dirtyState, model.revision, model.content )
                        )
         , test "a save acknowledgement for the current content cleans the document" <|
             \_ ->
                 Editor.init
                     |> Editor.setContent "/notes/a.md" "one" "rev-1" False
-                    |> Editor.update (Editor.ContentChanged "two")
-                    |> Editor.markSaved "two" "rev-2"
+                    |> Editor.update (Editor.KeyPressed Editor.DocEnd)
+                    |> Editor.update (Editor.InsertText "-two")
+                    |> Editor.markSaved "one-two" "rev-2"
                     |> .dirtyState
                     |> Expect.equal Clean
         ]
@@ -202,6 +204,12 @@ editingSuite =
                     |> Editor.update (Editor.PointerDown { x = 33, y = 25, shift = False, clicks = 1 })
                     |> .cursor
                     |> Expect.equal { line = 1, col = 3 }
+        , test "a never-opened editor is one empty line, so typing works" <|
+            \_ ->
+                Editor.init
+                    |> Editor.update (Editor.KeyPressed (Editor.Char "a"))
+                    |> (\m -> ( m.content, m.cursor ))
+                    |> Expect.equal ( "a", { line = 0, col = 1 } )
         , test "opening a file resets the caret and history" <|
             \_ -> opened |> type_ "zzz" |> Editor.setContent "/n/b.md" "new" "r2" False |> (\m -> ( m.cursor, m.undo )) |> Expect.equal ( { line = 0, col = 0 }, [] )
         , test "the key decoder maps editing keys and lets app shortcuts through" <|
@@ -311,6 +319,66 @@ selectionSuite =
                     |> Expect.equal ( False, "hel" )
         , test "a click without movement leaves no selection" <|
             \_ -> opened |> metrics |> click 1 0 0 False |> Editor.update Editor.PointerUp |> Editor.selection |> Expect.equal Nothing
+        , test "word motion moves and selects by word" <|
+            \_ ->
+                let
+                    m =
+                        Editor.setContent "/n/a.md" "alpha beta gamma" "r" False Editor.init
+                in
+                Expect.all
+                    [ \_ -> press Editor.WordRight m |> .cursor |> Expect.equal { line = 0, col = 5 }
+                    , \_ -> m |> press Editor.WordRight |> press Editor.WordRight |> press Editor.WordLeft |> .cursor |> Expect.equal { line = 0, col = 6 }
+                    , \_ -> m |> select Editor.WordRight |> Editor.selectedText |> Expect.equal "alpha"
+                    ]
+                    ()
+        , test "word and line deletion" <|
+            \_ ->
+                let
+                    m =
+                        Editor.setContent "/n/a.md" "alpha beta gamma" "r" False Editor.init |> press Editor.End
+                in
+                Expect.all
+                    [ \_ -> press Editor.DeleteWordBack m |> .content |> Expect.equal "alpha beta "
+                    , \_ -> press Editor.DeleteToLineStart m |> .content |> Expect.equal ""
+                    , \_ -> Editor.setContent "/n/a.md" "alpha beta" "r" False Editor.init |> press Editor.DeleteWordForward |> .content |> Expect.equal " beta"
+                    , \_ -> m |> press Editor.DeleteWordBack |> press Editor.DeleteWordBack |> Editor.update Editor.Undo |> .content |> Expect.equal "alpha beta "
+                    ]
+                    ()
+        , test "deleting with a selection removes exactly the selection" <|
+            \_ ->
+                Editor.setContent "/n/a.md" "alpha beta" "r" False Editor.init
+                    |> select Editor.WordRight
+                    |> press Editor.DeleteWordBack
+                    |> .content
+                    |> Expect.equal " beta"
+        , test "the key decoder maps modifier scopes to word, line and character motion" <|
+            \_ ->
+                let
+                    ev key mods =
+                        E.object ([ ( "key", E.string key ), ( "metaKey", E.bool False ), ( "ctrlKey", E.bool False ), ( "shiftKey", E.bool False ), ( "altKey", E.bool False ) ] |> List.map (\( k, v ) -> ( k, if List.member k mods then E.bool True else v )))
+
+                    decoded key mods =
+                        D.decodeValue Editor.keyDecoder (ev key mods) |> Result.toMaybe |> Maybe.map Tuple.first
+                in
+                Expect.equal
+                    [ Just (Editor.KeyPressed Editor.Left)
+                    , Just (Editor.KeyPressed Editor.WordLeft)
+                    , Just (Editor.KeyPressed Editor.WordLeft)
+                    , Just (Editor.KeyPressed Editor.Home)
+                    , Just (Editor.Select Editor.WordRight)
+                    , Just (Editor.KeyPressed Editor.DeleteWordBack)
+                    , Just (Editor.KeyPressed Editor.DeleteToLineStart)
+                    , Just (Editor.KeyPressed Editor.DeleteWordForward)
+                    ]
+                    [ decoded "ArrowLeft" []
+                    , decoded "ArrowLeft" [ "altKey" ]
+                    , decoded "ArrowLeft" [ "ctrlKey" ]
+                    , decoded "ArrowLeft" [ "metaKey" ]
+                    , decoded "ArrowRight" [ "altKey", "shiftKey" ]
+                    , decoded "Backspace" [ "altKey" ]
+                    , decoded "Backspace" [ "metaKey" ]
+                    , decoded "Delete" [ "altKey" ]
+                    ]
         , test "the key decoder turns shift+movement into Select and Cmd+A into SelectAll" <|
             \_ ->
                 let
@@ -342,71 +410,106 @@ type Op
     | PasteOp String
 
 
+{-| The document as a flat list of characters with a code-point cursor. This
+representation cannot express a cursor inside a character, so it is a genuine
+oracle for the editor's UTF-16 columns rather than a copy of them.
+-}
 type alias Ref =
-    { text : String, cursor : Int, anchor : Maybe Int }
+    { chars : List Char, cursor : Int, anchor : Maybe Int }
 
 
 refApply : Op -> Ref -> Ref
 refApply op ref =
     let
-        sel =
-            ref.anchor |> Maybe.andThen (\a -> if a == ref.cursor then Nothing else Just ( Basics.min a ref.cursor, Basics.max a ref.cursor ))
+        selectionBounds =
+            ref.anchor
+                |> Maybe.andThen
+                    (\a ->
+                        if a == ref.cursor then
+                            Nothing
 
-        deleteSel =
-            case sel of
-                Just ( s, e ) ->
-                    { text = String.left s ref.text ++ String.dropLeft e ref.text, cursor = s, anchor = Nothing }
+                        else
+                            Just ( Basics.min a ref.cursor, Basics.max a ref.cursor )
+                    )
+
+        withoutSelection =
+            case selectionBounds of
+                Just ( start, end ) ->
+                    { chars = List.take start ref.chars ++ List.drop end ref.chars, cursor = start, anchor = Nothing }
 
                 Nothing ->
                     { ref | anchor = Nothing }
 
-        insertAt str r =
-            { r | text = String.left r.cursor r.text ++ str ++ String.dropLeft r.cursor r.text, cursor = r.cursor + String.length str }
+        insertAt text target =
+            let
+                inserted =
+                    String.toList text
+            in
+            { target
+                | chars = List.take target.cursor target.chars ++ inserted ++ List.drop target.cursor target.chars
+                , cursor = target.cursor + List.length inserted
+            }
 
         move extend target =
-            { ref | cursor = target, anchor = if extend then Just (Maybe.withDefault ref.cursor ref.anchor) else Nothing }
-
-        lineStartOf i =
-            String.left i ref.text |> String.indexes "\n" |> List.reverse |> List.head |> Maybe.map ((+) 1) |> Maybe.withDefault 0
-
-        lineEndOf i =
-            String.dropLeft i ref.text |> String.indexes "\n" |> List.head |> Maybe.map ((+) i) |> Maybe.withDefault (String.length ref.text)
-    in
-    case op of
-        TypeChar c ->
-            insertAt c deleteSel
-
-        PasteOp str ->
-            insertAt str deleteSel
-
-        Newline ->
-            insertAt "\n" deleteSel
-
-        BackspaceOp ->
-            case sel of
-                Just _ ->
-                    deleteSel
-
-                Nothing ->
-                    if ref.cursor > 0 then
-                        { ref | text = String.left (ref.cursor - 1) ref.text ++ String.dropLeft ref.cursor ref.text, cursor = ref.cursor - 1, anchor = Nothing }
+            { ref
+                | cursor = target
+                , anchor =
+                    if extend then
+                        Just (Maybe.withDefault ref.cursor ref.anchor)
 
                     else
-                        { ref | anchor = Nothing }
+                        Nothing
+            }
+
+        lineStartOf index =
+            List.take index ref.chars
+                |> List.indexedMap Tuple.pair
+                |> List.filter (\( _, char ) -> char == '\n')
+                |> List.reverse
+                |> List.head
+                |> Maybe.map (\( i, _ ) -> i + 1)
+                |> Maybe.withDefault 0
+
+        lineEndOf index =
+            List.drop index ref.chars
+                |> List.indexedMap Tuple.pair
+                |> List.filter (\( _, char ) -> char == '\n')
+                |> List.head
+                |> Maybe.map (\( i, _ ) -> index + i)
+                |> Maybe.withDefault (List.length ref.chars)
+    in
+    case op of
+        TypeChar text ->
+            insertAt text withoutSelection
+
+        PasteOp text ->
+            insertAt text withoutSelection
+
+        Newline ->
+            insertAt "\n" withoutSelection
+
+        BackspaceOp ->
+            if selectionBounds /= Nothing then
+                withoutSelection
+
+            else if ref.cursor > 0 then
+                { ref | chars = List.take (ref.cursor - 1) ref.chars ++ List.drop ref.cursor ref.chars, cursor = ref.cursor - 1, anchor = Nothing }
+
+            else
+                { ref | anchor = Nothing }
 
         DeleteOp ->
-            case sel of
-                Just _ ->
-                    deleteSel
+            if selectionBounds /= Nothing then
+                withoutSelection
 
-                Nothing ->
-                    { ref | text = String.left ref.cursor ref.text ++ String.dropLeft (ref.cursor + 1) ref.text, anchor = Nothing }
+            else
+                { ref | chars = List.take ref.cursor ref.chars ++ List.drop (ref.cursor + 1) ref.chars, anchor = Nothing }
 
         LeftOp extend ->
             move extend (Basics.max 0 (ref.cursor - 1))
 
         RightOp extend ->
-            move extend (Basics.min (String.length ref.text) (ref.cursor + 1))
+            move extend (Basics.min (List.length ref.chars) (ref.cursor + 1))
 
         HomeOp extend ->
             move extend (lineStartOf ref.cursor)
@@ -415,7 +518,7 @@ refApply op ref =
             move extend (lineEndOf ref.cursor)
 
         SelectAllOp ->
-            { ref | anchor = Just 0, cursor = String.length ref.text }
+            { ref | anchor = Just 0, cursor = List.length ref.chars }
 
 
 editorApply : Op -> Editor.Model -> Editor.Model
@@ -474,18 +577,39 @@ opFuzzer =
 
 referenceSuite : Test
 referenceSuite =
-    fuzzWith { runs = 300, distribution = noDistribution } (Fuzz.listOfLengthBetween 0 40 opFuzzer) "random edit sequences match a plain-string reference model" <|
+    let
+        -- the editor's UTF-16 column expressed as a code-point index, which is
+        -- only well defined while the cursor sits on a character boundary
+        codePointIndex editor cursor =
+            String.left (TextBuffer.offsetOf editor.lines cursor) editor.content
+                |> String.foldl (\_ n -> n + 1) 0
+    in
+    fuzzWith { runs = 300, distribution = noDistribution } (Fuzz.listOfLengthBetween 0 40 opFuzzer) "random edit sequences match a character-level reference model" <|
         \ops ->
             let
                 start =
                     "ab\ncd"
 
                 ref =
-                    List.foldl refApply { text = start, cursor = 0, anchor = Nothing } ops
+                    List.foldl refApply { chars = String.toList start, cursor = 0, anchor = Nothing } ops
 
                 editor =
                     List.foldl editorApply (Editor.setContent "/n/a.md" start "r" False Editor.init) ops
+
+                refSelectionStart =
+                    ref.anchor
+                        |> Maybe.andThen
+                            (\a ->
+                                if a == ref.cursor then
+                                    Nothing
+
+                                else
+                                    Just (Basics.min a ref.cursor)
+                            )
             in
             Expect.equal
-                ( ref.text, ref.cursor, ref.anchor |> Maybe.andThen (\a -> if a == ref.cursor then Nothing else Just (Basics.min a ref.cursor)) )
-                ( editor.content, TextBuffer.offsetOf editor.lines editor.cursor, Editor.selection editor |> Maybe.map (\( s, _ ) -> TextBuffer.offsetOf editor.lines s) )
+                ( String.fromList ref.chars, ref.cursor, refSelectionStart )
+                ( editor.content
+                , codePointIndex editor editor.cursor
+                , Editor.selection editor |> Maybe.map (\( s, _ ) -> codePointIndex editor s)
+                )

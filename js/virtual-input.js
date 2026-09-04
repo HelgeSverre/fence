@@ -3,6 +3,20 @@
 // DOM won't re-set an unchanged "" value). Paste is turned into a custom
 // event carrying plain text, since Elm cannot call clipboardData.getData.
 export function setupVirtualInput() {
+  // Focus the hidden input on click without letting focus() scroll the
+  // container (Elm's mousedown handler prevents the default focus change).
+  document.addEventListener("mousedown", (e) => {
+    if (!e.target?.closest?.(".veditor-spacer")) return;
+    const input = document.getElementById("veditor-input");
+    if (!input) return;
+    // Elm moves the input to the new caret on the next frame; a key that
+    // arrives before that would go to an input still at the old position
+    // and Chromium would scroll to reveal it. Move it to the clicked row now.
+    const lineHeight = parseFloat(input.style.height) || 20;
+    input.style.top = `${Math.floor(e.offsetY / lineHeight) * lineHeight}px`;
+    input.style.left = `${Math.max(0, e.offsetX)}px`;
+    input.focus({ preventScroll: true });
+  }, true);
   document.addEventListener("input", (e) => {
     const t = e.target;
     if (t?.classList?.contains("veditor-input") && !e.isComposing) t.value = "";

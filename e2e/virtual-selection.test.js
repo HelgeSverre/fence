@@ -15,7 +15,7 @@ async function expectEditorText(window, expected) {
 }
 
 async function open(content) {
-  const fence = await launchFence({ files: { "note.md": content }, open: "note.md", state: { virtualEditor: true } });
+  const fence = await launchFence({ files: { "note.md": content }, open: "note.md" });
   await fence.window.locator(".veditor-spacer").click({ position: { x: 2, y: 2 } });
   await fence.window.waitForFunction(() => document.activeElement?.id === "veditor-input");
   return fence;
@@ -142,6 +142,31 @@ describe("virtual editor: selection and clipboard", () => {
       assert.ok(!during.includes("ni"), `composition text leaked into the document: ${JSON.stringify(during)}`);
       await cdp.send("Input.insertText", { text: "你" });
       await expectEditorText(window, "你");
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("clicking, scrolling, then clicking again places the caret without jumping the view", async () => {
+    const fence = await open(Array.from({ length: 400 }, (_, i) => `line ${i}`).join("\n"));
+    try {
+      const { window } = fence;
+      const lh = await window.evaluate(() => parseFloat(document.querySelector(".veditor-caret").style.height));
+      await window.locator(".veditor-spacer").click({ position: { x: 10, y: lh * 5 + 2 } });
+      await window.keyboard.press("Shift+End"); // leave a selection behind, like a user might
+      await window.evaluate(() => { document.querySelector("[data-testid=veditor]").scrollTop = 4000; });
+      await window.waitForFunction(() => document.querySelector(".veditor-row")?.textContent !== "line 0");
+      const before = await window.evaluate(() => document.querySelector("[data-testid=veditor]").scrollTop);
+      const target = await window.evaluate(() => document.querySelectorAll(".veditor-row")[12].textContent);
+      const box = await window.locator(".veditor-row").nth(12).boundingBox();
+      await window.mouse.click(box.x + 10, box.y + box.height / 2);
+      await window.keyboard.type("|");
+      // the marker must land in the clicked row (10px in, so column 1)
+      await window.waitForFunction((t) => [...document.querySelectorAll(".veditor-row")].some((r) => r.textContent.includes("|") && r.textContent.replace("|", "") === t), target);
+      const after = await window.evaluate(() => ({ scrollTop: document.querySelector("[data-testid=veditor]").scrollTop, selections: document.querySelectorAll(".veditor-selection").length, focused: document.activeElement?.id }));
+      assert.ok(Math.abs(after.scrollTop - before) < 2, `view jumped from ${before} to ${after.scrollTop}`);
+      assert.equal(after.selections, 0);
+      assert.equal(after.focused, "veditor-input");
     } finally {
       await fence.close();
     }

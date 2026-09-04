@@ -54,7 +54,7 @@ suite =
                         Array.initialize 10000 (\i -> "line " ++ String.fromInt i)
                 in
                 VirtualEditor.view
-                    { onScroll = always ()
+                    { onScroll = \_ _ -> ()
                     , highlightLine = Html.text
                     , keyDecoder = D.fail "n/a"
                     , onInput = always ()

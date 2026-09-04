@@ -26,15 +26,10 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
   const app = await electron.launch({
     args: [path.join(projectRoot, "dist-electron/main.js"), open ? path.join(workspace, open) : workspace],
     cwd: projectRoot,
-    env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "true", FENCE_USER_DATA: stateDir },
+    env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "true", FENCE_USER_DATA: stateDir, FENCE_QUIET_WINDOW: "1" },
   });
   const window = await app.firstWindow();
-  const virtual = state?.virtualEditor ?? true; // the virtual editor is the default engine
-  if (virtual) {
-    await window.getByTestId("veditor").waitFor();
-  } else {
-    await window.getByTestId("editor-textarea").waitFor();
-  }
+  await window.getByTestId("veditor").waitFor();
   try {
     if (open) await waitForEditorValue(window, files[open]);
   } catch (error) {
@@ -58,25 +53,17 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
   };
 }
 
-// The document text as the editor shows it: the textarea's value, or (in the
-// virtual editor) the visible rows, which is the whole document for the short
-// files these tests use.
+// The document text as the editor shows it: the visible rows, which is the
+// whole document for the short files these tests use.
 function editorText(window) {
-  return window.evaluate(() => {
-    const ta = document.querySelector("[data-testid=editor-textarea]");
-    if (ta) return ta.value;
-    return [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n");
-  });
+  return window.evaluate(() => [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n"));
 }
 
-// Virtual editor: only visible rows are in the DOM, so compare the exposed
-// document length and require the visible rows to be a prefix of the text
-// (tests read from the top).
+// Only visible rows are in the DOM, so compare the exposed document length and
+// require the visible rows to be a prefix of the text (tests read from the top).
 function waitForEditorValue(window, expected, timeout = 10000) {
   return window.waitForFunction(
     (value) => {
-      const ta = document.querySelector("[data-testid=editor-textarea]");
-      if (ta) return ta.value === value;
       const ve = document.querySelector("[data-testid=veditor]");
       if (!ve || Number(ve.dataset.length) !== value.length) return false;
       const rows = [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n");
@@ -87,16 +74,8 @@ function waitForEditorValue(window, expected, timeout = 10000) {
   );
 }
 
-// Replace the whole document. Textarea: native setter + input event (a paste).
-// Virtual editor: focus, select all, and insert the text as one input.
+// Replace the whole document: focus, select all, and insert the text as one input.
 async function setEditorContent(window, content) {
-  const isVirtual = (await window.getByTestId("editor-textarea").count()) === 0;
-  if (!isVirtual) {
-    return window.getByTestId("editor-textarea").evaluate((element, value) => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(element, value);
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-    }, content);
-  }
   await window.locator(".veditor-spacer").click({ position: { x: 2, y: 2 } });
   await window.waitForFunction(() => document.activeElement?.id === "veditor-input");
   await window.keyboard.press(`${MOD}+a`);

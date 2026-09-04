@@ -104,7 +104,8 @@ js/
 ├── main.js             App initialization
 ├── elm.js              Elm app bootstrap
 ├── ports.js            Port subscriptions
-├── editor-keys.js      Keyboard shortcut handling
+├── virtual-input.js    Editor hidden-input glue (paste, copy/cut, focus, IME)
+├── editor-metrics.js   Measures monospace metrics for the editor
 └── mermaid-init.js     Mermaid diagram rendering
 static/
 ├── fonts/              Bundled fonts

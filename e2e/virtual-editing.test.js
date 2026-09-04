@@ -27,7 +27,7 @@ async function focusEditor(window) {
 
 describe("virtual editor: editing", () => {
   test("typing, newlines, deletion and arrows edit the document and update the preview", async () => {
-    const fence = await launchFence({ files: { "note.md": "" }, open: "note.md", state: { virtualEditor: true } });
+    const fence = await launchFence({ files: { "note.md": "" }, open: "note.md" });
     try {
       const { window } = fence;
       await focusEditor(window);
@@ -50,7 +50,7 @@ describe("virtual editor: editing", () => {
   });
 
   test("Tab indents, Shift+Tab unindents, and Cmd+Z / Cmd+Shift+Z undo and redo", async () => {
-    const fence = await launchFence({ files: { "note.md": "line" }, open: "note.md", state: { virtualEditor: true } });
+    const fence = await launchFence({ files: { "note.md": "line" }, open: "note.md" });
     try {
       const { window } = fence;
       await focusEditor(window);
@@ -73,7 +73,7 @@ describe("virtual editor: editing", () => {
   });
 
   test("pasting inserts multi-line text at the caret", async () => {
-    const fence = await launchFence({ files: { "note.md": "a\nb" }, open: "note.md", state: { virtualEditor: true } });
+    const fence = await launchFence({ files: { "note.md": "a\nb" }, open: "note.md" });
     try {
       const { window } = fence;
       await focusEditor(window);
@@ -87,7 +87,7 @@ describe("virtual editor: editing", () => {
   });
 
   test("Cmd+S still saves and clears the dirty marker", async () => {
-    const fence = await launchFence({ files: { "note.md": "x" }, open: "note.md", state: { virtualEditor: true } });
+    const fence = await launchFence({ files: { "note.md": "x" }, open: "note.md" });
     try {
       const { window } = fence;
       await focusEditor(window);
@@ -103,7 +103,7 @@ describe("virtual editor: editing", () => {
   });
 
   test("clicking places the caret at that line and column", async () => {
-    const fence = await launchFence({ files: { "note.md": "first\nsecond\nthird" }, open: "note.md", state: { virtualEditor: true } });
+    const fence = await launchFence({ files: { "note.md": "first\nsecond\nthird" }, open: "note.md" });
     try {
       const { window } = fence;
       const m = await window.evaluate(() => { const c = document.querySelector(".veditor-caret"); return { lh: parseFloat(c.style.height) }; });
@@ -122,7 +122,7 @@ describe("virtual editor: editing", () => {
 describe("virtual editor: keystroke cost", { skip: !fs.existsSync(SOURCE) && `no ${path.basename(SOURCE)}` }, () => {
   test("a keystroke in the 712KB reference document costs under 2ms of layout", async () => {
     const content = fs.readFileSync(SOURCE, "utf-8");
-    const fence = await launchFence({ files: { "big.md": content }, open: "big.md", state: { virtualEditor: true } });
+    const fence = await launchFence({ files: { "big.md": content }, open: "big.md" });
     try {
       const { window } = fence;
       await window.waitForFunction(() => document.querySelectorAll(".veditor-row").length > 10);

@@ -92,7 +92,6 @@ type alias Model =
     , rightSidebarVisible : Bool
     , rightSidebarFraction : Float
     , outlineMaxLevel : Int
-    , virtualEditor : Bool -- experimental read-only virtualized editor
     , leftToggleKey : KeyBinding
     , rightToggleKey : KeyBinding
     , rebinding : Maybe RebindTarget
@@ -126,7 +125,6 @@ type Msg
     | ToggleLeftSidebar
     | ToggleRightSidebar
     | SetOutlineMaxLevel Int
-    | ToggleVirtualEditor
     | ScrollToHeading String
     | StartRebind RebindTarget
     | DismissError
@@ -320,7 +318,6 @@ init flagsValue =
       , rebinding = Nothing
       , errorMessage = Nothing
       , closeAfterSave = False
-      , virtualEditor = flag "virtualEditor" D.bool True
       }
     , Cmd.none
     )
@@ -544,13 +541,6 @@ update msg model =
             in
             ( newModel, saveSplitsCmd newModel )
 
-        ToggleVirtualEditor ->
-            let
-                newModel =
-                    { model | virtualEditor = not model.virtualEditor }
-            in
-            ( newModel, saveSplitsCmd newModel )
-
         ScrollToHeading anchorId ->
             ( model, scrollToHeadingCmd anchorId )
 
@@ -586,25 +576,14 @@ update msg model =
                 newEditor =
                     Editor.update subMsg model.editor
 
-                -- keep the caret on screen and the hidden input focused
+                -- keep the caret on screen after it moves
                 virtualCmds =
-                    if model.virtualEditor then
-                        Cmd.batch
-                            [ if newEditor.cursor /= model.editor.cursor then
-                                followCaretCmd newEditor
+                    case ( newEditor.cursor /= model.editor.cursor, Editor.caretFollow newEditor ) of
+                        ( True, Just target ) ->
+                            Task.attempt (\_ -> NoOp) (Browser.Dom.setViewportOf "veditor" target.left target.top)
 
-                              else
-                                Cmd.none
-                            , case subMsg of
-                                Editor.PointerDown _ ->
-                                    focusSilently "veditor-input"
-
-                                _ ->
-                                    Cmd.none
-                            ]
-
-                    else
-                        Cmd.none
+                        _ ->
+                            Cmd.none
             in
             if newEditor.content /= model.editor.content then
                 let
@@ -629,12 +608,7 @@ update msg model =
                 )
 
             else
-                case subMsg of
-                    Editor.OverlayStep ->
-                        ( { model | editor = newEditor, framePainted = False }, Cmd.none )
-
-                    _ ->
-                        ( { model | editor = newEditor }, virtualCmds )
+                ( { model | editor = newEditor }, virtualCmds )
 
         DebouncedParse gen ->
             if gen == model.debounceGeneration then
@@ -648,11 +622,8 @@ update msg model =
                 let
                     ( afterParse, _ ) =
                         update (ParseStep model.debounceGeneration) model
-
-                    ( afterOverlay, _ ) =
-                        update (EditorMsg Editor.OverlayStep) afterParse
                 in
-                ( { afterOverlay | framePainted = False }, Cmd.none )
+                ( { afterParse | framePainted = False }, Cmd.none )
 
             else
                 ( { model | framePainted = True }, Cmd.none )
@@ -770,50 +741,6 @@ continueParse budget progress model =
       }
     , Cmd.none
     )
-
-
-{-| Scroll the virtual editor just enough to keep the caret visible, in
-both axes, from its current scroll position. -}
-followCaretCmd : Editor.Model -> Cmd Msg
-followCaretCmd editor =
-    let
-        caret =
-            Editor.caretPixel editor
-
-        m =
-            editor.metrics
-
-        pad =
-            16
-
-        within lo size lo0 span =
-            -- keep [lo, lo+size] inside the window [lo0, lo0+span]
-            if lo < lo0 then
-                lo
-
-            else if lo + size > lo0 + span then
-                lo + size - span
-
-            else
-                lo0
-    in
-    Browser.Dom.getViewportOf "veditor"
-        |> Task.andThen
-            (\{ viewport } ->
-                let
-                    x =
-                        within caret.x (m.charWidth + pad * 2) viewport.x viewport.width
-
-                    y =
-                        within caret.y (m.lineHeight + pad * 2) viewport.y viewport.height
-                in
-                if x == viewport.x && y == viewport.y then
-                    Task.succeed ()
-
-                else
-                    Browser.Dom.setViewportOf "veditor" (Basics.max 0 x) (Basics.max 0 y)
-            )
-        |> Task.attempt (\_ -> NoOp)
 
 
 {-| Characters of uncached source parsed before the first paint. -}
@@ -1178,7 +1105,6 @@ saveSplitsCmd model =
             , ( "leftSidebarVisible", E.bool model.leftSidebarVisible )
             , ( "rightSidebarVisible", E.bool model.rightSidebarVisible )
             , ( "outlineMaxLevel", E.int model.outlineMaxLevel )
-            , ( "virtualEditor", E.bool model.virtualEditor )
             , ( "leftToggleKey", encodeKeyBinding model.leftToggleKey )
             , ( "rightToggleKey", encodeKeyBinding model.rightToggleKey )
             ]
@@ -1352,9 +1278,9 @@ subscriptions model =
         [ Ports.fromElectron FromElectron
         , Browser.Events.onKeyDown keyDecoder
         , Browser.Events.onResize WindowResized
-        , -- Background parse/overlay steps run one per painted frame, so a
-          -- large document paints its first screen before the rest fills in.
-          if model.parseProgress /= Nothing || Editor.overlayPending model.editor then
+        , -- Background parse steps run one per painted frame, so a large
+          -- document paints its first screen before the rest fills in.
+          if model.parseProgress /= Nothing then
             Browser.Events.onAnimationFrame (\_ -> Frame)
 
           else
@@ -1446,7 +1372,7 @@ view model =
                 []
 
         middleSection =
-            [ ( pct editorTrack, Html.map EditorMsg (Editor.view { virtual = model.virtualEditor } model.editor) )
+            [ ( pct editorTrack, Html.map EditorMsg (Editor.view model.editor) )
             , ( "2px", viewDivider DraggingEditor )
             , ( "1fr", Html.Lazy.lazy2 Preview.view model.frontmatter model.previewHtml )
             ]
@@ -1634,25 +1560,6 @@ viewSettingsDropdown model =
             , div [ class "settings-dropdown-label" ] [ text "Shortcuts" ]
             , viewRebindRow "Toggle left sidebar" model.leftToggleKey RebindLeft model.rebinding
             , viewRebindRow "Toggle right sidebar" model.rightToggleKey RebindRight model.rebinding
-            , div [ class "settings-dropdown-divider" ] []
-            , div [ class "settings-dropdown-label" ] [ text "Editor engine" ]
-            , div [ class "settings-dropdown-row" ]
-                [ span [ class "settings-dropdown-row-label" ] [ text "Virtual editor" ]
-                , button
-                    [ class "rebind-btn"
-                    , classList [ ( "capturing", model.virtualEditor ) ]
-                    , attribute "data-testid" "toggle-virtual-editor"
-                    , onClick ToggleVirtualEditor
-                    ]
-                    [ text
-                        (if model.virtualEditor then
-                            "On"
-
-                         else
-                            "Off"
-                        )
-                    ]
-                ]
             ]
         ]
 

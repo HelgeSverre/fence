@@ -13,7 +13,7 @@ Elm 0.19.1 frontend + Electron 28 desktop shell, bundled with Vite.
 
 - `src/` — Elm app: `Main.elm` (entry, TEA app), `Types.elm` (shared types), `Ports.elm` (JS interop), `Editor.elm`, `Preview.elm`, `Markdown.elm`, `FileTree.elm`, `Frontmatter.elm`, `Yaml.elm`, `Icon.elm`
 - `electron/` — Main process (`main.js`), preload script, filesystem ops (`fs-ops.js`)
-- `js/` — JS glue: Elm init (`elm.js`), port handlers (`ports.js`), keybindings (`editor-keys.js`)
+- `js/` — JS glue: Elm init (`elm.js`), port handlers (`ports.js`), editor input and metrics (`virtual-input.js`, `editor-metrics.js`)
 - Elm↔JS communication uses ports (`Ports.toElectron`/`Ports.fromElectron`) with JSON-encoded messages
 
 ## Code Style

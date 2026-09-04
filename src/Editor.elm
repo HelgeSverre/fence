@@ -2,19 +2,16 @@ module Editor exposing
     ( Model
     , Msg(..)
     , Token
-    , chunksOf
     , init
     , Key(..)
-    , caretPixel
+    , caretFollow
     , dragging
     , highlightLine
     , keyDecoder
     , selectedText
     , selection
     , lineTokens
-    , overlayPending
     , markSaved
-    , maxHighlightedCharacters
     , setContent
     , update
     , view
@@ -24,7 +21,6 @@ import Array exposing (Array)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
-import Html.Lazy
 import Json.Decode as D
 import Regex
 import TextBuffer exposing (Cursor)
@@ -38,7 +34,7 @@ type alias Model =
     , dirtyState : DirtyState
     , revision : Maybe String
     , scrollTop : Float
-    , overlayLines : Maybe Int -- Just n: only the first n lines are highlighted so far
+    , scrollLeft : Float
     , lines : Array String -- the content split by line, for the virtual view
     , maxLineLength : Int
     , metrics : VirtualEditor.Metrics
@@ -83,8 +79,7 @@ type Key
 
 type Msg
     = ContentChanged String
-    | ScrollChanged Float
-    | OverlayStep
+    | ScrollChanged Float Float -- scrollTop scrollLeft
     | MetricsChanged VirtualEditor.Metrics
     | KeyPressed Key
     | Select Key -- shift + a movement key extends the selection
@@ -105,7 +100,7 @@ init =
     , dirtyState = Clean
     , revision = Nothing
     , scrollTop = 0
-    , overlayLines = Nothing
+    , scrollLeft = 0
     , lines = Array.empty
     , maxLineLength = 0
     , metrics = VirtualEditor.defaultMetrics
@@ -131,7 +126,6 @@ setContent path content revision dirty model =
                 Clean
         , revision = Just revision
         , scrollTop = 0
-        , overlayLines = initialOverlay content
         , lines = splitLines content
         , maxLineLength = longestLine content
         , cursor = TextBuffer.docStart
@@ -164,8 +158,8 @@ update msg model =
             -- lines); slice 2 of the virtual editor edits lines in place.
             { model | content = content, dirtyState = Dirty, lines = splitLines content, maxLineLength = longestLine content, cursor = TextBuffer.clampCursor (splitLines content) model.cursor }
 
-        ScrollChanged scrollTop ->
-            { model | scrollTop = scrollTop }
+        ScrollChanged scrollTop scrollLeft ->
+            { model | scrollTop = scrollTop, scrollLeft = scrollLeft }
 
         MetricsChanged metrics ->
             { model | metrics = metrics }
@@ -253,25 +247,6 @@ update msg model =
                     restore snapshot { model | redo = rest, undo = { lines = model.lines, cursor = model.cursor } :: model.undo }
 
                 [] ->
-                    model
-
-        OverlayStep ->
-            case model.overlayLines of
-                Just n ->
-                    let
-                        next =
-                            n + overlayStepLines
-                    in
-                    { model
-                        | overlayLines =
-                            if next >= lineCount model.content then
-                                Nothing
-
-                            else
-                                Just next
-                    }
-
-                Nothing ->
                     model
 
 
@@ -498,10 +473,45 @@ undoLimit =
     200
 
 
-{-| Caret position in pixels inside the virtual editor's spacer. -}
-caretPixel : Model -> { x : Float, y : Float }
-caretPixel model =
-    VirtualEditor.caretPosition model.metrics model.lines model.cursor
+{-| Where to scroll so the caret is visible, or Nothing if it already is.
+Decided from the model's own scroll position at the moment the caret moves:
+reading the DOM later (Browser.Dom.getViewportOf) raced with the user's own
+scrolling and yanked the view back to a stale caret.
+-}
+caretFollow : Model -> Maybe { left : Float, top : Float }
+caretFollow model =
+    let
+        caret =
+            VirtualEditor.caretPosition model.metrics model.lines model.cursor
+
+        m =
+            model.metrics
+
+        pad =
+            16
+
+        within lo size lo0 span =
+            -- keep [lo, lo + size] inside the window [lo0, lo0 + span]
+            if lo < lo0 then
+                lo
+
+            else if lo + size > lo0 + span then
+                lo + size - span
+
+            else
+                lo0
+
+        left =
+            within caret.x (m.charWidth + pad * 2) model.scrollLeft m.viewportWidth
+
+        top =
+            within caret.y (m.lineHeight + pad * 2) model.scrollTop m.viewportHeight
+    in
+    if left == model.scrollLeft && top == model.scrollTop then
+        Nothing
+
+    else
+        Just { left = Basics.max 0 left, top = Basics.max 0 top }
 
 
 {-| Keys the virtual editor handles itself; anything else (Cmd+S, the
@@ -613,45 +623,6 @@ keyDecoder =
                             D.fail "not an editing key"
             )
 
-{-| A large document paints with the textarea's own text first and builds
-the highlight overlay a few thousand lines per frame behind it (see
-`overlay-pending` in editor.css), so opening never blocks on laying out
-tens of thousands of highlight nodes.
--}
-initialOverlay : String -> Maybe Int
-initialOverlay content =
-    if lineCount content > initialOverlayLines then
-        Just initialOverlayLines
-
-    else
-        Nothing
-
-
-overlayPending : Model -> Bool
-overlayPending model =
-    model.overlayLines /= Nothing
-
-
-lineCount : String -> Int
-lineCount content =
-    List.length (String.indexes "\n" content) + 1
-
-
-initialOverlayLines : Int
-initialOverlayLines =
-    256
-
-
-largeDocumentCharacters : Int
-largeDocumentCharacters =
-    200000
-
-
-overlayStepLines : Int
-overlayStepLines =
-    2048
-
-
 splitLines : String -> Array String
 splitLines content =
     Array.fromList (String.split "\n" content)
@@ -662,64 +633,32 @@ longestLine content =
     String.split "\n" content |> List.map String.length |> List.maximum |> Maybe.withDefault 0
 
 
-view : { virtual : Bool } -> Model -> Html Msg
-view options model =
+view : Model -> Html Msg
+view model =
     div [ class "editor-pane", attribute "data-testid" "editor-pane" ]
         [ div [ class "pane-header", attribute "data-testid" "editor-header" ]
             [ span []
                 [ text (headerText model) ]
             ]
-        , if options.virtual then
-            div [ class "editor-container" ]
-                [ VirtualEditor.view
-                    { onScroll = ScrollChanged
-                    , highlightLine = highlightLine
-                    , keyDecoder = keyDecoder
-                    , onInput = InsertText
-                    , onPaste = InsertText
-                    , onPointerDown = PointerDown
-                    , onPointerMove = PointerMove
-                    , onCut = CutSelection
-                    , cursor = model.cursor
-                    , selection = selection model
-                    , selectedText = selectedText model
-                    , contentLength = String.length model.content
-                    }
-                    model.metrics
-                    model.scrollTop
-                    model.maxLineLength
-                    model.lines
-                ]
-
-          else
-            div
-            [ class "editor-container"
-            , classList
-                [ ( "overlay-pending", overlayPending model )
-
-                -- shaping ligatures across a huge textarea costs ~100ms per open
-                , ( "large-document", String.length model.content > largeDocumentCharacters )
-                ]
-            ]
-            [ pre
-                [ class "editor-highlight"
-                , attribute "data-testid" "editor-highlight"
-                , style "transform" ("translateY(-" ++ String.fromFloat model.scrollTop ++ "px)")
-                ]
-                [ code [] (highlightMarkdown model.overlayLines model.content) ]
-            , textarea
-                [ class "editor-textarea"
-                , attribute "data-testid" "editor-textarea"
-                , spellcheck False
-                , placeholder "Open a file to start editing..."
-                , value model.content
-                , onInput ContentChanged
-                , on "scroll"
-                    (D.at [ "target", "scrollTop" ] D.float
-                        |> D.map ScrollChanged
-                    )
-                ]
-                []
+        , div [ class "editor-container" ]
+            [ VirtualEditor.view
+                { onScroll = ScrollChanged
+                , highlightLine = highlightLine
+                , keyDecoder = keyDecoder
+                , onInput = InsertText
+                , onPaste = InsertText
+                , onPointerDown = PointerDown
+                , onPointerMove = PointerMove
+                , onCut = CutSelection
+                , cursor = model.cursor
+                , selection = selection model
+                , selectedText = selectedText model
+                , contentLength = String.length model.content
+                }
+                model.metrics
+                model.scrollTop
+                model.maxLineLength
+                model.lines
             ]
         ]
 
@@ -744,73 +683,8 @@ headerText model =
 -- SYNTAX HIGHLIGHTING
 
 
-highlightMarkdown : Maybe Int -> String -> List (Html msg)
-highlightMarkdown limit content =
-    if String.length content > maxHighlightedCharacters then
-        -- A single text node keeps very large documents responsive. The
-        -- textarea remains fully editable; only decorative highlighting is
-        -- reduced.
-        [ text content ]
-
-    else
-        content
-            |> String.split "\n"
-            |> (case limit of
-                    Just n ->
-                        List.take n
-
-                    Nothing ->
-                        identity
-               )
-            |> chunksOf linesPerChunk
-            -- lazy: a keystroke only re-renders (and re-diffs) the chunk it
-            -- touched; Html.Lazy compares the chunk's text by value.
-            |> List.map (String.join "\n" >> Html.Lazy.lazy highlightChunk)
-
-
-{-| Each line is its own block element so a keystroke re-wraps only that
-line (see `.editor-line` in editor.css).
--}
-highlightChunk : String -> Html msg
-highlightChunk chunk =
-    div [ class "editor-chunk" ]
-        (chunk
-            |> String.split "\n"
-            |> List.map (Html.Lazy.lazy highlightLine)
-        )
-
-
-linesPerChunk : Int
-linesPerChunk =
-    64
-
-
-chunksOf : Int -> List a -> List (List a)
-chunksOf n items =
-    -- tail-recursive: a 500k-line document is ~8k chunks, past the JS stack
-    chunksOfHelp n items []
-
-
-chunksOfHelp : Int -> List a -> List (List a) -> List (List a)
-chunksOfHelp n items acc =
-    case items of
-        [] ->
-            List.reverse acc
-
-        _ ->
-            chunksOfHelp n (List.drop n items) (List.take n items :: acc)
-
-
-maxHighlightedCharacters : Int
-maxHighlightedCharacters =
-    -- Lines are separate blocks, so per-line highlighting stays cheap far
-    -- beyond this; the plain-text fallback is what reflows the whole document.
-    1500000
-
-
-{-| One run of overlay text with an optional highlight class. The overlay
-must be character-identical to the textarea, so the concatenated token text
-of a line is always the line itself (see EditorTest).
+{-| One run of highlighted text with an optional class. The concatenated
+token text of a line is always the line itself (see EditorTest).
 -}
 type alias Token =
     { class : Maybe String, text : String }

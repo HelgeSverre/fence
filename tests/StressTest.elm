@@ -275,9 +275,7 @@ volumeSuite =
             List.range 1 5000 |> List.map (\i -> FileEntry { name = "f" ++ String.fromInt i ++ ".md", path = "/w/f" ++ String.fromInt i ++ ".md", fileType = File, children = Nothing })
     in
     describe "large inputs do not overflow the stack"
-        [ test "chunksOf on 500k lines" <|
-            \_ -> Editor.chunksOf 64 (List.range 1 500000) |> List.length |> Expect.equal 7813
-        , test "lineTokens on a 200k-character line full of delimiters" <|
+        [ test "lineTokens on a 200k-character line full of delimiters" <|
             \_ ->
                 let
                     line =

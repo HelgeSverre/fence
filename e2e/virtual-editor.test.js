@@ -27,7 +27,7 @@ describe("virtual editor", { skip: !fs.existsSync(SOURCE) && `no ${path.basename
   test("renders only visible rows, paints fast, and scrolls the reference file without long layouts", async () => {
     const content = fs.readFileSync(SOURCE, "utf-8");
     const lineCount = content.split("\n").length;
-    const fence = await launchFence({ files: { "warmup.md": "# warm\n", "big.md": content }, open: "warmup.md", state: { virtualEditor: true } });
+    const fence = await launchFence({ files: { "warmup.md": "# warm\n", "big.md": content }, open: "warmup.md" });
     try {
       const { window } = fence;
       await window.getByTestId("veditor").waitFor();

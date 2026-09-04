@@ -75,7 +75,6 @@ initSuite =
                     , \_ -> fresh.editorFraction |> Expect.within (Expect.Absolute 0.0001) 0.5
                     , \_ -> fresh.rightSidebarFraction |> Expect.within (Expect.Absolute 0.0001) 0.18
                     , \_ -> ( fresh.leftSidebarVisible, fresh.rightSidebarVisible, fresh.outlineMaxLevel ) |> Expect.equal ( True, False, 3 )
-                    , \_ -> fresh.virtualEditor |> Expect.equal True
                     , \_ -> fresh.theme |> Expect.equal "github-dark"
                     ]
                     ()
@@ -339,7 +338,7 @@ progressiveSuite : Test
 progressiveSuite =
     let
         bigDoc =
-            -- 40 sections, ~2000 lines: big enough for both the parse and the overlay to be progressive
+            -- 40 sections, ~2000 lines: big enough for the parse to be progressive
             List.range 1 40 |> List.map (\i -> "# Section " ++ String.fromInt i ++ "\n\n" ++ String.repeat 50 "some words on a line\n") |> String.join "\n"
 
         opened =
@@ -350,13 +349,13 @@ progressiveSuite =
     in
     describe "progressive rendering of a large document"
         [ test "opening renders the first screen and leaves the rest pending" <|
-            \_ -> ( headings opened < 40, opened.parseProgress /= Nothing, Editor.overlayPending opened.editor ) |> Expect.equal ( True, True, True )
+            \_ -> ( headings opened < 40, opened.parseProgress /= Nothing ) |> Expect.equal ( True, True )
         , test "the first animation frame after content only lets it paint" <|
             \_ -> step Frame opened |> headings |> Expect.equal (headings opened)
         , test "the following frame does a parse step" <|
             \_ -> steps [ Frame, Frame ] opened |> headings |> Expect.greaterThan (headings opened)
         , test "frames keep alternating paint and work until everything is rendered" <|
-            \_ -> steps (List.repeat 60 Frame) opened |> (\m -> ( headings m, m.parseProgress, Editor.overlayPending m.editor )) |> Expect.equal ( 40, Nothing, False )
+            \_ -> steps (List.repeat 60 Frame) opened |> (\m -> ( headings m, m.parseProgress )) |> Expect.equal ( 40, Nothing )
         , test "a step for a stale generation is ignored" <|
             \_ -> step (ParseStep (opened.debounceGeneration - 1)) opened |> headings |> Expect.equal (headings opened)
         , test "an edit during the fill-in restarts the parse against the cache" <|

@@ -12,6 +12,11 @@ if (process.env.FENCE_USER_DATA) {
   app.setPath("userData", process.env.FENCE_USER_DATA);
 }
 
+// Set by the e2e suite and profiling scripts: run fully headless. The window
+// is never shown and renders offscreen into a buffer, and the Dock icon is
+// hidden, so automation cannot appear on screen or take focus.
+const QUIET_WINDOW = !!process.env.FENCE_QUIET_WINDOW;
+
 const MAX_RECENT_WORKSPACES = 20;
 
 function getStatePath() {
@@ -244,11 +249,13 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      backgroundThrottling: !QUIET_WINDOW, // keep frames flowing while hidden
+      offscreen: QUIET_WINDOW, // headless: paint to a buffer, never a native window
     },
   });
 
   mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
+    if (!QUIET_WINDOW) mainWindow.show();
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -522,7 +529,7 @@ registerIpc("fence:save-splits", (data) => {
       updates[key] = data[key];
     }
   }
-  for (const key of ["leftSidebarVisible", "rightSidebarVisible", "virtualEditor"]) {
+  for (const key of ["leftSidebarVisible", "rightSidebarVisible"]) {
     if (typeof data[key] === "boolean") updates[key] = data[key];
   }
   if (
@@ -577,7 +584,7 @@ const gotLock = app.requestSingleInstanceLock();
 app.on("open-file", (event, filePath) => {
   event.preventDefault();
   if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.focus();
+    if (!QUIET_WINDOW) mainWindow.focus();
     openCliPath(filePath);
   } else {
     pendingOpenPath = filePath;
@@ -592,13 +599,14 @@ if (!gotLock) {
   app.on("second-instance", (_event, argv, workingDirectory) => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
+      if (!QUIET_WINDOW) mainWindow.focus();
     }
     const cliPath = cliPathFrom(argv, workingDirectory);
     if (cliPath) openCliPath(cliPath);
   });
 
   app.whenReady().then(() => {
+    if (QUIET_WINDOW) app.dock?.hide();
     app.setAboutPanelOptions({
       applicationName: "Fence",
       applicationVersion: app.getVersion(),

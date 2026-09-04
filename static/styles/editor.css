@@ -4,98 +4,7 @@
   overflow: hidden;
 }
 
-/* Shared typography for textarea and highlight overlay */
-.editor-textarea,
-.editor-highlight {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-editor);
-  font-weight: normal;
-  line-height: var(--editor-line-height);
-  tab-size: 2;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  box-sizing: border-box;
-  padding: 16px;
-  margin: 0;
-  border: none;
-  /* Both must wrap at the same width. The textarea's 6px scrollbar (see
-     ::-webkit-scrollbar in main.css) otherwise narrows its content box while
-     the overlay stays full-width, so lines wrap at different points and the
-     highlight drifts from the caret as the split is resized. */
-  scrollbar-gutter: stable;
-}
-
-/* Textarea — on top, transparent text, visible caret */
-.editor-textarea {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 2;
-  background: transparent;
-  color: transparent;
-  caret-color: var(--text-primary);
-  outline: none;
-  resize: none;
-  overflow-y: auto;
-}
-
-.editor-textarea::selection {
-  background: var(--selection);
-}
-
-.editor-textarea::placeholder {
-  color: var(--text-muted);
-}
-
-/* Highlight overlay — behind textarea, renders colored tokens */
-.editor-highlight {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  min-height: 100%;
-  z-index: 1;
-  pointer-events: none;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  overflow: hidden;
-}
-
-.editor-highlight code {
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
-}
-
-/* One block per line, so a keystroke re-wraps only the edited line instead
-   of re-flowing the whole document as one inline run. `min-height` keeps
-   empty lines the same height as the textarea's. (Not content-visibility:
-   its placeholder heights would drift from the textarea on wrapped lines.) */
-.editor-line {
-  min-height: 1lh;
-}
-
-/* While a large document's overlay is still being built, show the textarea's
-   own text so the editor is readable and editable immediately. */
-.editor-container.overlay-pending .editor-textarea {
-  color: var(--text-primary);
-}
-
-.editor-container.overlay-pending .editor-highlight {
-  visibility: hidden;
-}
-
-/* Font shaping dominates the first layout of a very large textarea; drop
-   ligatures/kerning there (monospace fonts have no kerning to lose). */
-.editor-container.large-document .editor-textarea,
-.editor-container.large-document .editor-highlight {
-  font-variant-ligatures: none;
-  font-kerning: none;
-}
-
-/* Virtual editor (experimental, read-only): only visible rows exist in the DOM. */
+/* The editor: only visible rows exist in the DOM (see src/VirtualEditor.elm). */
 .veditor {
   position: absolute;
   inset: 0;
@@ -118,6 +27,10 @@
   position: absolute;
   left: 0;
   right: 0;
+  /* Every layer above the spacer is click-transparent: mousedown offsets
+     must be relative to the spacer (the whole document), not the window of
+     rendered rows, or clicks after scrolling land on the wrong line. */
+  pointer-events: none;
 }
 
 .veditor-row {
@@ -168,6 +81,7 @@
 
 .veditor-input {
   position: absolute;
+  pointer-events: none; /* clicks must hit the spacer, whose offsets map to lines */
   width: 1px;
   padding: 0;
   margin: 0;
@@ -178,10 +92,6 @@
   overflow: hidden;
   font: inherit;
   line-height: inherit;
-}
-
-.veditor-row .editor-line {
-  min-height: 0;
 }
 
 /* Off-screen probe with the editor's font, measured by js/editor-metrics.js. */

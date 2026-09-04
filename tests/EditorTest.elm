@@ -14,7 +14,7 @@ import Types exposing (DirtyState(..))
 suite : Test
 suite =
     describe "Editor"
-        [ stateSuite, overlaySuite, progressiveOverlaySuite, editingSuite, selectionSuite, referenceSuite ]
+        [ stateSuite, overlaySuite, editingSuite, selectionSuite, referenceSuite ]
 
 
 stateSuite : Test
@@ -38,7 +38,7 @@ stateSuite =
         , test "opening a file resets the scroll position" <|
             \_ ->
                 Editor.init
-                    |> Editor.update (Editor.ScrollChanged 400)
+                    |> Editor.update (Editor.ScrollChanged 400 0)
                     |> Editor.setContent "/notes/a.md" "x" "rev-1" False
                     |> .scrollTop
                     |> Expect.equal 0
@@ -65,8 +65,8 @@ stateSuite =
         ]
 
 
-{-| The highlight overlay sits behind a transparent textarea, so every line's
-tokens must concatenate back to exactly the source line or the caret drifts.
+{-| Every line's tokens must concatenate back to exactly the source line, or
+the rendered row would not match the document.
 -}
 overlaySuite : Test
 overlaySuite =
@@ -120,48 +120,6 @@ overlaySuite =
             \_ -> classes "see [docs](https://x.y/a) now" |> Expect.equal [ "md-link" ]
         , test "a hashtag without a space is not a heading" <|
             \_ -> classes "#hashtag" |> Expect.equal []
-        , test "chunksOf splits into fixed-size groups with a short tail" <|
-            \_ -> Editor.chunksOf 2 [ 1, 2, 3, 4, 5 ] |> Expect.equal [ [ 1, 2 ], [ 3, 4 ], [ 5 ] ]
-        , test "chunksOf of nothing is nothing" <|
-            \_ -> Editor.chunksOf 3 ([] |> List.map identity) |> List.length |> Expect.equal 0
-        , test "the plain-text fallback threshold is well above typical documents" <|
-            \_ -> Editor.maxHighlightedCharacters |> Expect.atLeast 1000000
-        ]
-
-
-
-progressiveOverlaySuite : Test
-progressiveOverlaySuite =
-    let
-        bigDoc =
-            String.repeat 3000 "line\n"
-
-        opened =
-            Editor.setContent "/n/big.md" bigDoc "r" False Editor.init
-    in
-    describe "progressive overlay"
-        [ test "small documents highlight everything at once" <|
-            \_ -> Editor.setContent "/n/a.md" "# a\nb" "r" False Editor.init |> Editor.overlayPending |> Expect.equal False
-        , test "large documents start with a partial overlay" <|
-            \_ -> Editor.overlayPending opened |> Expect.equal True
-        , test "steps extend the overlay until it covers the document" <|
-            \_ ->
-                let
-                    stepsUntilDone m n =
-                        if Editor.overlayPending m && n < 50 then
-                            stepsUntilDone (Editor.update Editor.OverlayStep m) (n + 1)
-
-                        else
-                            n
-                in
-                stepsUntilDone opened 0 |> Expect.all [ Expect.atLeast 1, Expect.atMost 3 ]
-        , test "typing while the overlay is filling does not restart it" <|
-            \_ ->
-                opened
-                    |> Editor.update Editor.OverlayStep
-                    |> Editor.update (Editor.ContentChanged (bigDoc ++ "x"))
-                    |> .overlayLines
-                    |> Expect.equal (Editor.update Editor.OverlayStep opened).overlayLines
         ]
 
 
@@ -257,6 +215,28 @@ editingSuite =
                 , decode "Shift" [] |> Maybe.map Tuple.first
                 ]
                     |> Expect.equal [ Just (Editor.KeyPressed (Editor.Char "a")), Just (Editor.KeyPressed Editor.Enter), Just Editor.Undo, Just Editor.Redo, Nothing, Nothing, Nothing ]
+        , test "caret follow only scrolls when the caret leaves the viewport, from the model's own scroll position" <|
+            \_ ->
+                let
+                    m =
+                        Editor.setContent "/n/a.md" (String.repeat 100 "some text on a line\n") "r" False Editor.init
+                            |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 200, viewportWidth = 300 })
+                in
+                Expect.all
+                    [ \_ -> Editor.caretFollow m |> Expect.equal Nothing
+                    , \_ -> Editor.caretFollow (press Editor.DocEnd m) |> Maybe.map .top |> Expect.equal (Just (100 * 20 + 20 + 32 - 200))
+                    , \_ -> Editor.caretFollow (m |> press Editor.DocEnd |> Editor.update (Editor.ScrollChanged 1900 0)) |> Expect.equal Nothing
+                    , \_ -> Editor.caretFollow (Editor.update (Editor.ScrollChanged 900 0) m) |> Maybe.map .top |> Expect.equal (Just 0)
+                    , \_ -> Editor.caretFollow (m |> press Editor.End) |> Expect.equal Nothing
+                    , \_ ->
+                        Editor.setContent "/n/w.md" (String.repeat 50 "x") "r" False Editor.init
+                            |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 200, viewportWidth = 300 })
+                            |> press Editor.End
+                            |> Editor.caretFollow
+                            |> Maybe.map .left
+                            |> Expect.equal (Just (50 * 10 + 10 + 32 - 300))
+                    ]
+                    ()
         , test "Escape clears the selection without moving the caret" <|
             \_ -> opened |> press Editor.Right |> Editor.update (Editor.Select Editor.Right) |> press Editor.Escape |> (\m -> ( Editor.selection m, m.cursor )) |> Expect.equal ( Nothing, { line = 0, col = 2 } )
         ]

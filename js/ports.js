@@ -1,4 +1,3 @@
-import { setupEditorKeys } from "./editor-keys.js";
 import { reRenderMermaid } from "./mermaid-init.js";
 import { applyFontFamily, applyFontSizesFromState } from "./font-settings.js";
 import { setupEditorMetrics, remeasureEditorMetrics } from "./editor-metrics.js";
@@ -78,7 +77,6 @@ export function wirePorts(app) {
     window.electronAPI.showTreeContextMenu({ path: item.dataset.path });
   });
 
-  setupEditorKeys();
   setupEditorMetrics(app);
   setupVirtualInput();
 }

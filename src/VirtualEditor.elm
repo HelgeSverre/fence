@@ -8,9 +8,10 @@ module VirtualEditor exposing
     , visibleRange
     )
 
-{-| A read-only virtualized text view: a spacer the size of the whole document
-and only the rows that intersect the viewport (plus overscan) rendered as
-real DOM. No wrapping; long lines scroll horizontally. See
+{-| The editor's view: a spacer the size of the whole document and only the
+rows that intersect the viewport (plus overscan) rendered as real DOM, a
+caret, selection boxes and a hidden input under the caret for keys, IME and
+paste. No wrapping; long lines scroll horizontally. See
 docs/plans/2026-09-02-virtualized-editor.md.
 -}
 
@@ -59,7 +60,7 @@ caretPosition metrics lines cursor =
 
 
 type alias Config msg =
-    { onScroll : Float -> msg
+    { onScroll : Float -> Float -> msg -- scrollTop scrollLeft
     , highlightLine : String -> Html msg
     , keyDecoder : D.Decoder ( msg, Bool )
     , onInput : String -> msg
@@ -116,7 +117,7 @@ view config metrics scrollTop maxLineLength lines =
         , id "veditor"
         , attribute "data-testid" "veditor"
         , attribute "data-length" (String.fromInt config.contentLength)
-        , on "scroll" (D.map config.onScroll (D.at [ "target", "scrollTop" ] D.float))
+        , on "scroll" (D.map2 config.onScroll (D.at [ "target", "scrollTop" ] D.float) (D.at [ "target", "scrollLeft" ] D.float))
         ]
         [ div
             [ class "veditor-spacer"

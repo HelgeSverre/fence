@@ -4,7 +4,9 @@ const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
 const { launchFence } = require("./helpers");
 
-describe("window lifecycle", () => {
+// Only macOS keeps the app alive without windows; elsewhere window-all-closed
+// quits it, so there is no destroyed window left to trip over.
+describe("window lifecycle", { skip: process.platform !== "darwin" && "macOS-only behaviour" }, () => {
   test("opening a path from a second `fence` invocation reopens a closed window instead of crashing", async () => {
     const fence = await launchFence({ files: { "note.md": "# First\n", "other.md": "# Other\n" }, open: "note.md" });
     try {

@@ -110,6 +110,11 @@ type alias Model =
     , historyPos : Int
     , navigating : Bool -- this open came from the history, so do not record it
     , counts : Counts
+
+    -- editor line the preview was last scrolled to follow, and the
+    -- (source line, anchor id) pairs it is mapped through
+    , syncedLine : Int
+    , headingAnchors : List ( Int, String )
     }
 
 
@@ -358,6 +363,8 @@ init flagsValue =
       , historyPos = 0
       , navigating = False
       , counts = emptyCounts
+      , syncedLine = -1
+      , headingAnchors = []
       }
     , Cmd.none
     )
@@ -776,7 +783,11 @@ update msg model =
                 )
 
             else
-                ( { model | editor = newEditor }, followCaret )
+                let
+                    ( synced, syncCmd ) =
+                        syncPreview newEditor model
+                in
+                ( { synced | editor = newEditor }, Cmd.batch [ followCaret, syncCmd ] )
 
         DebouncedParse gen ->
             if gen == model.debounceGeneration then
@@ -1029,6 +1040,12 @@ continueParse budget progress model =
     ( { model
         | previewHtml = Markdown.htmlChunks stepped
         , outline = Markdown.outline stepped
+        , headingAnchors =
+            if complete then
+                syncAnchors model.editor.content (Markdown.outline stepped)
+
+            else
+                model.headingAnchors
         , parseCache = Markdown.cache stepped
         , parseProgress =
             if complete then
@@ -1486,6 +1503,110 @@ saveSplitsCmd model =
         , ( "leftToggleKey", encodeKeyBinding model.leftToggleKey )
         , ( "rightToggleKey", encodeKeyBinding model.rightToggleKey )
         ]
+
+
+{-| Keep the preview following the editor's scroll position.
+
+Mapping source lines to rendered pixels exactly would need a position for
+every block; headings are the anchors we already have, so the preview is
+scrolled to the heading the editor's top line sits under, interpolated
+towards the next one. Only the editor drives this: mapping the preview's DOM
+back to source would need the same data in reverse, for much less gain.
+
+-}
+syncPreview : Editor.Model -> Model -> ( Model, Cmd Msg )
+syncPreview editor model =
+    let
+        topLine =
+            floor (editor.scrollTop / Basics.max 1 editor.metrics.lineHeight)
+
+        anchors =
+            model.headingAnchors
+    in
+    if topLine == model.syncedLine || Editor.dragging editor || List.isEmpty anchors then
+        ( model, Cmd.none )
+
+    else
+        ( { model | syncedLine = topLine }, syncPreviewCmd topLine anchors )
+
+
+{-| The headings, as (source line, anchor id) pairs. Recomputed once per
+completed parse, never per scroll event: it rescans the whole document.
+
+The two lists come from the same document in the same order; if they disagree
+in length the mapping would be wrong for every heading (a setext heading, say),
+so sync is skipped entirely instead.
+
+-}
+syncAnchors : String -> List Markdown.OutlineEntry -> List ( Int, String )
+syncAnchors content entries =
+    let
+        lines =
+            Markdown.headingLines content
+    in
+    if List.length lines == List.length entries then
+        List.map2 (\line entry -> ( line, entry.id )) lines entries
+
+    else
+        []
+
+
+syncPreviewCmd : Int -> List ( Int, String ) -> Cmd Msg
+syncPreviewCmd topLine anchors =
+    let
+        before =
+            List.filter (\( line, _ ) -> line <= topLine) anchors
+
+        after =
+            List.filter (\( line, _ ) -> line > topLine) anchors
+
+        -- how far between this heading and the next the top line sits
+        ratio from to =
+            if to <= from then
+                0
+
+            else
+                clamp 0 1 (toFloat (topLine - from) / toFloat (to - from))
+    in
+    case ( List.head (List.reverse before), List.head after ) of
+        ( Nothing, Just ( nextLine, nextId ) ) ->
+            -- above the first heading: from the top of the document to it
+            scrollPreviewBetween Nothing (Just nextId) (ratio 0 nextLine)
+
+        ( Just ( line, anchorId ), Just ( nextLine, nextId ) ) ->
+            scrollPreviewBetween (Just anchorId) (Just nextId) (ratio line nextLine)
+
+        ( Just ( line, anchorId ), Nothing ) ->
+            -- past the last heading: from it to the end of the document
+            scrollPreviewBetween (Just anchorId) Nothing (ratio line (line + 40))
+
+        ( Nothing, Nothing ) ->
+            Cmd.none
+
+
+{-| Scroll the preview to a point between two anchors (either end may be the
+document's own start or end).
+-}
+scrollPreviewBetween : Maybe String -> Maybe String -> Float -> Cmd Msg
+scrollPreviewBetween fromId toId fraction =
+    Task.map2 Tuple.pair (Browser.Dom.getElement "preview-container") (Browser.Dom.getViewportOf "preview-container")
+        |> Task.andThen
+            (\( container, containerVp ) ->
+                let
+                    offsetOf anchorId =
+                        Browser.Dom.getElement anchorId
+                            |> Task.map (\heading -> containerVp.viewport.y + heading.element.y - container.element.y)
+
+                    documentEnd =
+                        Task.succeed (Basics.max 0 (containerVp.scene.height - containerVp.viewport.height))
+                in
+                Task.map2
+                    (\from to -> from + fraction * (to - from))
+                    (Maybe.map offsetOf fromId |> Maybe.withDefault (Task.succeed 0))
+                    (Maybe.map offsetOf toId |> Maybe.withDefault documentEnd)
+            )
+        |> Task.andThen (Browser.Dom.setViewportOf "preview-container" 0)
+        |> ignoreResult
 
 
 {-| Scroll the preview pane so the heading with `anchorId` is at the top.

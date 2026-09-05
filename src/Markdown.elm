@@ -5,6 +5,7 @@ module Markdown exposing
     , begin
     , cache
     , emptyCache
+    , headingLines
     , htmlChunks
     , isComplete
     , outline
@@ -265,6 +266,51 @@ parseChunk chunk =
 
 
 -- CHUNKING
+
+
+{-| The source line of every ATX heading in a document, in document order,
+counted from the top of the file (frontmatter included) so it can be compared
+with the editor's own line numbers. Headings inside fenced code are skipped.
+
+Setext headings (underlined with `=` or `-`) are not reported: telling one
+from a thematic break needs the parser, and a caller that zips this against
+the outline can detect the mismatch by length and do nothing.
+
+-}
+headingLines : String -> List Int
+headingLines input =
+    let
+        body =
+            (Frontmatter.extract input).body
+
+        offset =
+            List.length (String.lines input) - List.length (String.lines body)
+
+        scan line ( index, openFence, found ) =
+            case ( openFence, fenceOf line ) of
+                ( Just ( char, len ), Just ( c, l ) ) ->
+                    if c == char && l >= len && String.trim line == String.repeat l (String.fromChar c) then
+                        ( index + 1, Nothing, found )
+
+                    else
+                        ( index + 1, openFence, found )
+
+                ( Just _, Nothing ) ->
+                    ( index + 1, openFence, found )
+
+                ( Nothing, Just fence ) ->
+                    ( index + 1, Just fence, found )
+
+                ( Nothing, Nothing ) ->
+                    if Regex.contains atxHeading line then
+                        ( index + 1, Nothing, (index + offset) :: found )
+
+                    else
+                        ( index + 1, Nothing, found )
+    in
+    String.lines body
+        |> List.foldl scan ( 0, Nothing, [] )
+        |> (\( _, _, found ) -> List.reverse found)
 
 
 {-| Split markdown at hard top-level block boundaries: an ATX heading at

@@ -13,7 +13,30 @@ import Test.Html.Selector as Selector
 
 suite : Test
 suite =
-    describe "Markdown" [ selfCloseSuite, headingIdSuite, chunkSuite, renderSuite, progressSuite ]
+    describe "Markdown" [ selfCloseSuite, headingIdSuite, chunkSuite, renderSuite, progressSuite, headingLineSuite ]
+
+
+headingLineSuite : Test
+headingLineSuite =
+    describe "heading source lines"
+        [ test "reports the line of every heading, counting from zero" <|
+            \_ -> Markdown.headingLines "# One\n\ntext\n\n## Two\n" |> Expect.equal [ 0, 4 ]
+        , test "headings inside fenced code are not headings" <|
+            \_ -> Markdown.headingLines "# One\n\n```\n# not a heading\n```\n\n## Two\n" |> Expect.equal [ 0, 6 ]
+        , test "frontmatter shifts the lines it reports" <|
+            \_ -> Markdown.headingLines "---\ntitle: x\n---\n# One\n\n## Two\n" |> Expect.equal [ 3, 5 ]
+        , test "a document with no headings has no lines" <|
+            \_ -> Markdown.headingLines "just text\n" |> Expect.equal []
+        , test "the lines line up one-for-one with the outline" <|
+            \_ ->
+                let
+                    source =
+                        "---\nk: v\n---\n# One\n\n## Two\n\n```\n### fenced\n```\n\n### Three\n"
+                in
+                Expect.equal
+                    (List.length (Markdown.parse source).outline)
+                    (List.length (Markdown.headingLines source))
+        ]
 
 
 selfCloseSuite : Test

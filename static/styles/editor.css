@@ -24,10 +24,9 @@
   position: relative;
 }
 
-/* Clicks must reach the spacer: mousedown offsets are taken relative to the
-   event target, and only the spacer spans the whole document, so anything
-   layered over it (rows, caret, selection, the hidden input) would report
-   coordinates in its own space and place the caret on the wrong line. */
+/* Clicks belong to the scroller, which handles them in window coordinates
+   (see src/VirtualEditor.elm). Nothing layered over the text - rows, caret,
+   selection, the hidden input - may swallow one. */
 .veditor-spacer * {
   pointer-events: none;
 }

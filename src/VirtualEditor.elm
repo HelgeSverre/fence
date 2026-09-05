@@ -127,20 +127,23 @@ view config metrics scrollTop maxLineLength lines =
         , attribute "data-testid" "veditor"
         , attribute "data-length" (String.fromInt config.contentLength)
         , on "scroll" (D.map2 config.onScroll (D.at [ "target", "scrollTop" ] D.float) (D.at [ "target", "scrollLeft" ] D.float))
+
+        -- on the scroller, not the text: clicking anywhere in the pane -
+        -- past the last line, in the padding, right of a short line - places
+        -- the caret, the way every other editor behaves. Window coordinates,
+        -- so it does not matter which element was actually hit.
+        , preventDefaultOn "mousedown"
+            (D.map4 (\x y shift clicks -> ( config.onPointerDown { x = x, y = y, shift = shift, clicks = clicks }, True ))
+                (D.field "clientX" D.float)
+                (D.field "clientY" D.float)
+                (D.field "shiftKey" D.bool)
+                (D.field "detail" D.int)
+            )
         ]
         [ div
             [ class "veditor-spacer"
             , style "height" (px (toFloat lineCount * metrics.lineHeight))
             , style "min-width" (px (toFloat (maxLineLength + 1) * metrics.charWidth))
-
-            -- rows have pointer-events: none, so offsets are relative to the spacer
-            , preventDefaultOn "mousedown"
-                (D.map4 (\x y shift clicks -> ( config.onPointerDown { x = x, y = y, shift = shift, clicks = clicks }, True ))
-                    (D.field "offsetX" D.float)
-                    (D.field "offsetY" D.float)
-                    (D.field "shiftKey" D.bool)
-                    (D.field "detail" D.int)
-                )
             ]
             [ div [ class "veditor-highlight-layer" ]
                 (List.concatMap (rangeRects "veditor-highlight" metrics lines from to) config.highlights

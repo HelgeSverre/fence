@@ -114,7 +114,7 @@ type alias Model =
     -- the (source line, anchor id) pairs the preview's scroll is mapped
     -- through, and the measured pair the editor is currently between
     , headingAnchors : List ( Int, String )
-    , syncSegment : Maybe SyncSegment
+    , syncPoints : List SyncPoint
     }
 
 
@@ -166,7 +166,7 @@ type Msg
     | PaletteChoose (Maybe Palette.Item)
     | SearchDue Int
     | NavigateHistory Int
-    | SegmentMeasured Float SyncSegment
+    | SyncPointsMeasured (List SyncPoint)
     | NoOp
 
 
@@ -365,7 +365,7 @@ init flagsValue =
       , navigating = False
       , counts = emptyCounts
       , headingAnchors = []
-      , syncSegment = Nothing
+      , syncPoints = []
       }
     , Cmd.none
     )
@@ -685,8 +685,15 @@ update msg model =
                 Nothing ->
                     ( model, Cmd.none )
 
-        SegmentMeasured topLine segment ->
-            ( { model | syncSegment = Just segment }, scrollPreviewTo (positionIn segment topLine) )
+        SyncPointsMeasured points ->
+            -- re-sync straight away: the editor may have been scrolled while
+            -- the measurement was pending, and an edit that changed the
+            -- rendered heights leaves the preview where the old map put it
+            let
+                measured =
+                    { model | syncPoints = points }
+            in
+            ( measured, syncPreview measured.editor measured )
 
         NavigateHistory delta ->
             let
@@ -787,11 +794,9 @@ update msg model =
                 )
 
             else
-                let
-                    ( synced, syncCmd ) =
-                        syncPreview newEditor model
-                in
-                ( { synced | editor = newEditor }, Cmd.batch [ followCaret, syncCmd ] )
+                ( { model | editor = newEditor }
+                , Cmd.batch [ followCaret, syncPreview newEditor model ]
+                )
 
         DebouncedParse gen ->
             if gen == model.debounceGeneration then
@@ -927,9 +932,11 @@ update msg model =
                     -- js/editor-metrics.js remeasures on any pane resize and on
                     -- every font change, so this is also where the preview's
                     -- rendered positions are known to have moved
-                    ( { model | editor = Editor.update (Editor.MetricsChanged metrics) model.editor, syncSegment = Nothing }
-                    , Cmd.none
-                    )
+                    let
+                        measured =
+                            { model | editor = Editor.update (Editor.MetricsChanged metrics) model.editor }
+                    in
+                    ( measured, measureSyncPoints measured )
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -1046,28 +1053,34 @@ continueParse budget progress model =
         complete =
             Markdown.isComplete stepped
     in
-    ( { model
-        | previewHtml = Markdown.htmlChunks stepped
-        , outline = Markdown.outline stepped
-        , headingAnchors =
-            if complete then
-                syncAnchors model.editor.content (Markdown.outline stepped)
+    let
+        parsed =
+            { model
+                | previewHtml = Markdown.htmlChunks stepped
+                , outline = Markdown.outline stepped
+                , headingAnchors =
+                    if complete then
+                        syncAnchors model.editor.content (Markdown.outline stepped)
 
-            else
-                model.headingAnchors
+                    else
+                        model.headingAnchors
+                , parseCache = Markdown.cache stepped
+                , parseProgress =
+                    if complete then
+                        Nothing
 
-        -- the rendered positions just moved
-        , syncSegment = Nothing
-        , parseCache = Markdown.cache stepped
-        , parseProgress =
-            if complete then
-                Nothing
+                    else
+                        Just stepped
+                , framePainted = False
+            }
+    in
+    ( parsed
+      -- the rendered document just changed, so every heading may have moved
+    , if complete then
+        measureSyncPoints parsed
 
-            else
-                Just stepped
-        , framePainted = False
-      }
-    , Cmd.none
+      else
+        Cmd.none
     )
 
 
@@ -1524,129 +1537,124 @@ every block; headings are the anchors we already have, so the editor's top
 line is placed between the two headings that bracket it, and the preview is
 scrolled to the matching point between their rendered positions.
 
-Two things make it smooth rather than steppy. The top line is fractional, so
-the preview moves with the editor instead of once per line. And the bracketing
-pair's pixel positions are measured once and cached: while scrolling inside a
-section every frame is pure arithmetic and a single scroll write, with no DOM
-read to wait a frame for. Crossing into another section measures again.
+Two things keep it smooth. The top line is fractional, so the preview moves
+with the editor rather than once per line. And every heading's pixel position
+is measured in one pass whenever the preview's layout changes, never while
+scrolling: a `getElement` between the editor's own row updates would force a
+synchronous layout of the whole page on every scroll event, which is exactly
+what this editor exists to avoid. Scrolling is then pure arithmetic and a
+single scroll write.
 
 Only the editor drives this: mapping the preview's DOM back to source would
 need the same data in reverse, for much less gain.
 
 -}
-type alias SyncSegment =
-    { fromLine : Float, toLine : Float, fromY : Float, toY : Float }
+type alias SyncPoint =
+    { line : Float, y : Float }
 
 
-syncPreview : Editor.Model -> Model -> ( Model, Cmd Msg )
+syncPreview : Editor.Model -> Model -> Cmd Msg
 syncPreview editor model =
     let
         topLine =
             editor.scrollTop / Basics.max 1 editor.metrics.lineHeight
     in
-    if Editor.dragging editor || List.isEmpty model.headingAnchors then
-        ( model, Cmd.none )
+    if Editor.dragging editor then
+        Cmd.none
 
     else
-        case bracketing topLine model of
-            Nothing ->
-                ( model, Cmd.none )
-
+        case bracketing topLine model.syncPoints of
             Just ( from, to ) ->
-                case model.syncSegment of
-                    -- still between the same two headings: no measuring needed
-                    Just segment ->
-                        if segment.fromLine == Tuple.first from && segment.toLine == Tuple.first to then
-                            ( model, scrollPreviewTo (positionIn segment topLine) )
+                scrollPreviewTo (interpolate from to topLine)
 
-                        else
-                            ( model, measureSegment topLine from to )
-
-                    Nothing ->
-                        ( model, measureSegment topLine from to )
+            Nothing ->
+                Cmd.none
 
 
-{-| The headings bracketing a line, as (line, anchor) pairs. The document's
-own start and end stand in beyond the first and last heading.
--}
-bracketing : Float -> Model -> Maybe ( ( Float, Maybe String ), ( Float, Maybe String ) )
-bracketing topLine model =
-    let
-        anchors =
-            List.map (\( line, anchorId ) -> ( toFloat line, Just anchorId )) model.headingAnchors
+{-| The measured points bracketing a line. -}
+bracketing : Float -> List SyncPoint -> Maybe ( SyncPoint, SyncPoint )
+bracketing topLine points =
+    case points of
+        first :: second :: rest ->
+            if topLine < second.line || List.isEmpty rest then
+                Just ( first, second )
 
-        documentStart =
-            ( 0, Nothing )
-
-        documentEnd =
-            ( toFloat (Basics.max 1 (Array.length model.editor.lines - 1)), Nothing )
-
-        before =
-            List.filter (\( line, _ ) -> line <= topLine) anchors |> List.reverse |> List.head
-
-        after =
-            List.filter (\( line, _ ) -> line > topLine) anchors |> List.head
-    in
-    case ( before, after ) of
-        ( Nothing, Nothing ) ->
-            Nothing
+            else
+                bracketing topLine (second :: rest)
 
         _ ->
-            Just
-                ( Maybe.withDefault documentStart before
-                , Maybe.withDefault documentEnd after
-                )
+            Nothing
 
 
-{-| Where in the preview a line falls, interpolated across a measured pair. -}
-positionIn : SyncSegment -> Float -> Float
-positionIn segment topLine =
+interpolate : SyncPoint -> SyncPoint -> Float -> Float
+interpolate from to topLine =
     let
         span =
-            segment.toLine - segment.fromLine
+            to.line - from.line
     in
     if span <= 0 then
-        segment.fromY
+        from.y
 
     else
-        segment.fromY + clamp 0 1 ((topLine - segment.fromLine) / span) * (segment.toY - segment.fromY)
-
-
-{-| Measure a heading pair's rendered positions, then scroll and remember them.
-An anchor that is `Nothing` is the top or the bottom of the preview.
--}
-measureSegment : Float -> ( Float, Maybe String ) -> ( Float, Maybe String ) -> Cmd Msg
-measureSegment topLine ( fromLine, fromId ) ( toLine, toId ) =
-    Task.map2 Tuple.pair (Browser.Dom.getElement "preview-container") (Browser.Dom.getViewportOf "preview-container")
-        |> Task.andThen
-            (\( container, containerVp ) ->
-                let
-                    offsetOf anchorId =
-                        Browser.Dom.getElement anchorId
-                            |> Task.map (\heading -> containerVp.viewport.y + heading.element.y - container.element.y)
-
-                    documentEnd =
-                        Task.succeed (Basics.max 0 (containerVp.scene.height - containerVp.viewport.height))
-                in
-                Task.map2
-                    (\fromY toY -> { fromLine = fromLine, toLine = toLine, fromY = fromY, toY = toY })
-                    (Maybe.map offsetOf fromId |> Maybe.withDefault (Task.succeed 0))
-                    (Maybe.map offsetOf toId |> Maybe.withDefault documentEnd)
-            )
-        |> Task.attempt
-            (\result ->
-                case result of
-                    Ok segment ->
-                        SegmentMeasured topLine segment
-
-                    Err _ ->
-                        NoOp
-            )
+        from.y + clamp 0 1 ((topLine - from.line) / span) * (to.y - from.y)
 
 
 scrollPreviewTo : Float -> Cmd Msg
 scrollPreviewTo y =
     ignoreResult (Browser.Dom.setViewportOf "preview-container" 0 y)
+
+
+{-| Measure where every heading sits in the rendered preview, plus the two
+ends of the document. One pass, off the scrolling path: consecutive reads with
+no writes between them share a single layout.
+
+The wait is not decoration. Elm applies a view on the animation frame after
+the update that produced it, so reading the DOM in the same update would
+measure the *previous* render - and right after a parse that is a preview
+without the headings in it.
+
+-}
+measureSyncPoints : Model -> Cmd Msg
+measureSyncPoints model =
+    if List.isEmpty model.headingAnchors then
+        Task.perform SyncPointsMeasured (Task.succeed [])
+
+    else
+        Process.sleep 50
+            |> Task.andThen
+                (\_ -> Task.map2 Tuple.pair (Browser.Dom.getElement "preview-container") (Browser.Dom.getViewportOf "preview-container"))
+            |> Task.andThen
+                (\( container, containerVp ) ->
+                    model.headingAnchors
+                        |> List.map
+                            (\( line, anchorId ) ->
+                                Browser.Dom.getElement anchorId
+                                    |> Task.map
+                                        (\heading ->
+                                            Just
+                                                { line = toFloat line
+                                                , y = containerVp.viewport.y + heading.element.y - container.element.y
+                                                }
+                                        )
+                                    -- a heading that is not in the DOM is skipped
+                                    -- rather than losing the whole mapping
+                                    |> Task.onError (\_ -> Task.succeed Nothing)
+                            )
+                        |> Task.sequence
+                        |> Task.map
+                            (\measured ->
+                                -- the document's own top always maps to the top
+                                -- of the preview, so a heading on line 0 (which
+                                -- measures at the preview's padding) is dropped
+                                { line = 0, y = 0 }
+                                    :: List.filter (\point -> point.line > 0) (List.filterMap identity measured)
+                                    ++ [ { line = toFloat (Basics.max 1 (Array.length model.editor.lines - 1))
+                                         , y = Basics.max 0 (containerVp.scene.height - containerVp.viewport.height)
+                                         }
+                                       ]
+                            )
+                )
+            |> Task.attempt (Result.withDefault [] >> SyncPointsMeasured)
 
 
 {-| The headings, as (source line, anchor id) pairs. Recomputed once per

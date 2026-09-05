@@ -147,6 +147,53 @@ describe("virtual editor: editing", () => {
       await fence.close();
     }
   });
+
+  test("clicking anywhere in the pane places the caret, not only on a line", async () => {
+    const fence = await launchFence({ files: { "note.md": "one\ntwo\n" }, open: "note.md" });
+    try {
+      const { window } = fence;
+      const pane = window.getByTestId("veditor");
+      const box = await pane.boundingBox();
+
+      // Far below the last line, where a short document has no rows at all.
+      await pane.click({ position: { x: box.width / 2, y: box.height - 8 } });
+      await window.waitForFunction(() => document.activeElement?.id === "veditor-input");
+      await window.keyboard.type("!");
+      await expectEditorText(window, "one\ntwo\n!");
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("clicking past the end of a line puts the caret at its end", async () => {
+    const fence = await launchFence({ files: { "note.md": "one\ntwo\n" }, open: "note.md" });
+    try {
+      const { window } = fence;
+      const box = await window.getByTestId("veditor").boundingBox();
+      const lineHeight = await window.evaluate(() => parseFloat(document.querySelector(".veditor-row").style.height));
+
+      // Right of "one", which is three characters wide.
+      await window.getByTestId("veditor").click({ position: { x: box.width - 30, y: lineHeight / 2 } });
+      await window.keyboard.type("!");
+      await expectEditorText(window, "one!\ntwo\n");
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("clicking in the pane's padding still lands on the nearest position", async () => {
+    const fence = await launchFence({ files: { "note.md": "one\ntwo\n" }, open: "note.md" });
+    try {
+      const { window } = fence;
+      // The top-left corner is inside the scroller's 16px padding, outside
+      // every row, and should place the caret at the very start.
+      await window.getByTestId("veditor").click({ position: { x: 2, y: 2 } });
+      await window.keyboard.type("!");
+      await expectEditorText(window, "!one\ntwo\n");
+    } finally {
+      await fence.close();
+    }
+  });
 });
 
 describe("virtual editor: keystroke cost", { skip: !fs.existsSync(SOURCE) && `no ${path.basename(SOURCE)}` }, () => {

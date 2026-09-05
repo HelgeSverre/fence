@@ -278,7 +278,7 @@ update msg model =
         PointerDown { x, y, shift, clicks } ->
             let
                 at =
-                    cursorAtPixel x y model
+                    cursorAtWindow { x = x, y = y } model
 
                 ( anchor, cursor ) =
                     if shift then

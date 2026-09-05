@@ -6,15 +6,20 @@ export function setupVirtualInput() {
   // Focus the hidden input on click without letting focus() scroll the
   // container (Elm's mousedown handler prevents the default focus change).
   document.addEventListener("mousedown", (e) => {
-    if (!e.target?.closest?.(".veditor-spacer")) return;
+    const scroller = e.target?.closest?.(".veditor");
+    if (!scroller) return;
     const input = document.getElementById("veditor-input");
-    if (!input) return;
+    const spacer = scroller.querySelector(".veditor-spacer");
+    if (!input || !spacer) return;
     // Elm moves the input to the new caret on the next frame; a key that
     // arrives before that would go to an input still at the old position
     // and Chromium would scroll to reveal it. Move it to the clicked row now.
+    // Measured against the spacer, since that is what the input sits in, and
+    // the click may have landed anywhere in the pane.
+    const box = spacer.getBoundingClientRect();
     const lineHeight = parseFloat(input.style.height) || 20;
-    input.style.top = `${Math.floor(e.offsetY / lineHeight) * lineHeight}px`;
-    input.style.left = `${Math.max(0, e.offsetX)}px`;
+    input.style.top = `${Math.max(0, Math.floor((e.clientY - box.top) / lineHeight) * lineHeight)}px`;
+    input.style.left = `${Math.max(0, e.clientX - box.left)}px`;
     input.focus({ preventScroll: true });
   }, true);
   document.addEventListener("input", (e) => {

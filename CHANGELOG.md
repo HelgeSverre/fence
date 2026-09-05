@@ -6,6 +6,12 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+### Changed
+
+- Clicking anywhere in the editor pane places the caret. It previously only
+  responded on the lines themselves, so a short or new file left most of the
+  pane inert.
+
 ### Added
 
 - **Creating, renaming and deleting files.** New File and New Folder (Cmd+N,

@@ -8,7 +8,8 @@ describe("startup", () => {
     try {
       const { window } = fence;
       assert.equal(await window.getByTestId("titlebar-filename").textContent(), "note.md");
-      assert.equal(await window.getByTestId("editor-header").textContent(), "note.md");
+      assert.match(await window.getByTestId("editor-header").textContent(), /^note\.md/);
+      assert.equal(await window.getByTestId("word-count").textContent(), "4 words · 4 lines · 23 characters");
 
       const treeFiles = window.getByTestId("tree-file");
       assert.deepEqual(await treeFiles.allTextContents(), ["note.md", "other.md"]);

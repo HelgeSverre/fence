@@ -200,7 +200,7 @@ editingSuite =
         , test "a pointer press maps pixels to a line and column" <|
             \_ ->
                 opened
-                    |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 400, viewportWidth = 400 })
+                    |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 400, viewportWidth = 400, viewportTop = 0, viewportLeft = 0 })
                     |> Editor.update (Editor.PointerDown { x = 33, y = 25, shift = False, clicks = 1 })
                     |> .cursor
                     |> Expect.equal { line = 1, col = 3 }
@@ -228,7 +228,7 @@ editingSuite =
                 let
                     m =
                         Editor.setContent "/n/a.md" (String.repeat 100 "some text on a line\n") "r" False Editor.init
-                            |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 200, viewportWidth = 300 })
+                            |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 200, viewportWidth = 300, viewportTop = 0, viewportLeft = 0 })
                 in
                 Expect.all
                     [ \_ -> Editor.caretFollow m |> Expect.equal Nothing
@@ -238,7 +238,7 @@ editingSuite =
                     , \_ -> Editor.caretFollow (m |> press Editor.End) |> Expect.equal Nothing
                     , \_ ->
                         Editor.setContent "/n/w.md" (String.repeat 50 "x") "r" False Editor.init
-                            |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 200, viewportWidth = 300 })
+                            |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 200, viewportWidth = 300, viewportTop = 0, viewportLeft = 0 })
                             |> press Editor.End
                             |> Editor.caretFollow
                             |> Maybe.map .left
@@ -267,7 +267,7 @@ selectionSuite =
             List.foldl (\c -> Editor.update (Editor.KeyPressed (Editor.Char c))) m (String.split "" chars)
 
         metrics =
-            Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 400, viewportWidth = 400 })
+            Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 400, viewportWidth = 400, viewportTop = 0, viewportLeft = 0 })
 
         click clicks x y shift =
             Editor.update (Editor.PointerDown { x = x, y = y, shift = shift, clicks = clicks })
@@ -313,10 +313,66 @@ selectionSuite =
                 opened
                     |> metrics
                     |> click 1 0 0 False
-                    |> Editor.update (Editor.PointerMove 30 0)
+                    |> Editor.update (Editor.PointerMoved 30 0)
                     |> Editor.update Editor.PointerUp
                     |> (\m -> ( Editor.dragging m, Editor.selectedText m ))
                     |> Expect.equal ( False, "hel" )
+        , describe "a drag held outside the editor keeps scrolling"
+            (let
+                dragging =
+                    Editor.setContent "/n/a.md" (String.repeat 300 "a line of text\n") "r" False Editor.init
+                        |> metrics
+                        |> click 1 0 0 False
+
+                afterFrame pointerY model =
+                    model
+                        |> Editor.update (Editor.PointerMoved 0 pointerY)
+                        |> Editor.update Editor.AutoScrolled
+             in
+             -- the viewport spans y 0..400 in window coordinates
+             [ test "a pointer inside the editor does not scroll" <|
+                \_ -> afterFrame 100 dragging |> .scrollTop |> Expect.within (Expect.Absolute 0.01) 0
+             , test "just past the bottom edge creeps" <|
+                \_ -> afterFrame 440 dragging |> .scrollTop |> Expect.within (Expect.Absolute 0.01) 10
+             , test "far past the edge races, but no faster than the cap" <|
+                \_ -> afterFrame 5000 dragging |> .scrollTop |> Expect.within (Expect.Absolute 0.01) 28
+             , test "each frame scrolls again while the pointer is held there" <|
+                \_ ->
+                    dragging
+                        |> afterFrame 440
+                        |> Editor.update Editor.AutoScrolled
+                        |> Editor.update Editor.AutoScrolled
+                        |> .scrollTop
+                        |> Expect.within (Expect.Absolute 0.01) 30
+             , test "above the top edge scrolls back, and stops at the start" <|
+                \_ ->
+                    Expect.all
+                        [ \_ -> dragging |> Editor.update (Editor.ScrollChanged 100 0) |> afterFrame -40 |> .scrollTop |> Expect.within (Expect.Absolute 0.01) 90
+                        , \_ -> afterFrame -40 dragging |> .scrollTop |> Expect.within (Expect.Absolute 0.01) 0
+                        ]
+                        ()
+             , test "the selection grows to the newly revealed text" <|
+                \_ ->
+                    let
+                        scrolled =
+                            List.foldl (\_ m -> Editor.update Editor.AutoScrolled m) (Editor.update (Editor.PointerMoved 0 5000) dragging) (List.range 1 20)
+                    in
+                    Expect.all
+                        [ \_ -> scrolled.scrollTop |> Expect.atLeast 500
+                        , \_ -> scrolled.cursor.line |> Expect.atLeast 25
+                        , \_ -> String.length (Editor.selectedText scrolled) |> Expect.atLeast 300
+                        ]
+                        ()
+             , test "releasing the mouse stops the scrolling" <|
+                \_ ->
+                    dragging
+                        |> Editor.update (Editor.PointerMoved 0 5000)
+                        |> Editor.update Editor.PointerUp
+                        |> Editor.update Editor.AutoScrolled
+                        |> .scrollTop
+                        |> Expect.within (Expect.Absolute 0.01) 0
+             ]
+            )
         , test "a click without movement leaves no selection" <|
             \_ -> opened |> metrics |> click 1 0 0 False |> Editor.update Editor.PointerUp |> Editor.selection |> Expect.equal Nothing
         , test "word motion moves and selects by word" <|

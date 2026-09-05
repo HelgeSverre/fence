@@ -41,6 +41,7 @@ type alias Model =
     , cursor : Cursor
     , anchor : Maybe Cursor -- other end of the selection, when there is one
     , dragging : Bool
+    , dragPointer : Maybe { x : Float, y : Float } -- last pointer position, in window coordinates
     , undo : List Snapshot
     , redo : List Snapshot
     , coalesce : Coalesce -- what kind of edit the top undo entry may absorb
@@ -89,7 +90,8 @@ type Msg
     | Select Key -- shift + a movement key extends the selection
     | InsertText String
     | PointerDown { x : Float, y : Float, shift : Bool, clicks : Int }
-    | PointerMove Float Float
+    | PointerMoved Float Float
+    | AutoScrolled
     | PointerUp
     | SelectAll
     | CutSelection
@@ -114,6 +116,7 @@ init =
     , cursor = TextBuffer.docStart
     , anchor = Nothing
     , dragging = False
+    , dragPointer = Nothing
     , undo = []
     , redo = []
     , coalesce = NoCoalesce
@@ -142,6 +145,7 @@ setContent path content revision dirty model =
         , cursor = TextBuffer.docStart
         , anchor = Nothing
         , dragging = False
+        , dragPointer = Nothing
         , undo = []
         , redo = []
         , coalesce = NoCoalesce
@@ -218,15 +222,31 @@ update msg model =
             in
             { model | cursor = cursor, anchor = anchor, dragging = clicks == 1 && not shift, coalesce = NoCoalesce }
 
-        PointerMove x y ->
+        PointerMoved x y ->
             if model.dragging then
-                { model | anchor = Just (Maybe.withDefault model.cursor model.anchor), cursor = cursorAtPixel x y model }
+                { model
+                    | anchor = Just (Maybe.withDefault model.cursor model.anchor)
+                    , dragPointer = Just { x = x, y = y }
+                    , cursor = cursorAtWindow { x = x, y = y } model
+                }
 
             else
                 model
 
+        AutoScrolled ->
+            case ( model.dragging, model.dragPointer, autoScrollStep model ) of
+                ( True, Just pointer, Just ( left, top ) ) ->
+                    let
+                        scrolled =
+                            { model | scrollLeft = left, scrollTop = top }
+                    in
+                    { scrolled | cursor = cursorAtWindow pointer scrolled }
+
+                _ ->
+                    model
+
         PointerUp ->
-            { model | dragging = False, anchor = model.anchor |> Maybe.andThen (\a -> if a == model.cursor then Nothing else Just a) }
+            { model | dragging = False, dragPointer = Nothing, anchor = model.anchor |> Maybe.andThen (\a -> if a == model.cursor then Nothing else Just a) }
 
         SelectAll ->
             { model | anchor = Just TextBuffer.docStart, cursor = TextBuffer.docEnd model.lines, coalesce = NoCoalesce }
@@ -386,6 +406,69 @@ editLines f model =
             , redo = []
             , coalesce = NoCoalesce
         }
+
+
+{-| Where to scroll this frame while a drag is held outside the editor, or
+Nothing while the pointer is inside it. Speed grows with the distance out so
+a small overshoot creeps and a big one races, and is capped so the document
+still passes at a followable rate.
+-}
+autoScrollStep : Model -> Maybe ( Float, Float )
+autoScrollStep model =
+    case model.dragPointer of
+        Nothing ->
+            Nothing
+
+        Just pointer ->
+            let
+                m =
+                    model.metrics
+
+                -- how far outside the viewport the pointer is, per axis
+                beyond low high value =
+                    if value < low then
+                        value - low
+
+                    else if value > high then
+                        value - high
+
+                    else
+                        0
+
+                speed distance =
+                    clamp -autoScrollMaxStep autoScrollMaxStep (distance * autoScrollFactor)
+
+                top =
+                    Basics.max 0 (model.scrollTop + speed (beyond m.viewportTop (m.viewportTop + m.viewportHeight) pointer.y))
+
+                left =
+                    Basics.max 0 (model.scrollLeft + speed (beyond m.viewportLeft (m.viewportLeft + m.viewportWidth) pointer.x))
+            in
+            if top == model.scrollTop && left == model.scrollLeft then
+                Nothing
+
+            else
+                Just ( left, top )
+
+
+autoScrollMaxStep : Float
+autoScrollMaxStep =
+    28
+
+
+autoScrollFactor : Float
+autoScrollFactor =
+    0.25
+
+
+{-| A pointer position in window coordinates as a position in the document.
+-}
+cursorAtWindow : { x : Float, y : Float } -> Model -> Cursor
+cursorAtWindow pointer model =
+    cursorAtPixel
+        (pointer.x - model.metrics.viewportLeft + model.scrollLeft)
+        (pointer.y - model.metrics.viewportTop + model.scrollTop)
+        model
 
 
 cursorAtPixel : Float -> Float -> Model -> Cursor
@@ -734,7 +817,6 @@ view model =
                 , onInput = InsertText
                 , onPaste = InsertText
                 , onPointerDown = PointerDown
-                , onPointerMove = PointerMove
                 , onCut = CutSelection
                 , cursor = model.cursor
                 , selection = selection model

@@ -552,9 +552,18 @@ update msg model =
                 newEditor =
                     Editor.update subMsg model.editor
 
-                -- keep the caret on screen after it moves
+                -- an auto-scrolling drag sets the offsets itself; the caret is
+                -- meant to be at the edge, so it must not be followed as well
+                scrollDuringDrag =
+                    ignoreResult (Browser.Dom.setViewportOf "veditor" newEditor.scrollLeft newEditor.scrollTop)
+
+                -- Keep the caret on screen after it moves, except during a
+                -- drag: there the caret sits at the edge on purpose and the
+                -- auto-scroll owns the offsets. Chromium also emits a
+                -- mousemove after every scroll, so following the caret here
+                -- would fight the drag frame by frame.
                 followCaret =
-                    case ( newEditor.cursor /= model.editor.cursor, Editor.caretFollow newEditor ) of
+                    case ( newEditor.cursor /= model.editor.cursor && not (Editor.dragging newEditor), Editor.caretFollow newEditor ) of
                         ( True, Just target ) ->
                             ignoreResult (Browser.Dom.setViewportOf "veditor" target.left target.top)
 
@@ -581,6 +590,17 @@ update msg model =
                     , setDirtyCmd True
                     , followCaret
                     ]
+                )
+
+            else if subMsg == Editor.AutoScrolled then
+                -- a frame that scrolled nothing (the drag ended, or the pointer
+                -- came back inside) must not push a stale offset at the DOM
+                ( { model | editor = newEditor }
+                , if ( newEditor.scrollTop, newEditor.scrollLeft ) /= ( model.editor.scrollTop, model.editor.scrollLeft ) then
+                    scrollDuringDrag
+
+                  else
+                    Cmd.none
                 )
 
             else
@@ -1239,8 +1259,19 @@ subscriptions model =
 
             Nothing ->
                 Sub.none
-        , if Editor.dragging model.editor then
-            Browser.Events.onMouseUp (D.succeed (EditorMsg Editor.PointerUp))
+        , -- A drag continues outside the editor, so it is followed on the
+          -- document, and each frame may scroll further while it is held
+          -- past an edge.
+          if Editor.dragging model.editor then
+            Sub.batch
+                [ Browser.Events.onMouseMove
+                    (D.map2 (\x y -> EditorMsg (Editor.PointerMoved x y))
+                        (D.field "clientX" D.float)
+                        (D.field "clientY" D.float)
+                    )
+                , Browser.Events.onMouseUp (D.succeed (EditorMsg Editor.PointerUp))
+                , Browser.Events.onAnimationFrame (\_ -> EditorMsg Editor.AutoScrolled)
+                ]
 
           else
             Sub.none

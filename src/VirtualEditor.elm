@@ -30,21 +30,28 @@ type alias Metrics =
     , charWidth : Float
     , viewportHeight : Float
     , viewportWidth : Float
+
+    -- where the document's origin sits on screen, so a pointer position
+    -- anywhere in the window can be turned into a document position
+    , viewportTop : Float
+    , viewportLeft : Float
     }
 
 
 defaultMetrics : Metrics
 defaultMetrics =
-    { lineHeight = 22.4, charWidth = 8.4, viewportHeight = 800, viewportWidth = 800 }
+    { lineHeight = 22.4, charWidth = 8.4, viewportHeight = 800, viewportWidth = 800, viewportTop = 0, viewportLeft = 0 }
 
 
 metricsDecoder : D.Decoder Metrics
 metricsDecoder =
-    D.map4 Metrics
+    D.map6 Metrics
         (D.field "lineHeight" D.float)
         (D.field "charWidth" D.float)
         (D.field "viewportHeight" D.float)
         (D.field "viewportWidth" D.float)
+        (D.field "viewportTop" D.float)
+        (D.field "viewportLeft" D.float)
 
 
 {-| Pixel position of the caret inside the spacer (before padding). -}
@@ -66,7 +73,6 @@ type alias Config msg =
     , onInput : String -> msg
     , onPaste : String -> msg
     , onPointerDown : { x : Float, y : Float, shift : Bool, clicks : Int } -> msg
-    , onPointerMove : Float -> Float -> msg
     , onCut : msg
     , cursor : Cursor
     , selection : Maybe ( Cursor, Cursor )
@@ -132,7 +138,6 @@ view config metrics scrollTop maxLineLength lines =
                     (D.field "shiftKey" D.bool)
                     (D.field "detail" D.int)
                 )
-            , on "mousemove" (D.map2 config.onPointerMove (D.field "offsetX" D.float) (D.field "offsetY" D.float))
             ]
             [ div [ class "veditor-selection-layer" ] (selectionRects config.selection metrics lines from to)
             , div

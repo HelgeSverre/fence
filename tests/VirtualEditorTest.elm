@@ -13,7 +13,7 @@ import VirtualEditor
 
 metrics : VirtualEditor.Metrics
 metrics =
-    { lineHeight = 20, charWidth = 8, viewportHeight = 200, viewportWidth = 400 }
+    { lineHeight = 20, charWidth = 8, viewportHeight = 200, viewportWidth = 400, viewportTop = 0, viewportLeft = 0 }
 
 
 suite : Test
@@ -60,7 +60,6 @@ suite =
                     , onInput = always ()
                     , onPaste = always ()
                     , onPointerDown = always ()
-                    , onPointerMove = \_ _ -> ()
                     , onCut = ()
                     , cursor = { line = 95, col = 3 }
                     , selection = Just ( { line = 94, col = 2 }, { line = 95, col = 3 } )

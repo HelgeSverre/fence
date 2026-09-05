@@ -72,6 +72,40 @@ describe("virtual editor: selection and clipboard", () => {
     }
   });
 
+  test("dragging past the bottom edge keeps scrolling and selecting while held", async () => {
+    const fence = await openEditor(Array.from({ length: 400 }, (_, i) => `line ${i}`).join("\n"));
+    try {
+      const { window } = fence;
+      const box = await window.locator("[data-testid=veditor]").boundingBox();
+      const scrollTop = () => window.evaluate(() => document.querySelector("[data-testid=veditor]").scrollTop);
+      const selected = () => window.evaluate(() => document.getElementById("veditor-input").dataset.selection ?? "");
+
+      await window.mouse.move(box.x + 40, box.y + 30);
+      await window.mouse.down();
+      // out past the bottom edge, then held still: the frames do the work
+      await window.mouse.move(box.x + 40, box.y + box.height + 120, { steps: 4 });
+      await window.waitForFunction(() => document.querySelector("[data-testid=veditor]").scrollTop > 200, undefined, { timeout: 5000 });
+      const scrolledTo = await scrollTop();
+      const grown = await selected();
+      await window.mouse.up();
+
+      const lines = grown.split("\n");
+      assert.ok(scrolledTo > 200, `only scrolled to ${scrolledTo}`);
+      assert.ok(lines.length > 12, `selection covered ${lines.length} lines`);
+      // the drag began part-way into the first line and ran on to a later one
+      assert.ok("line 0".endsWith(lines[0]), `selection starts inside line 0, got ${JSON.stringify(lines[0])}`);
+      // whole lines in between, ending part-way into the line under the pointer
+      assert.match(lines[5], /^line \d+$/);
+
+      // and it stops once the button is released
+      const settled = await scrollTop();
+      await window.waitForTimeout(300);
+      assert.equal(await scrollTop(), settled);
+    } finally {
+      await fence.close();
+    }
+  });
+
   test("Cmd+C copies and Cmd+X cuts the selection to the system clipboard", async () => {
     const fence = await openEditor("copy this\nkeep");
     try {

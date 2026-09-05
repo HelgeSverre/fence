@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 const send = (channel) => (payload = {}) => ipcRenderer.send(channel, payload);
 
@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   revealPath: send("fence:reveal-path"),
   listFiles: send("fence:list-files"),
   searchWorkspace: send("fence:search-workspace"),
+  exportDocument: send("fence:export"),
+  saveAttachment: send("fence:save-attachment"),
+  openPath: send("fence:open-path"),
+  // Electron no longer exposes File.path; this is the supported replacement.
+  pathForFile: (file) => webUtils.getPathForFile(file),
   setTitle: send("fence:set-title"),
   setDirty: send("fence:set-dirty"),
   closeWindow: send("fence:close-window"),

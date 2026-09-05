@@ -931,6 +931,12 @@ countsFor content =
     }
 
 
+{-| The directory part of a path, for resolving a document's relative links. -}
+dirName : FilePath -> String
+dirName path =
+    String.split "/" path |> List.reverse |> List.drop 1 |> List.reverse |> String.join "/"
+
+
 {-| How many recently opened files back/forward can reach. -}
 historyLimit : Int
 historyLimit =
@@ -1228,6 +1234,30 @@ handlePortMessage tag value model =
                       else
                         Cmd.none
                     )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        "exportRequested" ->
+            case ( D.decodeValue (D.field "format" D.string) value, model.editor.filePath ) of
+                ( Ok format, path ) ->
+                    ( model
+                    , command "exportDocument"
+                        [ ( "format", E.string format )
+                        , ( "title", E.string (Maybe.map baseName path |> Maybe.withDefault "document") )
+
+                        -- so relative image sources resolve in the export
+                        , ( "base", E.string (Maybe.map (\p -> "file://" ++ dirName p ++ "/") path |> Maybe.withDefault "") )
+                        ]
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        "attachmentSaved" ->
+            case D.decodeValue (D.field "relative" D.string) value of
+                Ok relative ->
+                    update (EditorMsg (Editor.InsertText ("![](" ++ relative ++ ")"))) model
 
                 Err _ ->
                     ( model, Cmd.none )

@@ -29,6 +29,7 @@ export function setupVirtualInput() {
     const t = e.target;
     if (!t?.classList?.contains("veditor-input")) return;
     e.preventDefault();
+    if (pasteImage(e, t)) return;
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (text) t.dispatchEvent(new CustomEvent("fencepaste", { detail: text, bubbles: true }));
   });
@@ -37,6 +38,25 @@ export function setupVirtualInput() {
   document.addEventListener("keydown", copyOnShortcut);
 }
 
+
+// A pasted image is written beside the document and linked from it; the main
+// process replies with the relative path for Elm to insert. Needs a saved
+// document to sit next to, so an unsaved pane falls through to plain text.
+function pasteImage(e, input) {
+  const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+  const documentPath = input.dataset.path;
+  if (!file || !documentPath || !window.electronAPI) return false;
+
+  const extension = (file.type.split("/")[1] || "png").replace(/[^a-z0-9]/gi, "");
+  const name = `${timestampName()}.${extension}`;
+  file.arrayBuffer().then((bytes) => window.electronAPI.saveAttachment({ documentPath, name, bytes }));
+  return true;
+}
+
+// A sortable, filesystem-safe name: 2026-09-06-141530-123.
+function timestampName() {
+  return new Date().toISOString().replace(/[-:T]/g, "").replace(/\..*/, "") + "-" + String(Date.now() % 1000).padStart(3, "0");
+}
 
 // Copy/cut: Elm exposes the selected text on the hidden input. Both the Edit
 // menu's copy/cut roles (webContents.copy()) and Cmd+C/X in the focused

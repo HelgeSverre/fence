@@ -24,6 +24,9 @@ export function wirePorts(app) {
       } else if (data.tag === "setFontSize") {
         applyFontSizesFromState(data);
         remeasureEditorMetrics();
+      } else if (data.tag === "exportDocument") {
+        exportPreview(data);
+        return;
       }
 
       if (window.electronAPI) {
@@ -86,4 +89,54 @@ export function wirePorts(app) {
 
   setupEditorMetrics(app);
   setupVirtualInput();
+  setupFileDrop();
+}
+
+// Export takes the preview exactly as rendered - mermaid diagrams included -
+// plus the stylesheet text behind it, and lets the main process turn that into
+// a PDF, an HTML file or rich text on the clipboard.
+function exportPreview(data) {
+  // the rendered document itself, without the pane's own header
+  const pane = document.querySelector(".preview-content");
+  if (!pane || !window.electronAPI) return;
+  window.electronAPI.exportDocument({
+    format: data.format,
+    title: data.title || "document",
+    base: data.base || "",
+    theme: document.documentElement.getAttribute("data-theme") || "",
+    html: pane.innerHTML,
+    text: pane.textContent || "",
+    css: collectStyles(),
+  });
+}
+
+// Every same-origin rule on the page. Cross-origin sheets throw on access and
+// are skipped; nothing the app ships is loaded that way.
+function collectStyles() {
+  return [...document.styleSheets]
+    .map((sheet) => {
+      try {
+        return [...sheet.cssRules].map((rule) => rule.cssText).join("\n");
+      } catch {
+        return "";
+      }
+    })
+    .join("\n");
+}
+
+// Dropping a folder opens it as the workspace; dropping a markdown file opens
+// the file (and its folder, when it is outside the current workspace).
+function setupFileDrop() {
+  const stop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  document.addEventListener("dragover", stop);
+  document.addEventListener("drop", (e) => {
+    stop(e);
+    const file = e.dataTransfer?.files?.[0];
+    if (!file || !window.electronAPI) return;
+    const path = window.electronAPI.pathForFile(file);
+    if (path) window.electronAPI.openPath({ path });
+  });
 }

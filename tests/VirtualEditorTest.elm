@@ -64,6 +64,7 @@ suite =
                     , cursor = { line = 95, col = 3 }
                     , selection = Just ( { line = 94, col = 2 }, { line = 95, col = 3 } )
                     , selectedText = "ne 94\nlin"
+                    , documentPath = "/n/a.md"
                     , highlights = [ ( { line = 96, col = 0 }, { line = 96, col = 4 } ) ]
                     , activeHighlight = Just ( { line = 96, col = 0 }, { line = 96, col = 4 } )
                     , contentLength = 0

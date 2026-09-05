@@ -19,6 +19,9 @@ const QUIET_WINDOW = !!process.env.FENCE_QUIET_WINDOW;
 
 const MAX_RECENT_WORKSPACES = 20;
 
+// Where a pasted or dropped image is written, beside the open document.
+const ATTACHMENT_DIR = "assets";
+
 function getStatePath() {
   return path.join(app.getPath("userData"), "state.json");
 }
@@ -181,6 +184,20 @@ function buildMenu() {
               : [{ label: "No Recent Workspaces", enabled: false }],
         },
         { type: "separator" },
+        {
+          label: "Export",
+          submenu: [
+            {
+              label: "PDF...",
+              click: () => sendToRenderer({ tag: "exportRequested", format: "pdf" }),
+            },
+            {
+              label: "HTML...",
+              click: () => sendToRenderer({ tag: "exportRequested", format: "html" }),
+            },
+          ],
+        },
+        { type: "separator" },
         isMac ? { role: "close" } : { role: "quit" },
       ],
     },
@@ -194,6 +211,11 @@ function buildMenu() {
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" },
+        { type: "separator" },
+        {
+          label: "Copy Document as Rich Text",
+          click: () => sendToRenderer({ tag: "exportRequested", format: "clipboard" }),
+        },
       ],
     },
     {
@@ -552,6 +574,95 @@ registerIpc("fence:search-workspace", async (data) => {
   const root = requireString(data, "path", 32768);
   const query = requireString(data, "query", 1024);
   sendToRenderer({ tag: "searchResults", query, hits: await fsOps.grep(root, query) });
+});
+
+// Build a standalone HTML document from the rendered preview: the renderer
+// hands over the pane's markup and the stylesheet text it is using, so the
+// export looks exactly like what is on screen, mermaid diagrams included.
+function exportDocument(data) {
+  const html = requireString(data, "html");
+  const css = requireString(data, "css");
+  const title = requireString(data, "title", 512);
+  const theme = typeof data.theme === "string" ? data.theme : "";
+  const base = typeof data.base === "string" ? data.base : "";
+
+  return `<!doctype html>
+<html${theme ? ` data-theme="${escapeAttribute(theme)}"` : ""}>
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(title)}</title>
+${base ? `<base href="${escapeAttribute(base)}">` : ""}
+<style>${css}
+@page { margin: 1.5cm; }
+body { margin: 0; }
+.preview-pane, .preview-content { overflow: visible !important; height: auto !important; }
+</style>
+</head>
+<body><div class="preview-pane"><div class="preview-content">${html}</div></div></body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/"/g, "&quot;");
+}
+
+async function renderPdf(document_) {
+  const printer = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+  try {
+    await printer.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(document_)}`);
+    return await printer.webContents.printToPDF({ printBackground: true });
+  } finally {
+    printer.destroy();
+  }
+}
+
+async function saveExport(defaultName, extension, contents) {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: defaultName,
+    filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
+  });
+  if (result.canceled || !result.filePath) return;
+  await fs.promises.writeFile(result.filePath, contents);
+}
+
+registerIpc("fence:export", async (data) => {
+  const format = requireString(data, "format", 32);
+  const name = requireString(data, "title", 512).replace(/\.[^.]*$/, "") || "document";
+  const document_ = exportDocument(data);
+
+  if (format === "pdf") {
+    await saveExport(`${name}.pdf`, "pdf", await renderPdf(document_));
+  } else if (format === "html") {
+    await saveExport(`${name}.html`, "html", Buffer.from(document_, "utf-8"));
+  } else if (format === "clipboard") {
+    clipboard.write({ text: requireString(data, "text"), html: document_ });
+  } else {
+    throw new Error(`Unknown export format: ${format}`);
+  }
+});
+
+registerIpc("fence:save-attachment", async (data) => {
+  const documentPath = await fsOps.resolvePath(requireString(data, "documentPath", 32768));
+  const name = requireString(data, "name", 255);
+  const bytes = data.bytes;
+  if (!(bytes instanceof ArrayBuffer) && !ArrayBuffer.isView(bytes)) throw new TypeError("Invalid bytes");
+
+  const written = await fsOps.writeBinary(
+    path.join(path.dirname(documentPath), ATTACHMENT_DIR),
+    name,
+    Buffer.from(ArrayBuffer.isView(bytes) ? bytes.buffer : bytes),
+  );
+  sendToRenderer({ tag: "attachmentSaved", path: written.path, relative: `${ATTACHMENT_DIR}/${name}` });
+});
+
+registerIpc("fence:open-path", async (data) => {
+  const target = requireString(data, "path", 32768);
+  if (!fs.existsSync(target)) throw new Error(`No such path: ${target}`);
+  await openCliPath(target);
 });
 
 registerIpc("fence:tree-context-menu", async (data) => {

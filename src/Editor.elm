@@ -1338,6 +1338,7 @@ view found model =
                 , highlights = found.highlights
                 , activeHighlight = found.activeHighlight
                 , selectedText = selectedText model
+                , documentPath = Maybe.withDefault "" model.filePath
                 , contentLength = String.length model.content
                 }
                 model.metrics

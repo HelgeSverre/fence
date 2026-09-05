@@ -79,6 +79,7 @@ type alias Config msg =
     , highlights : List ( Cursor, Cursor ) -- search matches, drawn under the text
     , activeHighlight : Maybe ( Cursor, Cursor )
     , selectedText : String
+    , documentPath : String -- read by js/virtual-input.js, to place pasted images
     , contentLength : Int -- exposed as data-length so tests can check large documents
     }
 
@@ -180,6 +181,7 @@ view config metrics scrollTop maxLineLength lines =
                 , attribute "autocapitalize" "off"
                 , attribute "aria-label" "Editor"
                 , attribute "data-selection" config.selectedText -- read by js/virtual-input.js for copy/cut
+                , attribute "data-path" config.documentPath
                 , on "fencecut" (D.succeed config.onCut)
                 , preventDefaultOn "keydown" config.keyDecoder
                 , on "input"

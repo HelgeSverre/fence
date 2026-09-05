@@ -66,6 +66,147 @@ const NOISE_DIRS = new Set(["node_modules", "vendor", "dist", "build", "target",
 const WALK_MAX_DEPTH = 12;
 const WALK_MAX_ENTRIES = 5000;
 
+// Caps for the whole-workspace walk behind quick-open and search. Generous
+// enough for any notes folder, low enough that a wrong root can't hang the app.
+const LIST_MAX_FILES = 20000;
+const GREP_MAX_HITS = 500;
+const GREP_MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+// A single path segment the user typed: no separators, no traversal, nothing
+// that could reach outside the directory it is being created in.
+function safeName(name) {
+  if (typeof name !== "string" || name === "" || name === "." || name === "..") {
+    throw new Error(`Invalid name: ${name}`);
+  }
+  if (name !== path.basename(name) || name.includes("/") || name.includes("\\")) {
+    throw new Error(`Invalid name: ${name}`);
+  }
+  return name;
+}
+
+async function createFile(dirPath, name) {
+  const canonical = await pathWithinWorkspace(dirPath);
+  const target = path.join(canonical, safeName(name));
+  let handle;
+  try {
+    handle = await fs.promises.open(target, "wx", 0o666);
+  } catch (error) {
+    if (error.code === "EEXIST") throw new Error(`${name} already exists`);
+    throw error;
+  }
+  await handle.close();
+  return { path: target };
+}
+
+async function createDir(dirPath, name) {
+  const canonical = await pathWithinWorkspace(dirPath);
+  const target = path.join(canonical, safeName(name));
+  try {
+    await fs.promises.mkdir(target);
+  } catch (error) {
+    if (error.code === "EEXIST") throw new Error(`${name} already exists`);
+    throw error;
+  }
+  return { path: target };
+}
+
+async function renamePath(fromPath, name) {
+  const canonical = await pathWithinWorkspace(fromPath);
+  const target = path.join(path.dirname(canonical), safeName(name));
+  await pathWithinWorkspace(target);
+  if (target !== canonical && (await exists(target))) {
+    throw new Error(`${name} already exists`);
+  }
+  await fs.promises.rename(canonical, target);
+  return { from: canonical, path: target };
+}
+
+async function writeBinary(dirPath, name, data) {
+  const canonical = await pathWithinWorkspace(dirPath);
+  const target = path.join(canonical, safeName(name));
+  await fs.promises.mkdir(canonical, { recursive: true });
+  await fs.promises.writeFile(target, data);
+  return { path: target };
+}
+
+async function exists(target) {
+  return fs.promises
+    .access(target)
+    .then(() => true)
+    .catch(() => false);
+}
+
+// Every markdown file under the workspace, for quick-open and search. Same
+// pruning as the tree (hidden and noise directories), with its own file cap.
+async function listMarkdownFiles(rootPath) {
+  const root = await pathWithinWorkspace(rootPath);
+  const found = [];
+
+  async function walk(dirPath, depth) {
+    if (depth > WALK_MAX_DEPTH || found.length >= LIST_MAX_FILES) return;
+    let entries;
+    try {
+      entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (found.length >= LIST_MAX_FILES) return;
+      if (entry.name.startsWith(".")) continue;
+      const full = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        if (!NOISE_DIRS.has(entry.name)) await walk(full, depth + 1);
+      } else if (entry.isFile() && isMarkdownFile(entry.name)) {
+        found.push({ path: full, relative: path.relative(root, full).split(path.sep).join("/") });
+      }
+    }
+  }
+
+  await walk(root, 0);
+  found.sort((a, b) => a.relative.localeCompare(b.relative, undefined, { sensitivity: "base" }));
+  return found;
+}
+
+// Literal, case-insensitive substring search across the workspace's markdown.
+// ponytail: plain read-and-scan; swap in ripgrep if a large workspace drags.
+async function grep(rootPath, query, { limit = GREP_MAX_HITS } = {}) {
+  if (typeof query !== "string" || query === "") return [];
+  const needle = query.toLowerCase();
+  const files = await listMarkdownFiles(rootPath);
+  const hits = [];
+
+  for (const file of files) {
+    if (hits.length >= limit) break;
+    let stats;
+    try {
+      stats = await fs.promises.stat(file.path);
+    } catch {
+      continue;
+    }
+    if (stats.size > GREP_MAX_FILE_BYTES) continue;
+    let content;
+    try {
+      content = await fs.promises.readFile(file.path, "utf-8");
+    } catch {
+      continue;
+    }
+    if (!content.toLowerCase().includes(needle)) continue;
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length && hits.length < limit; i += 1) {
+      const column = lines[i].toLowerCase().indexOf(needle);
+      if (column === -1) continue;
+      hits.push({
+        path: file.path,
+        relative: file.relative,
+        line: i + 1,
+        column,
+        text: lines[i].length > 300 ? `${lines[i].slice(0, 300)}\u2026` : lines[i],
+      });
+    }
+  }
+  return hits;
+}
+
 function isMarkdownFile(name) {
   return MARKDOWN_EXTENSIONS.has(path.extname(name).toLowerCase());
 }
@@ -196,6 +337,12 @@ async function unwatchDir(dirPath) {
 module.exports = {
   FileConflictError,
   containsMarkdown,
+  createDir,
+  createFile,
+  grep,
+  listMarkdownFiles,
+  renamePath,
+  writeBinary,
   isMarkdownFile,
   readDir,
   readFile,

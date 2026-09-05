@@ -10,8 +10,10 @@ describe("workspace filesystem operations", () => {
   let outside;
 
   beforeEach(async () => {
-    workspace = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-workspace-"));
-    outside = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-outside-"));
+    // realpath: on macOS the temp dir is a symlink (/var -> /private/var) and
+    // fs-ops canonicalizes every path it returns.
+    workspace = await fs.promises.realpath(await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-workspace-")));
+    outside = await fs.promises.realpath(await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-outside-")));
     await fsOps.setWorkspace(workspace);
   });
 
@@ -107,4 +109,84 @@ describe("workspace filesystem operations", () => {
       assert.equal(await fs.promises.readFile(outsideFile, "utf-8"), "secret");
     },
   );
+
+  test("creates files and directories, refusing to clobber an existing name", async () => {
+    const created = await fsOps.createFile(workspace, "new.md");
+    assert.equal(created.path, path.join(workspace, "new.md"));
+    assert.equal(await fs.promises.readFile(created.path, "utf-8"), "");
+
+    await fs.promises.writeFile(path.join(workspace, "taken.md"), "keep", "utf-8");
+    await assert.rejects(fsOps.createFile(workspace, "taken.md"), /already exists/);
+    assert.equal(await fs.promises.readFile(path.join(workspace, "taken.md"), "utf-8"), "keep");
+
+    const dir = await fsOps.createDir(workspace, "folder");
+    assert.equal((await fs.promises.stat(dir.path)).isDirectory(), true);
+    await assert.rejects(fsOps.createDir(workspace, "folder"), /already exists/);
+  });
+
+  test("rejects names that escape their parent directory", async () => {
+    for (const name of ["../escape.md", "a/b.md", "", ".", "..", "/abs.md"]) {
+      await assert.rejects(fsOps.createFile(workspace, name), /Invalid name/);
+    }
+    assert.equal(await fs.promises.readdir(outside).then((n) => n.length), 0);
+  });
+
+  test("renames within the workspace and refuses to overwrite", async () => {
+    await fs.promises.writeFile(path.join(workspace, "old.md"), "body", "utf-8");
+    await fs.promises.writeFile(path.join(workspace, "other.md"), "other", "utf-8");
+
+    const renamed = await fsOps.renamePath(path.join(workspace, "old.md"), "new.md");
+    assert.equal(renamed.path, path.join(workspace, "new.md"));
+    assert.equal(await fs.promises.readFile(renamed.path, "utf-8"), "body");
+
+    await assert.rejects(fsOps.renamePath(renamed.path, "other.md"), /already exists/);
+    await assert.rejects(fsOps.renamePath(renamed.path, "../out.md"), /Invalid name/);
+    assert.equal(await fs.promises.readFile(renamed.path, "utf-8"), "body");
+  });
+
+  test("lists every markdown file under the workspace", async () => {
+    const mk = (rel) => fs.promises.mkdir(path.join(workspace, rel), { recursive: true });
+    const touch = (rel) => fs.promises.writeFile(path.join(workspace, rel), "", "utf-8");
+    await mk("docs/deep");
+    await touch("docs/deep/inner.md");
+    await touch("docs/guide.md");
+    await touch("top.md");
+    await touch("ignored.txt");
+    await mk("node_modules");
+    await touch("node_modules/README.md");
+    await mk(".git");
+    await touch(".git/notes.md");
+
+    const files = await fsOps.listMarkdownFiles(workspace);
+
+    assert.deepEqual(files.map((f) => f.relative).sort(), ["docs/deep/inner.md", "docs/guide.md", "top.md"]);
+  });
+
+  test("greps markdown files for a literal query, capped and case-insensitive", async () => {
+    await fs.promises.writeFile(path.join(workspace, "a.md"), "alpha\nBETA line\ngamma", "utf-8");
+    await fs.promises.writeFile(path.join(workspace, "b.md"), "nothing here", "utf-8");
+    await fs.promises.writeFile(path.join(workspace, "c.txt"), "beta ignored", "utf-8");
+
+    const hits = await fsOps.grep(workspace, "beta");
+
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].relative, "a.md");
+    assert.equal(hits[0].line, 2);
+    assert.equal(hits[0].text, "BETA line");
+    assert.equal(hits[0].column, 0);
+
+    assert.deepEqual(await fsOps.grep(workspace, ""), []);
+
+    await fs.promises.writeFile(path.join(workspace, "many.md"), Array(50).fill("beta").join("\n"), "utf-8");
+    assert.equal((await fsOps.grep(workspace, "beta", { limit: 10 })).length, 10);
+  });
+
+  test("writes binary attachments beside the document", async () => {
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const written = await fsOps.writeBinary(path.join(workspace, "assets"), "image.png", bytes);
+
+    assert.equal(written.path, path.join(workspace, "assets", "image.png"));
+    assert.deepEqual(await fs.promises.readFile(written.path), bytes);
+    await assert.rejects(fsOps.writeBinary(path.join(outside, "assets"), "x.png", bytes), /outside workspace/);
+  });
 });

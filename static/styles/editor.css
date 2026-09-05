@@ -53,6 +53,23 @@
   background: var(--selection);
 }
 
+/* Search matches, drawn under the text like the selection. */
+.veditor-highlight-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.veditor-highlight {
+  position: absolute;
+  background: oklch(from var(--accent) l c h / 0.25);
+  border-radius: 2px;
+}
+
+.veditor-highlight.active {
+  background: oklch(from var(--accent) l c h / 0.45);
+  outline: 1px solid var(--accent);
+}
+
 /* The caret belongs to the focused editor: hidden otherwise, so it never
    suggests that typing would land here. */
 .veditor-caret {
@@ -97,4 +114,91 @@
   font-family: var(--font-mono);
   font-size: var(--font-size-editor);
   line-height: var(--editor-line-height);
+}
+
+/* Find bar: floats over the top-right of the editor pane. */
+.editor-pane-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.editor-pane-wrap > .editor-pane {
+  flex: 1;
+  min-height: 0;
+}
+
+.find-bar {
+  position: absolute;
+  top: calc(var(--header-height) + 8px);
+  right: 16px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  box-shadow: 0 4px 16px oklch(0 0 0 / 0.3);
+  font-size: var(--font-size-ui);
+}
+
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.find-input {
+  width: 200px;
+  padding: 4px 6px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: none;
+}
+
+.find-input:focus {
+  border-color: var(--state-focus-ring);
+}
+
+.find-count {
+  min-width: 70px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.find-button {
+  min-width: 26px;
+  padding: 3px 6px;
+  color: var(--text-secondary);
+  font: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.find-button.wide {
+  min-width: 60px;
+}
+
+.find-button:hover:not(:disabled) {
+  background: var(--state-hover);
+  color: var(--text-primary);
+}
+
+.find-button.on {
+  background: var(--state-selected);
+  color: var(--accent-text);
+}
+
+.find-button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }

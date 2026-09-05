@@ -11,11 +11,13 @@ module Main exposing
     , update
     )
 
+import Array
 import Browser
 import Browser.Dom
 import Browser.Events
 import Editor
 import FileTree
+import Find
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
@@ -28,6 +30,7 @@ import Ports
 import Preview
 import Process
 import Task
+import TextBuffer exposing (Cursor)
 import Types exposing (..)
 import VirtualEditor
 import Yaml
@@ -97,6 +100,7 @@ type alias Model =
     , rebinding : Maybe RebindTarget
     , errorMessage : Maybe String
     , closeAfterSave : Bool
+    , find : Find.Model
     }
 
 
@@ -129,6 +133,14 @@ type Msg
     | ScrollToHeading String
     | StartRebind RebindTarget
     | DismissError
+    | OpenFind Bool
+    | CloseFind
+    | FindQueryChanged String
+    | FindReplacementChanged String
+    | FindStep Int
+    | FindToggleCase
+    | ReplaceActive
+    | ReplaceAll
     | NoOp
 
 
@@ -319,6 +331,7 @@ init flagsValue =
       , rebinding = Nothing
       , errorMessage = Nothing
       , closeAfterSave = False
+      , find = Find.init
       }
     , Cmd.none
     )
@@ -523,6 +536,46 @@ update msg model =
         StartRebind target ->
             ( { model | rebinding = Just target }, Cmd.none )
 
+        OpenFind withReplace ->
+            let
+                -- a search almost always starts from the selected words
+                seed =
+                    if String.contains "\n" (Editor.selectedText model.editor) then
+                        ""
+
+                    else
+                        Editor.selectedText model.editor
+            in
+            ( { model | find = Find.open withReplace seed model.editor.lines model.find }
+            , focusSilently findInputId
+            )
+
+        CloseFind ->
+            ( { model | find = Find.close model.find }, focusSilently "veditor-input" )
+
+        FindQueryChanged query ->
+            goToActive { model | find = Find.setQuery query model.editor.lines model.find }
+
+        FindReplacementChanged replacement ->
+            ( { model | find = Find.setReplacement replacement model.find }, Cmd.none )
+
+        FindStep delta ->
+            goToActive { model | find = Find.step delta model.find }
+
+        FindToggleCase ->
+            goToActive { model | find = Find.setCaseSensitive (not model.find.caseSensitive) model.editor.lines model.find }
+
+        ReplaceActive ->
+            case Find.activeMatch model.find of
+                Just range ->
+                    applyReplacement [ range ] model
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        ReplaceAll ->
+            applyReplacement (Array.toList (Find.matches model.find)) model
+
         DismissError ->
             ( { model | errorMessage = Nothing }, Cmd.none )
 
@@ -608,7 +661,9 @@ update msg model =
 
         DebouncedParse gen ->
             if gen == model.debounceGeneration then
-                startParse model.parseCache model
+                -- the search shares the edit debounce: rescanning a large
+                -- document on every keystroke is not worth a live count
+                startParse model.parseCache { model | find = Find.refresh model.editor.lines model.find }
 
             else
                 ( model, Cmd.none )
@@ -682,6 +737,24 @@ update msg model =
                     else if key == "Escape" && model.settingsOpen then
                         ( { model | settingsOpen = False }, Cmd.none )
 
+                    else if key == "f" && (metaKey || ctrlKey) then
+                        update (OpenFind altKey) model
+
+                    else if key == "g" && (metaKey || ctrlKey) && Find.isOpen model.find then
+                        update
+                            (FindStep
+                                (if shiftKey then
+                                    -1
+
+                                 else
+                                    1
+                                )
+                            )
+                            model
+
+                    else if key == "Escape" && Find.isOpen model.find then
+                        update CloseFind model
+
                     else if matchesBinding model.leftToggleKey key metaKey ctrlKey shiftKey altKey then
                         update ToggleLeftSidebar model
 
@@ -706,6 +779,55 @@ update msg model =
 
                 Err _ ->
                     ( model, Cmd.none )
+
+
+{-| Show the active match: select it in the editor and scroll it into view.
+Focus stays in the find field, so Enter keeps stepping through matches.
+-}
+goToActive : Model -> ( Model, Cmd Msg )
+goToActive model =
+    case Find.activeMatch model.find of
+        Just range ->
+            let
+                editor =
+                    Editor.selectRange range model.editor
+            in
+            ( { model | editor = editor }
+            , case Editor.caretFollow editor of
+                Just target ->
+                    ignoreResult (Browser.Dom.setViewportOf "veditor" target.left target.top)
+
+                Nothing ->
+                    Cmd.none
+            )
+
+        Nothing ->
+            ( model, Cmd.none )
+
+
+{-| Replace the given matches and re-run the search over the result. -}
+applyReplacement : List ( Cursor, Cursor ) -> Model -> ( Model, Cmd Msg )
+applyReplacement ranges model =
+    let
+        edited =
+            Editor.replaceRanges ranges model.find.replacement model.editor
+
+        gen =
+            model.debounceGeneration + 1
+    in
+    ( { model
+        | editor = edited
+        , find = Find.refresh edited.lines model.find
+        , debounceGeneration = gen
+        , recoveryGeneration = model.recoveryGeneration + 1
+      }
+    , Cmd.batch
+        [ Task.perform (\_ -> DebouncedParse gen) (Process.sleep (previewDelay edited.content))
+        , Task.perform (\_ -> RecoveryDraftDue (model.recoveryGeneration + 1)) (Process.sleep 1000)
+        , setDirtyCmd (edited.dirtyState == Dirty)
+        , setTitleCmd edited
+        ]
+    )
 
 
 {-| Begin a progressive parse of the editor content: the first step is
@@ -1422,7 +1544,7 @@ view model =
                 []
 
         middleSection =
-            [ ( pct editorTrack, Html.map EditorMsg (Editor.view model.editor) )
+            [ ( pct editorTrack, viewEditorPane model )
             , ( "2px", viewDivider DraggingEditor )
             , ( "1fr", Html.Lazy.lazy2 Preview.view model.frontmatter model.previewHtml )
             ]
@@ -1460,6 +1582,182 @@ view model =
             Nothing ->
                 text ""
         ]
+
+
+{-| The editor, with the find bar layered over it when it is open. -}
+viewEditorPane : Model -> Html Msg
+viewEditorPane model =
+    div [ class "editor-pane-wrap" ]
+        [ Html.map EditorMsg
+            (Editor.view
+                { highlights =
+                    if Find.isOpen model.find then
+                        Array.toList (Find.matches model.find)
+
+                    else
+                        []
+                , activeHighlight =
+                    if Find.isOpen model.find then
+                        Find.activeMatch model.find
+
+                    else
+                        Nothing
+                }
+                model.editor
+            )
+        , if Find.isOpen model.find then
+            viewFindBar model.find
+
+          else
+            text ""
+        ]
+
+
+findInputId : String
+findInputId =
+    "find-input"
+
+
+viewFindBar : Find.Model -> Html Msg
+viewFindBar find =
+    let
+        ( current, total ) =
+            Find.count find
+
+        countLabel =
+            if find.query == "" then
+                ""
+
+            else if total == 0 then
+                "No results"
+
+            else
+                String.fromInt current
+                    ++ " of "
+                    ++ String.fromInt total
+                    ++ (if total >= Find.matchLimit then
+                            "+"
+
+                        else
+                            ""
+                       )
+
+        stepButton label delta =
+            button
+                [ class "find-button"
+                , attribute "aria-label" label
+                , title label
+                , disabled (total == 0)
+                , onClick (FindStep delta)
+                ]
+                [ text
+                    (if delta < 0 then
+                        "\u{2191}"
+
+                     else
+                        "\u{2193}"
+                    )
+                ]
+    in
+    div [ class "find-bar", attribute "data-testid" "find-bar" ]
+        [ div [ class "find-row" ]
+            [ input
+                [ class "find-input"
+                , id findInputId
+                , attribute "data-testid" "find-input"
+                , attribute "aria-label" "Find"
+                , placeholder "Find"
+                , value find.query
+                , spellcheck False
+                , onInput FindQueryChanged
+                , preventDefaultOn "keydown" (findKeyDecoder False)
+                ]
+                []
+            , span [ class "find-count", attribute "data-testid" "find-count" ] [ text countLabel ]
+            , button
+                [ class "find-button"
+                , classList [ ( "on", find.caseSensitive ) ]
+                , attribute "aria-label" "Match case"
+                , attribute "aria-pressed"
+                    (if find.caseSensitive then
+                        "true"
+
+                     else
+                        "false"
+                    )
+                , title "Match case"
+                , onClick FindToggleCase
+                ]
+                [ text "Aa" ]
+            , stepButton "Previous match" -1
+            , stepButton "Next match" 1
+            , button [ class "find-button", attribute "aria-label" "Close find", title "Close", onClick CloseFind ] [ text "\u{00D7}" ]
+            ]
+        , if find.replaceShown then
+            div [ class "find-row" ]
+                [ input
+                    [ class "find-input"
+                    , attribute "data-testid" "replace-input"
+                    , attribute "aria-label" "Replace with"
+                    , placeholder "Replace"
+                    , value find.replacement
+                    , spellcheck False
+                    , onInput FindReplacementChanged
+                    , preventDefaultOn "keydown" (findKeyDecoder True)
+                    ]
+                    []
+                , button
+                    [ class "find-button wide"
+                    , attribute "data-testid" "replace-one"
+                    , disabled (total == 0)
+                    , onClick ReplaceActive
+                    ]
+                    [ text "Replace" ]
+                , button
+                    [ class "find-button wide"
+                    , attribute "data-testid" "replace-all"
+                    , disabled (total == 0)
+                    , onClick ReplaceAll
+                    ]
+                    [ text "All" ]
+                ]
+
+          else
+            text ""
+        ]
+
+
+{-| Keys inside the find fields. Enter steps through matches (or replaces, in
+the replacement field) and Escape closes; everything else is ordinary typing.
+-}
+findKeyDecoder : Bool -> D.Decoder ( Msg, Bool )
+findKeyDecoder inReplacement =
+    D.map2 Tuple.pair (D.field "key" D.string) (D.field "shiftKey" D.bool)
+        |> D.andThen
+            (\( key, shift ) ->
+                case key of
+                    "Enter" ->
+                        D.succeed
+                            ( if inReplacement then
+                                ReplaceActive
+
+                              else
+                                FindStep
+                                    (if shift then
+                                        -1
+
+                                     else
+                                        1
+                                    )
+                            , True
+                            )
+
+                    "Escape" ->
+                        D.succeed ( CloseFind, True )
+
+                    _ ->
+                        D.fail "not a find key"
+            )
 
 
 {-| The right sidebar: a clickable outline of the document's headings,

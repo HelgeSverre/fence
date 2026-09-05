@@ -7,6 +7,8 @@ module Editor exposing
     , caretFollow
     , dragging
     , followRename
+    , replaceRanges
+    , selectRange
     , gotoLine
     , highlightLine
     , keyDecoder
@@ -161,6 +163,39 @@ setContent path content revision dirty model =
         , redo = []
         , coalesce = NoCoalesce
     }
+
+
+{-| Select a range, which is how a search hit is shown: the caret lands on it
+so the usual caret-following scroll brings it into view.
+-}
+selectRange : ( Cursor, Cursor ) -> Model -> Model
+selectRange ( s, e ) model =
+    { model | anchor = Just s, cursor = e, coalesce = NoCoalesce }
+
+
+{-| Replace several ranges in one undo step. The ranges must be in document
+order: they are applied last-first so the earlier ones stay valid.
+-}
+replaceRanges : List ( Cursor, Cursor ) -> String -> Model -> Model
+replaceRanges ranges replacement model =
+    if List.isEmpty ranges then
+        model
+
+    else
+        edit NoCoalesce
+            (\cursor lines ->
+                List.foldr
+                    (\( s, e ) ( acc, _ ) ->
+                        let
+                            ( cleared, at ) =
+                                TextBuffer.deleteRange s e acc
+                        in
+                        TextBuffer.insert replacement at cleared
+                    )
+                    ( lines, cursor )
+                    ranges
+            )
+            { model | anchor = Nothing }
 
 
 {-| Follow a rename of the open file, so the title bar and the next save
@@ -1276,8 +1311,8 @@ scoped isWord wordKey isLine lineKey plainKey =
         plainKey
 
 
-view : Model -> Html Msg
-view model =
+view : { highlights : List ( Cursor, Cursor ), activeHighlight : Maybe ( Cursor, Cursor ) } -> Model -> Html Msg
+view found model =
     div [ class "editor-pane", attribute "data-testid" "editor-pane" ]
         [ div [ class "pane-header", attribute "data-testid" "editor-header" ]
             [ span []
@@ -1294,6 +1329,8 @@ view model =
                 , onCut = CutSelection
                 , cursor = model.cursor
                 , selection = selection model
+                , highlights = found.highlights
+                , activeHighlight = found.activeHighlight
                 , selectedText = selectedText model
                 , contentLength = String.length model.content
                 }

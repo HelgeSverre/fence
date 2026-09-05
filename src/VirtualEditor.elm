@@ -76,6 +76,8 @@ type alias Config msg =
     , onCut : msg
     , cursor : Cursor
     , selection : Maybe ( Cursor, Cursor )
+    , highlights : List ( Cursor, Cursor ) -- search matches, drawn under the text
+    , activeHighlight : Maybe ( Cursor, Cursor )
     , selectedText : String
     , contentLength : Int -- exposed as data-length so tests can check large documents
     }
@@ -139,7 +141,11 @@ view config metrics scrollTop maxLineLength lines =
                     (D.field "detail" D.int)
                 )
             ]
-            [ div [ class "veditor-selection-layer" ] (selectionRects config.selection metrics lines from to)
+            [ div [ class "veditor-highlight-layer" ]
+                (List.concatMap (rangeRects "veditor-highlight" metrics lines from to) config.highlights
+                    ++ List.concatMap (rangeRects "veditor-highlight active" metrics lines from to) (maybeToList config.activeHighlight)
+                )
+            , div [ class "veditor-selection-layer" ] (selectionRects config.selection metrics lines from to)
             , div
                 [ class "veditor-rows"
                 , style "top" (px (toFloat from * metrics.lineHeight))
@@ -198,6 +204,16 @@ view config metrics scrollTop maxLineLength lines =
         ]
 
 
+maybeToList : Maybe a -> List a
+maybeToList maybe =
+    case maybe of
+        Just value ->
+            [ value ]
+
+        Nothing ->
+            []
+
+
 {-| One highlight box per visible selected row; rows ending inside the
 selection get an extra cell for the line break. -}
 selectionRects : Maybe ( Cursor, Cursor ) -> Metrics -> Array String -> Int -> Int -> List (Html msg)
@@ -206,37 +222,43 @@ selectionRects maybeSelection metrics lines from to =
         Nothing ->
             []
 
-        Just ( s, e ) ->
-            List.range (Basics.max from s.line) (Basics.min (to - 1) e.line)
-                |> List.map
-                    (\row ->
-                        let
-                            line =
-                                Array.get row lines |> Maybe.withDefault ""
+        Just range ->
+            rangeRects "veditor-selection" metrics lines from to range
 
-                            startCell =
-                                if row == s.line then
-                                    TextBuffer.visualColumn line s.col
 
-                                else
-                                    0
+{-| The boxes covering a range, clipped to the rendered rows. -}
+rangeRects : String -> Metrics -> Array String -> Int -> Int -> ( Cursor, Cursor ) -> List (Html msg)
+rangeRects cls metrics lines from to ( s, e ) =
+    List.range (Basics.max from s.line) (Basics.min (to - 1) e.line)
+        |> List.map
+            (\row ->
+                let
+                    line =
+                        Array.get row lines |> Maybe.withDefault ""
 
-                            endCell =
-                                if row == e.line then
-                                    TextBuffer.visualColumn line e.col
+                    startCell =
+                        if row == s.line then
+                            TextBuffer.visualColumn line s.col
 
-                                else
-                                    TextBuffer.visualColumn line (String.length line) + 1
+                        else
+                            0
 
-                            px n =
-                                String.fromFloat n ++ "px"
-                        in
-                        div
-                            [ class "veditor-selection"
-                            , style "left" (px (toFloat startCell * metrics.charWidth))
-                            , style "top" (px (toFloat row * metrics.lineHeight))
-                            , style "width" (px (toFloat (endCell - startCell) * metrics.charWidth))
-                            , style "height" (px metrics.lineHeight)
-                            ]
-                            []
-                    )
+                    endCell =
+                        if row == e.line then
+                            TextBuffer.visualColumn line e.col
+
+                        else
+                            TextBuffer.visualColumn line (String.length line) + 1
+
+                    px n =
+                        String.fromFloat n ++ "px"
+                in
+                div
+                    [ class cls
+                    , style "left" (px (toFloat startCell * metrics.charWidth))
+                    , style "top" (px (toFloat row * metrics.lineHeight))
+                    , style "width" (px (toFloat (endCell - startCell) * metrics.charWidth))
+                    , style "height" (px metrics.lineHeight)
+                    ]
+                    []
+            )

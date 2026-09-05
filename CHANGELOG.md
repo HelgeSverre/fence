@@ -31,7 +31,8 @@ Notable changes to Fence. Dates are release dates; versions follow
   rendered preview with its styles and mermaid diagrams.
 - **Pasting an image** writes it to `assets/` beside the document and inserts
   the link. **Dropping** a file or folder on the window opens it.
-- **The preview follows the editor's scroll position**, anchored on headings.
+- **The preview follows the editor's scroll position**, anchored on headings
+  and moving continuously with it rather than a line at a time.
 - A word, line and character count in the editor's pane header.
 
 ## [0.1.6] — 2026-09-05

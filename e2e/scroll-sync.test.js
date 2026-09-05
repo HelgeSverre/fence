@@ -68,6 +68,40 @@ describe("scroll sync", () => {
     }
   });
 
+  test("the preview tracks the editor continuously, not one line at a time", async () => {
+    const fence = await launchFence({ files: { "note.md": doc }, open: "note.md" });
+    try {
+      const { window } = fence;
+      await window.getByTestId("preview-content").waitFor();
+
+      // Small scrolls well inside one section: a line-quantised sync would
+      // leave the preview still until a whole line had gone by.
+      const lineHeight = await window.evaluate(() => parseFloat(document.querySelector(".veditor-row")?.style.height) || 22.4);
+      const start = 30 * lineHeight;
+      await scrollEditorTo(window, start);
+      await window.waitForFunction(() => document.querySelector("#preview-container").scrollTop > 100, undefined, { timeout: 10000 });
+
+      const samples = [await previewTop(window)];
+      for (const offset of [4, 8, 12, 16]) {
+        await scrollEditorTo(window, start + offset);
+        await window.waitForFunction(
+          (previous) => document.querySelector("#preview-container").scrollTop !== previous,
+          samples.at(-1),
+          { timeout: 5000 },
+        );
+        samples.push(await previewTop(window));
+      }
+
+      // strictly increasing, with no jump the size of a whole section
+      for (let i = 1; i < samples.length; i += 1) {
+        assert.ok(samples[i] > samples[i - 1], `preview went ${samples[i - 1]} -> ${samples[i]}`);
+        assert.ok(samples[i] - samples[i - 1] < 60, `preview jumped ${samples[i] - samples[i - 1]}px for a few pixels of editor scroll`);
+      }
+    } finally {
+      await fence.close();
+    }
+  });
+
   test("scrolling the preview alone does not move the editor", async () => {
     const fence = await launchFence({ files: { "note.md": doc }, open: "note.md" });
     try {

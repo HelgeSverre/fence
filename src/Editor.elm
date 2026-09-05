@@ -89,6 +89,9 @@ type Key
     | DeleteLine
     | OpenLineBelow
     | OpenLineAbove
+    | Wrap String
+    | Link
+    | ToggleComment
 
 
 type Msg
@@ -220,19 +223,22 @@ update msg model =
             { moved | anchor = anchored.anchor }
 
         InsertText text ->
-            if String.isEmpty text then
-                model
+            case ( isUrl text, selection model ) of
+                -- a URL pasted over words links them, which is the only thing
+                -- anyone wants from that gesture
+                ( True, Just ( s, e ) ) ->
+                    let
+                        inner =
+                            TextBuffer.sliceRange s e model.lines
+                    in
+                    let
+                        replacement =
+                            "[" ++ inner ++ "](" ++ text ++ ")"
+                    in
+                    replaceRange s e replacement (String.length replacement) 0 model
 
-            else
-                edit
-                    (if String.length text == 1 && text /= "\n" && text /= " " then
-                        Typing
-
-                     else
-                        NoCoalesce
-                    )
-                    (TextBuffer.insert text)
-                    model
+                _ ->
+                    insertText text model
 
         PointerDown { x, y, shift, clicks } ->
             let
@@ -389,6 +395,46 @@ keyPressed key model =
 
         OpenLineAbove ->
             openLine model.cursor.line model
+
+        Wrap marker ->
+            wrap marker model
+
+        Link ->
+            case selection model of
+                Just ( s, e ) ->
+                    let
+                        inner =
+                            TextBuffer.sliceRange s e model.lines
+                    in
+                    replaceRange s e ("[" ++ inner ++ "]()") (String.length inner + 3) 0 model
+
+                Nothing ->
+                    insertAround "[]()" 1 model
+
+        ToggleComment ->
+            let
+                ( from, to ) =
+                    lineSpan model
+
+                spanned =
+                    Array.slice from (to + 1) model.lines |> Array.toList
+
+                uncomment =
+                    List.all (\line -> String.isEmpty (String.trim line) || firstMatch commentPattern line /= Nothing) spanned
+
+                toggle index line =
+                    if index < from || index > to || String.isEmpty (String.trim line) then
+                        line
+
+                    else if uncomment then
+                        String.replace "<!--" "" line
+                            |> String.replace "-->" ""
+                            |> String.trim
+
+                    else
+                        "<!-- " ++ line ++ " -->"
+            in
+            lineEdit (Array.indexedMap toggle) identity model
 
         Tab ->
             case multiLineSelection model of
@@ -812,6 +858,44 @@ editorAction { key, meta, ctrl, shift, alt } =
             if shortcut && shift then
                 press DeleteLine
 
+            else if shortcut then
+                press Link
+
+            else
+                typed
+
+        "b" ->
+            if shortcut && not shift then
+                press (Wrap "**")
+
+            else
+                typed
+
+        "i" ->
+            if shortcut && not shift then
+                press (Wrap "*")
+
+            else
+                typed
+
+        "e" ->
+            if shortcut && not shift then
+                press (Wrap "`")
+
+            else
+                typed
+
+        "x" ->
+            if shortcut && shift then
+                press (Wrap "~~")
+
+            else
+                typed
+
+        "/" ->
+            if shortcut then
+                press ToggleComment
+
             else
                 typed
 
@@ -880,6 +964,132 @@ editorAction { key, meta, ctrl, shift, alt } =
 
         _ ->
             typed
+
+
+insertText : String -> Model -> Model
+insertText text model =
+    if String.isEmpty text then
+        model
+
+    else
+        edit
+            (if String.length text == 1 && text /= "\n" && text /= " " then
+                Typing
+
+             else
+                NoCoalesce
+            )
+            (TextBuffer.insert text)
+            model
+
+
+{-| Pasted text that should become a link's target rather than plain text. -}
+isUrl : String -> Bool
+isUrl text =
+    let
+        trimmed =
+            String.trim text
+    in
+    trimmed
+        == text
+        && not (String.contains " " trimmed)
+        && List.any (\scheme -> String.startsWith scheme trimmed) [ "http://", "https://" ]
+
+
+{-| Toggle a pair of markers around the selection, or around the caret when
+there is none. A selection already wrapped - whether or not the markers are
+part of it - is unwrapped, so the shortcut is its own undo.
+-}
+wrap : String -> Model -> Model
+wrap marker model =
+    case selection model of
+        Nothing ->
+            insertAround (marker ++ marker) (String.length marker) model
+
+        Just ( s, e ) ->
+            let
+                inner =
+                    TextBuffer.sliceRange s e model.lines
+
+                width =
+                    String.length marker
+
+                outside =
+                    TextBuffer.sliceRange (backBy width s model) (forwardBy width e model) model.lines
+            in
+            if String.length inner >= 2 * width && String.startsWith marker inner && String.endsWith marker inner then
+                -- the markers are inside the selection
+                let
+                    stripped =
+                        String.slice width -width inner
+                in
+                replaceRange s e stripped 0 (String.length stripped) model
+
+            else if String.startsWith marker outside && String.endsWith marker outside && String.length outside == String.length inner + 2 * width then
+                -- the selection is the text between the markers
+                replaceRange (backBy width s model) (forwardBy width e model) inner 0 (String.length inner) model
+
+            else
+                replaceRange s e (marker ++ inner ++ marker) width (String.length inner) model
+
+
+{-| A column `n` before a cursor, clamped to the line. -}
+backBy : Int -> Cursor -> Model -> Cursor
+backBy n cursor model =
+    TextBuffer.clampCursor model.lines { cursor | col = Basics.max 0 (cursor.col - n) }
+
+
+forwardBy : Int -> Cursor -> Model -> Cursor
+forwardBy n cursor model =
+    TextBuffer.clampCursor model.lines { cursor | col = cursor.col + n }
+
+
+{-| Replace the range `s`..`e` with `text`, then place the caret `offset`
+characters into it and select `length` characters from there.
+-}
+replaceRange : Cursor -> Cursor -> String -> Int -> Int -> Model -> Model
+replaceRange s e text offset length model =
+    let
+        replaced =
+            edit NoCoalesce
+                (\_ lines ->
+                    let
+                        ( cleared, at ) =
+                            TextBuffer.deleteRange s e lines
+                    in
+                    TextBuffer.insert text at cleared
+                )
+                -- the op removes the range itself, so `edit` must not also
+                -- delete a selection before running it
+                { model | anchor = Nothing }
+
+        start =
+            TextBuffer.offsetOf replaced.lines replaced.cursor - String.length text + offset
+    in
+    { replaced
+        | cursor = TextBuffer.cursorAt replaced.lines (start + length)
+        , anchor =
+            if length == 0 then
+                Nothing
+
+            else
+                Just (TextBuffer.cursorAt replaced.lines start)
+    }
+
+
+{-| Insert `text` at the caret and put the caret `offset` characters into it. -}
+insertAround : String -> Int -> Model -> Model
+insertAround text offset model =
+    let
+        inserted =
+            edit NoCoalesce (TextBuffer.insert text) model
+    in
+    { inserted | cursor = backBy (String.length text - offset) inserted.cursor inserted, anchor = Nothing }
+
+
+commentPattern : Regex.Regex
+commentPattern =
+    compile "^\\s*<!--.*-->\\s*$"
 
 
 {-| The lines a line operation acts on: those the selection touches, or the

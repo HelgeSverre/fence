@@ -15,7 +15,125 @@ import Types exposing (DirtyState(..))
 suite : Test
 suite =
     describe "Editor"
-        [ stateSuite, overlaySuite, editingSuite, selectionSuite, referenceSuite, continuationSuite, lineOpsSuite ]
+        [ stateSuite, overlaySuite, editingSuite, selectionSuite, referenceSuite, continuationSuite, lineOpsSuite, markdownSuite ]
+
+
+markdownSuite : Test
+markdownSuite =
+    let
+        doc source =
+            Editor.setContent "/n/a.md" source "r" False Editor.init
+
+        select from to model =
+            { model | anchor = Just { line = 0, col = from }, cursor = { line = 0, col = to } }
+
+        run key model =
+            Editor.update (Editor.KeyPressed key) model
+    in
+    describe "markdown shortcuts"
+        [ test "wrapping a selection in bold keeps the words selected" <|
+            \_ ->
+                doc "one two"
+                    |> select 0 3
+                    |> run (Editor.Wrap "**")
+                    |> (\m -> Expect.equal ( "**one** two", Just "one" ) ( m.content, Maybe.map (always (Editor.selectedText m)) (Editor.selection m) ))
+        , test "wrapping again unwraps, so the shortcut toggles" <|
+            \_ ->
+                doc "one two"
+                    |> select 0 3
+                    |> run (Editor.Wrap "**")
+                    |> run (Editor.Wrap "**")
+                    |> (\m -> Expect.equal ( "one two", "one" ) ( m.content, Editor.selectedText m ))
+        , test "a selection that includes the markers unwraps too" <|
+            \_ ->
+                doc "**one** two"
+                    |> select 0 7
+                    |> run (Editor.Wrap "**")
+                    |> .content
+                    |> Expect.equal "one two"
+        , test "with no selection the markers are inserted around the caret" <|
+            \_ ->
+                doc "ab"
+                    |> (\m -> { m | cursor = { line = 0, col = 1 } })
+                    |> run (Editor.Wrap "*")
+                    |> (\m -> Expect.equal ( "a**b", { line = 0, col = 2 } ) ( m.content, m.cursor ))
+        , test "a link wraps the selection and leaves the caret in the URL" <|
+            \_ ->
+                doc "click here"
+                    |> select 0 5
+                    |> run Editor.Link
+                    |> (\m -> Expect.equal ( "[click]() here", { line = 0, col = 8 } ) ( m.content, m.cursor ))
+        , test "commenting wraps whole lines and toggles back" <|
+            \_ ->
+                let
+                    commented =
+                        doc "one\ntwo" |> run Editor.ToggleComment
+                in
+                Expect.equal
+                    ( "<!-- one -->\ntwo", "one\ntwo" )
+                    ( commented.content, run Editor.ToggleComment commented |> .content )
+        , test "commenting a selection covers every line it touches" <|
+            \_ ->
+                doc "one\ntwo\nthree"
+                    |> (\m -> { m | anchor = Just { line = 0, col = 0 }, cursor = { line = 1, col = 1 } })
+                    |> run Editor.ToggleComment
+                    |> .content
+                    |> Expect.equal "<!-- one -->\n<!-- two -->\nthree"
+        , test "a blank line is left alone by commenting" <|
+            \_ ->
+                doc "one\n\ntwo"
+                    |> (\m -> { m | anchor = Just { line = 0, col = 0 }, cursor = { line = 2, col = 1 } })
+                    |> run Editor.ToggleComment
+                    |> .content
+                    |> Expect.equal "<!-- one -->\n\n<!-- two -->"
+        , test "pasting a URL over a selection makes it a link" <|
+            \_ ->
+                doc "click here"
+                    |> select 0 5
+                    |> Editor.update (Editor.InsertText "https://example.com")
+                    |> .content
+                    |> Expect.equal "[click](https://example.com) here"
+        , test "pasting plain text over a selection still replaces it" <|
+            \_ ->
+                doc "click here"
+                    |> select 0 5
+                    |> Editor.update (Editor.InsertText "tap")
+                    |> .content
+                    |> Expect.equal "tap here"
+        , test "pasting a URL with no selection inserts it as text" <|
+            \_ ->
+                doc "x"
+                    |> Editor.update (Editor.InsertText "https://example.com")
+                    |> .content
+                    |> Expect.equal "https://example.comx"
+        , test "the markdown shortcuts are bound" <|
+            \_ ->
+                let
+                    event key mods =
+                        E.object
+                            ([ ( "key", E.string key ), ( "metaKey", E.bool False ), ( "ctrlKey", E.bool False ), ( "shiftKey", E.bool False ), ( "altKey", E.bool False ) ]
+                                |> List.map (\( k, v ) -> ( k, if List.member k mods then E.bool True else v ))
+                            )
+
+                    bound key mods =
+                        D.decodeValue Editor.keyDecoder (event key mods) |> Result.toMaybe |> Maybe.map Tuple.first
+                in
+                Expect.equal
+                    [ Just (Editor.KeyPressed (Editor.Wrap "**"))
+                    , Just (Editor.KeyPressed (Editor.Wrap "*"))
+                    , Just (Editor.KeyPressed (Editor.Wrap "`"))
+                    , Just (Editor.KeyPressed (Editor.Wrap "~~"))
+                    , Just (Editor.KeyPressed Editor.Link)
+                    , Just (Editor.KeyPressed Editor.ToggleComment)
+                    ]
+                    [ bound "b" [ "metaKey" ]
+                    , bound "i" [ "metaKey" ]
+                    , bound "e" [ "metaKey" ]
+                    , bound "x" [ "metaKey", "shiftKey" ]
+                    , bound "k" [ "metaKey" ]
+                    , bound "/" [ "metaKey" ]
+                    ]
+        ]
 
 
 lineOpsSuite : Test

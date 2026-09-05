@@ -1311,12 +1311,18 @@ scoped isWord wordKey isLine lineKey plainKey =
         plainKey
 
 
-view : { highlights : List ( Cursor, Cursor ), activeHighlight : Maybe ( Cursor, Cursor ) } -> Model -> Html Msg
+view :
+    { highlights : List ( Cursor, Cursor )
+    , activeHighlight : Maybe ( Cursor, Cursor )
+    , status : String -- shown at the right of the pane header
+    }
+    -> Model
+    -> Html Msg
 view found model =
     div [ class "editor-pane", attribute "data-testid" "editor-pane" ]
         [ div [ class "pane-header", attribute "data-testid" "editor-header" ]
-            [ span []
-                [ text (headerText model) ]
+            [ span [] [ text (headerText model) ]
+            , span [ class "pane-header-status", attribute "data-testid" "word-count" ] [ text found.status ]
             ]
         , div [ class "editor-container" ]
             [ VirtualEditor.view

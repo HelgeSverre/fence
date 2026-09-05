@@ -26,6 +26,7 @@ import Icon
 import Json.Decode as D
 import Json.Encode as E
 import Markdown
+import Palette
 import Ports
 import Preview
 import Process
@@ -101,7 +102,19 @@ type alias Model =
     , errorMessage : Maybe String
     , closeAfterSave : Bool
     , find : Find.Model
+    , palette : Palette.Model
+    , searchGeneration : Int
+
+    -- recently opened files, newest first, with a cursor for back/forward
+    , history : List FilePath
+    , historyPos : Int
+    , navigating : Bool -- this open came from the history, so do not record it
+    , counts : Counts
     }
+
+
+type alias Counts =
+    { words : Int, characters : Int, lines : Int }
 
 
 type Msg
@@ -141,6 +154,13 @@ type Msg
     | FindToggleCase
     | ReplaceActive
     | ReplaceAll
+    | OpenPalette Palette.Mode
+    | ClosePalette
+    | PaletteQueryChanged String
+    | PaletteStep Int
+    | PaletteChoose (Maybe Palette.Item)
+    | SearchDue Int
+    | NavigateHistory Int
     | NoOp
 
 
@@ -332,6 +352,12 @@ init flagsValue =
       , errorMessage = Nothing
       , closeAfterSave = False
       , find = Find.init
+      , palette = Palette.init
+      , searchGeneration = 0
+      , history = []
+      , historyPos = 0
+      , navigating = False
+      , counts = emptyCounts
       }
     , Cmd.none
     )
@@ -576,6 +602,99 @@ update msg model =
         ReplaceAll ->
             applyReplacement (Array.toList (Find.matches model.find)) model
 
+        OpenPalette wanted ->
+            ( { model | palette = Palette.open wanted model.palette }
+            , Cmd.batch
+                [ focusSilently paletteInputId
+                , case ( wanted, model.fileTree.rootPath ) of
+                    -- the list is cheap to rebuild and always current this way
+                    ( Palette.Files, Just root ) ->
+                        command "listFiles" [ ( "path", E.string root ) ]
+
+                    _ ->
+                        Cmd.none
+                ]
+            )
+
+        ClosePalette ->
+            ( { model | palette = Palette.close model.palette }, focusSilently "veditor-input" )
+
+        PaletteQueryChanged text ->
+            let
+                palette =
+                    Palette.setQuery text model.palette
+
+                generation =
+                    model.searchGeneration + 1
+            in
+            case ( Palette.mode palette, model.fileTree.rootPath ) of
+                ( Just Palette.Search, Just _ ) ->
+                    ( { model | palette = palette, searchGeneration = generation }
+                    , Task.perform (\_ -> SearchDue generation) (Process.sleep searchDelay)
+                    )
+
+                _ ->
+                    ( { model | palette = palette }, Cmd.none )
+
+        SearchDue generation ->
+            if generation /= model.searchGeneration then
+                ( model, Cmd.none )
+
+            else
+                case ( model.fileTree.rootPath, String.trim (Palette.query model.palette) ) of
+                    ( Just root, text ) ->
+                        if text == "" then
+                            ( { model | palette = Palette.setResults [] model.palette }, Cmd.none )
+
+                        else
+                            ( model
+                            , command "searchWorkspace"
+                                [ ( "path", E.string root ), ( "query", E.string text ) ]
+                            )
+
+                    _ ->
+                        ( model, Cmd.none )
+
+        PaletteStep delta ->
+            ( { model | palette = Palette.step delta model.palette }, Cmd.none )
+
+        PaletteChoose item ->
+            case item of
+                Just chosen ->
+                    ( { model | palette = Palette.close model.palette }
+                    , command "readFile"
+                        (( "path", E.string chosen.path )
+                            :: (case chosen.line of
+                                    Just line ->
+                                        [ ( "line", E.int line ) ]
+
+                                    Nothing ->
+                                        []
+                               )
+                        )
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        NavigateHistory delta ->
+            let
+                target =
+                    model.historyPos + delta
+            in
+            case List.drop target model.history |> List.head of
+                Just path ->
+                    if target < 0 then
+                        ( model, Cmd.none )
+
+                    else
+                        ( { model | historyPos = target, navigating = True }
+                        , command "readFile" [ ( "path", E.string path ) ]
+                        )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
         DismissError ->
             ( { model | errorMessage = Nothing }, Cmd.none )
 
@@ -737,8 +856,23 @@ update msg model =
                     else if key == "Escape" && model.settingsOpen then
                         ( { model | settingsOpen = False }, Cmd.none )
 
+                    else if key == "f" && (metaKey || ctrlKey) && shiftKey then
+                        update (OpenPalette Palette.Search) model
+
                     else if key == "f" && (metaKey || ctrlKey) then
                         update (OpenFind altKey) model
+
+                    else if key == "p" && (metaKey || ctrlKey) then
+                        update (OpenPalette Palette.Files) model
+
+                    else if key == "Escape" && Palette.isOpen model.palette then
+                        update ClosePalette model
+
+                    else if key == "[" && (metaKey || ctrlKey) then
+                        update (NavigateHistory 1) model
+
+                    else if key == "]" && (metaKey || ctrlKey) then
+                        update (NavigateHistory -1) model
 
                     else if key == "g" && (metaKey || ctrlKey) && Find.isOpen model.find then
                         update
@@ -779,6 +913,39 @@ update msg model =
 
                 Err _ ->
                     ( model, Cmd.none )
+
+
+emptyCounts : Counts
+emptyCounts =
+    { words = 0, characters = 0, lines = 0 }
+
+
+{-| Words, characters and lines, counted once per debounced parse rather than
+per keystroke: `String.words` over a large document is not free.
+-}
+countsFor : String -> Counts
+countsFor content =
+    { words = List.length (String.words content)
+    , characters = String.length content
+    , lines = List.length (String.lines content)
+    }
+
+
+{-| How many recently opened files back/forward can reach. -}
+historyLimit : Int
+historyLimit =
+    50
+
+
+paletteInputId : String
+paletteInputId =
+    "palette-input"
+
+
+{-| How long to wait before searching the workspace for what has been typed. -}
+searchDelay : Float
+searchDelay =
+    200
 
 
 {-| Show the active match: select it in the editor and scroll it into view.
@@ -841,7 +1008,7 @@ startParse previous model =
         ( progress, frontmatter ) =
             Markdown.begin previous model.editor.content
     in
-    continueParse firstParseBudget progress { model | frontmatter = frontmatter }
+    continueParse firstParseBudget progress { model | frontmatter = frontmatter, counts = countsFor model.editor.content }
 
 
 continueParse : Int -> Markdown.Progress Msg -> Model -> ( Model, Cmd Msg )
@@ -963,6 +1130,19 @@ handlePortMessage tag value model =
                     ( { parsedModel
                         | closeAfterSave = False
                         , savingContent = Nothing
+                        , history =
+                            if model.navigating then
+                                model.history
+
+                            else
+                                file.path :: List.filter ((/=) file.path) model.history |> List.take historyLimit
+                        , historyPos =
+                            if model.navigating then
+                                model.historyPos
+
+                            else
+                                0
+                        , navigating = False
                       }
                     , Cmd.batch
                         [ setTitleCmd newEditor
@@ -1048,6 +1228,28 @@ handlePortMessage tag value model =
                       else
                         Cmd.none
                     )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        "fileList" ->
+            case D.decodeValue (D.field "files" (D.list fileItemDecoder)) value of
+                Ok items ->
+                    ( { model | palette = Palette.setResults items model.palette }, Cmd.none )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        "searchResults" ->
+            case D.decodeValue searchResultsDecoder value of
+                Ok ( query, hits ) ->
+                    -- a slower search that finished after the query moved on
+                    -- must not replace what is on screen now
+                    if String.trim (Palette.query model.palette) == query then
+                        ( { model | palette = Palette.setResults hits model.palette }, Cmd.none )
+
+                    else
+                        ( model, Cmd.none )
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -1397,6 +1599,37 @@ fileSavedDecoder =
         (D.field "revision" D.string)
 
 
+fileItemDecoder : D.Decoder Palette.Item
+fileItemDecoder =
+    D.map2
+        (\path relative -> { primary = baseName path, secondary = relative, path = path, line = Nothing })
+        (D.field "path" D.string)
+        (D.field "relative" D.string)
+
+
+searchResultsDecoder : D.Decoder ( String, List Palette.Item )
+searchResultsDecoder =
+    D.map2 Tuple.pair
+        (D.field "query" D.string)
+        (D.field "hits"
+            (D.list
+                (D.map4
+                    (\path relative line text ->
+                        { primary = String.trim text
+                        , secondary = relative ++ ":" ++ String.fromInt line
+                        , path = path
+                        , line = Just line
+                        }
+                    )
+                    (D.field "path" D.string)
+                    (D.field "relative" D.string)
+                    (D.field "line" D.int)
+                    (D.field "text" D.string)
+                )
+            )
+        )
+
+
 treeCommandDecoder : D.Decoder ( String, Maybe FilePath )
 treeCommandDecoder =
     D.map2 Tuple.pair
@@ -1574,6 +1807,11 @@ view model =
                 ]
                 (List.map Tuple.second sections)
             ]
+        , if Palette.isOpen model.palette then
+            viewPalette model.palette
+
+          else
+            text ""
         , case model.errorMessage of
             Just message ->
                 div [ class "error-banner", attribute "data-testid" "error-banner", onClick DismissError, title "Click to dismiss" ]
@@ -1602,6 +1840,7 @@ viewEditorPane model =
 
                     else
                         Nothing
+                , status = countsLabel model.counts
                 }
                 model.editor
             )
@@ -1611,6 +1850,85 @@ viewEditorPane model =
           else
             text ""
         ]
+
+
+viewPalette : Palette.Model -> Html Msg
+viewPalette palette =
+    let
+        rows =
+            Palette.results palette
+
+        placeholderText =
+            case Palette.mode palette of
+                Just Palette.Search ->
+                    "Search the workspace"
+
+                _ ->
+                    "Go to file"
+
+        row index item =
+            div
+                [ class "palette-row"
+                , classList [ ( "active", index == palette.active ) ]
+                , attribute "data-testid" "palette-row"
+                , attribute "role" "option"
+                , attribute "aria-selected"
+                    (if index == palette.active then
+                        "true"
+
+                     else
+                        "false"
+                    )
+                , onClick (PaletteChoose (Just item))
+                ]
+                [ span [ class "palette-primary" ] [ text item.primary ]
+                , span [ class "palette-secondary" ] [ text item.secondary ]
+                ]
+    in
+    div [ class "palette-backdrop", attribute "data-testid" "palette", onClick ClosePalette ]
+        [ div [ class "palette", stopPropagationOn "click" (D.succeed ( NoOp, True )) ]
+            [ input
+                [ class "palette-input"
+                , id paletteInputId
+                , attribute "data-testid" "palette-input"
+                , attribute "aria-label" placeholderText
+                , placeholder placeholderText
+                , value (Palette.query palette)
+                , spellcheck False
+                , onInput PaletteQueryChanged
+                , preventDefaultOn "keydown" (paletteKeyDecoder palette)
+                ]
+                []
+            , if List.isEmpty rows then
+                div [ class "palette-empty" ] [ text "No results" ]
+
+              else
+                div [ class "palette-results", attribute "role" "listbox" ] (List.indexedMap row rows)
+            ]
+        ]
+
+
+paletteKeyDecoder : Palette.Model -> D.Decoder ( Msg, Bool )
+paletteKeyDecoder palette =
+    D.field "key" D.string
+        |> D.andThen
+            (\key ->
+                case key of
+                    "ArrowDown" ->
+                        D.succeed ( PaletteStep 1, True )
+
+                    "ArrowUp" ->
+                        D.succeed ( PaletteStep -1, True )
+
+                    "Enter" ->
+                        D.succeed ( PaletteChoose (Palette.active palette), True )
+
+                    "Escape" ->
+                        D.succeed ( ClosePalette, True )
+
+                    _ ->
+                        D.fail "not a palette key"
+            )
 
 
 findInputId : String
@@ -1780,6 +2098,24 @@ viewOutline model =
                 List.map viewOutlineEntry entries
             )
         ]
+
+
+{-| Word, line and character counts, shown in the editor's pane header. -}
+countsLabel : Counts -> String
+countsLabel counts =
+    let
+        plural n word =
+            String.fromInt n
+                ++ " "
+                ++ word
+                ++ (if n == 1 then
+                        ""
+
+                    else
+                        "s"
+                   )
+    in
+    String.join " \u{00B7} " [ plural counts.words "word", plural counts.lines "line", plural counts.characters "character" ]
 
 
 viewOutlineEntry : Markdown.OutlineEntry -> Html Msg

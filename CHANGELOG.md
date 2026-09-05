@@ -6,6 +6,34 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+### Added
+
+- **Creating, renaming and deleting files.** New File and New Folder (Cmd+N,
+  Cmd+Shift+N, and the file tree's context menu) name the entry inline in the
+  tree; Rename and Move to Trash are in the same menu, alongside Reveal in
+  Finder. Deletion goes to the Trash, never straight to unlink.
+- **Find and replace** (Cmd+F, Cmd+Alt+F). Every match is highlighted, Enter
+  and Shift+Enter step through them, matching is case-insensitive until "Aa"
+  is pressed, and Replace All is a single undo step. The query is seeded from
+  the selection.
+- **Quick-open** (Cmd+P) ranks every markdown file in the workspace, and
+  **workspace search** (Cmd+Shift+F) greps them and opens a hit at its line.
+- **Back and forward** through recently opened files (Cmd+[ and Cmd+]).
+- **List continuation.** Enter after a bullet, numbered item, task item or
+  blockquote repeats the marker (numbering incremented, task boxes cleared);
+  Enter on an empty item ends the list.
+- **Markdown shortcuts**: Cmd+B, Cmd+I, Cmd+E and Cmd+Shift+X wrap or unwrap
+  the selection, Cmd+K makes a link, Cmd+/ comments out lines, and pasting a
+  URL over selected words links them.
+- **Line operations**: duplicate (Cmd+Shift+D), move (Alt+Up/Down), delete
+  (Cmd+Shift+K) and open a line below or above (Cmd+Enter, Cmd+Shift+Enter).
+- **Export** to PDF or HTML, and Copy Document as Rich Text, all from the
+  rendered preview with its styles and mermaid diagrams.
+- **Pasting an image** writes it to `assets/` beside the document and inserts
+  the link. **Dropping** a file or folder on the window opens it.
+- **The preview follows the editor's scroll position**, anchored on headings.
+- A word, line and character count in the editor's pane header.
+
 ## [0.1.6] — 2026-09-05
 
 ### Fixed

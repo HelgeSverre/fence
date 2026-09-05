@@ -23,11 +23,16 @@ Fence provides a clean, focused environment for writing markdown with a live pre
 
 ## Features
 
-- **Split-View Editor** — Real-time markdown preview as you type
+- **Split-View Editor** — Real-time markdown preview that follows your scrolling
+- **Find & Replace** — Cmd+F, with match highlighting and a single-undo Replace All
+- **Quick-Open & Search** — Cmd+P by file name, Cmd+Shift+F across the workspace
+- **Markdown Editing** — List continuation, bold/italic/link shortcuts, line operations
+- **File Management** — Create, rename and trash files and folders from the tree
+- **Export** — PDF, HTML, or rich text on the clipboard
 - **Frontmatter Support** — Parses and displays YAML frontmatter
 - **Syntax Highlighting** — Built-in support for Elm, JavaScript, Python, CSS, JSON, and more
 - **Mermaid Diagrams** — Render mermaid diagrams directly in the preview
-- **File Explorer** — Integrated file tree for managing your markdown files
+- **Images** — Paste one in and it is saved beside the document and linked
 - **Themes** — Customizable themes for the editor environment
 - **Auto-Update** — Built-in auto-updater via GitHub releases
 - **Cross-Platform** — Builds for macOS, Windows, and Linux
@@ -88,7 +93,11 @@ bun run build:linux
 ```
 src/
 ├── Main.elm            Application entry point
-├── Editor.elm          Markdown editor component
+├── Editor.elm          Editing: cursor, selection, undo, shortcuts
+├── VirtualEditor.elm   The editor's view: only visible rows
+├── TextBuffer.elm      Pure edits over the document's lines
+├── Find.elm            Find and replace
+├── Palette.elm         Quick-open and workspace search
 ├── Markdown.elm        Markdown parsing and rendering
 ├── Preview.elm         Preview pane rendering
 ├── FileTree.elm        File navigation component
@@ -111,9 +120,31 @@ js/
 static/
 ├── fonts/              Bundled fonts
 └── styles/             CSS stylesheets
-tests/
-└── YamlTest.elm        YAML parser tests
+tests/                  elm-test suites, one per module
+e2e/                    Playwright tests driving the packaged app
 ```
+
+## Keyboard shortcuts
+
+On Windows and Linux, use Ctrl where this says Cmd.
+
+| Shortcut                | Action                                  |
+| ----------------------- | --------------------------------------- |
+| Cmd+S                   | Save                                    |
+| Cmd+N / Cmd+Shift+N     | New file / new folder                   |
+| Cmd+P                   | Go to file                              |
+| Cmd+Shift+F             | Search the workspace                    |
+| Cmd+F / Cmd+Alt+F       | Find / find and replace                 |
+| Cmd+G / Cmd+Shift+G     | Next / previous match                   |
+| Cmd+[ / Cmd+]           | Back / forward through opened files     |
+| Cmd+B / Cmd+I / Cmd+E   | Bold / italic / code                    |
+| Cmd+Shift+X / Cmd+K     | Strikethrough / link                    |
+| Cmd+/                   | Comment out the selected lines          |
+| Cmd+Shift+D             | Duplicate the line or selection         |
+| Alt+Up / Alt+Down       | Move the line or selection              |
+| Cmd+Shift+K             | Delete the line                         |
+| Cmd+Enter / +Shift      | Open a line below / above               |
+| Cmd+1 / Cmd+3           | Toggle the sidebar / outline            |
 
 ## Tech Stack
 

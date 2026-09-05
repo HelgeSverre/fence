@@ -14,7 +14,57 @@ import Types exposing (DirtyState(..))
 suite : Test
 suite =
     describe "Editor"
-        [ stateSuite, overlaySuite, editingSuite, selectionSuite, referenceSuite ]
+        [ stateSuite, overlaySuite, editingSuite, selectionSuite, referenceSuite, continuationSuite ]
+
+
+continuationSuite : Test
+continuationSuite =
+    let
+        -- Enter pressed at the end of a one-line document.
+        after source =
+            Editor.setContent "/n/a.md" source "r" False Editor.init
+                |> Editor.update (Editor.KeyPressed Editor.DocEnd)
+                |> Editor.update (Editor.KeyPressed Editor.Enter)
+                |> .content
+    in
+    describe "list continuation"
+        [ test "a bullet continues with the same marker and indentation" <|
+            \_ -> Expect.equal "  - one\n  - " (after "  - one")
+        , test "other bullet characters are repeated as typed" <|
+            \_ -> Expect.equal ( "* one\n* ", "+ one\n+ " ) ( after "* one", after "+ one" )
+        , test "an ordered item increments the number and keeps the delimiter" <|
+            \_ -> Expect.equal ( "1. one\n2. ", "3) one\n4) " ) ( after "1. one", after "3) one" )
+        , test "a task item continues unchecked, whatever the box held" <|
+            \_ -> Expect.equal ( "- [ ] one\n- [ ] ", "- [x] one\n- [ ] " ) ( after "- [ ] one", after "- [x] one" )
+        , test "a blockquote continues" <|
+            \_ -> Expect.equal "> quoted\n> " (after "> quoted")
+        , test "an empty item ends the list instead of continuing it" <|
+            \_ ->
+                Expect.equal
+                    ( "", "", "" )
+                    ( after "- ", after "  1. ", after "> " )
+        , test "an empty task item ends the list" <|
+            \_ -> Expect.equal "" (after "- [ ] ")
+        , test "a plain line still inserts a bare newline" <|
+            \_ -> Expect.equal ( "hello\n", "  indented\n" ) ( after "hello", after "  indented" )
+        , test "a marker is not continued from inside its own prefix" <|
+            \_ ->
+                Editor.setContent "/n/a.md" "- one" "r" False Editor.init
+                    |> Editor.update (Editor.KeyPressed Editor.Right)
+                    |> Editor.update (Editor.KeyPressed Editor.Enter)
+                    |> .content
+                    |> Expect.equal "-\n one"
+        , test "a horizontal rule is not a list item" <|
+            \_ -> Expect.equal "---\n" (after "---")
+        , test "continuing replaces a selection first" <|
+            \_ ->
+                Editor.setContent "/n/a.md" "- one two" "r" False Editor.init
+                    |> Editor.update (Editor.KeyPressed Editor.DocEnd)
+                    |> Editor.update (Editor.Select Editor.WordLeft)
+                    |> Editor.update (Editor.KeyPressed Editor.Enter)
+                    |> .content
+                    |> Expect.equal "- one \n- "
+        ]
 
 
 stateSuite : Test
@@ -618,7 +668,9 @@ editorApply op =
 opFuzzer : Fuzz.Fuzzer Op
 opFuzzer =
     Fuzz.frequency
-        [ ( 5, Fuzz.map TypeChar (Fuzz.oneOfValues [ "a", "b", " ", "*", "\t", "é", "😀" ]) )
+        -- no list markers among these: Enter continues a list, which the
+        -- plain character-level reference below deliberately does not model
+        [ ( 5, Fuzz.map TypeChar (Fuzz.oneOfValues [ "a", "b", " ", "#", "\t", "é", "😀" ]) )
         , ( 2, Fuzz.constant Newline )
         , ( 3, Fuzz.constant BackspaceOp )
         , ( 1, Fuzz.constant DeleteOp )

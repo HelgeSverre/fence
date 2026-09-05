@@ -352,7 +352,7 @@ keyPressed key model =
             edit Typing (TextBuffer.insert c) model
 
         Enter ->
-            edit NoCoalesce (TextBuffer.insert "\n") model
+            continueList model
 
         Tab ->
             case multiLineSelection model of
@@ -812,6 +812,101 @@ editorAction { key, meta, ctrl, shift, alt } =
 
         _ ->
             typed
+
+
+{-| Enter inside a list item or blockquote repeats the marker on the next
+line; on an item with no content it clears the marker instead, which is how a
+list is ended.
+-}
+continueList : Model -> Model
+continueList model =
+    let
+        line =
+            Array.get model.cursor.line model.lines |> Maybe.withDefault ""
+
+        bareNewline =
+            edit NoCoalesce (TextBuffer.insert "\n") model
+    in
+    case listMarker line of
+        Just marker ->
+            if model.cursor.col < String.length marker.prefix then
+                -- the caret is still inside the marker: nothing to repeat
+                bareNewline
+
+            else if String.length line == String.length marker.prefix then
+                edit NoCoalesce (\cursor lines -> ( Array.set cursor.line "" lines, { line = cursor.line, col = 0 } )) model
+
+            else
+                edit NoCoalesce (TextBuffer.insert ("\n" ++ marker.next)) model
+
+        Nothing ->
+            bareNewline
+
+
+{-| The list or quote marker a line opens with: what it spans, and what the
+next line has to start with to continue it.
+-}
+listMarker : String -> Maybe { prefix : String, next : String }
+listMarker line =
+    case firstMatch bulletPattern line of
+        Just prefix ->
+            -- a continued task item starts unticked, whatever this one holds
+            Just { prefix = prefix, next = String.replace "[x]" "[ ]" (String.replace "[X]" "[ ]" prefix) }
+
+        Nothing ->
+            case firstMatch orderedPattern line of
+                Just prefix ->
+                    -- the digits are the only ones in the prefix (the rest is
+                    -- whitespace and the delimiter), so replacing them is safe
+                    firstMatch digitsPattern prefix
+                        |> Maybe.map
+                            (\digits ->
+                                { prefix = prefix
+                                , next = String.replace digits (increment digits) prefix
+                                }
+                            )
+
+                Nothing ->
+                    firstMatch quotePattern line
+                        |> Maybe.map (\prefix -> { prefix = prefix, next = prefix })
+
+
+increment : String -> String
+increment digits =
+    String.toInt digits |> Maybe.withDefault 0 |> (+) 1 |> String.fromInt
+
+
+{-| The text a pattern matches at the start of a string. Whole matches only:
+elm/regex reports a group that matched the empty string as no group at all.
+-}
+firstMatch : Regex.Regex -> String -> Maybe String
+firstMatch pattern source =
+    Regex.findAtMost 1 pattern source |> List.head |> Maybe.map .match
+
+
+bulletPattern : Regex.Regex
+bulletPattern =
+    compile "^[ \t]*[-*+](\\s\\[[ xX]\\])?[ \t]+"
+
+
+orderedPattern : Regex.Regex
+orderedPattern =
+    compile "^[ \t]*\\d+[.)][ \t]+"
+
+
+quotePattern : Regex.Regex
+quotePattern =
+    compile "^[ \t]*>+[ \t]?"
+
+
+digitsPattern : Regex.Regex
+digitsPattern =
+    compile "\\d+"
+
+
+compile : String -> Regex.Regex
+compile source =
+    Regex.fromString source |> Maybe.withDefault Regex.never
 
 
 {-| Pick the word-scope, line-scope or plain key for a keypress.

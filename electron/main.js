@@ -160,6 +160,17 @@ function buildMenu() {
           click: () => sendToRenderer({ tag: "triggerOpenFolder" }),
         },
         {
+          label: "New File",
+          accelerator: "CmdOrCtrl+N",
+          click: () => sendToRenderer({ tag: "treeCommand", command: "newFile", path: null }),
+        },
+        {
+          label: "New Folder",
+          accelerator: "CmdOrCtrl+Shift+N",
+          click: () => sendToRenderer({ tag: "treeCommand", command: "newFolder", path: null }),
+        },
+        { type: "separator" },
+        {
           label: "Open Recent",
           submenu:
             recents.length > 0
@@ -394,7 +405,7 @@ function registerIpc(channel, handler) {
   });
 }
 
-async function sendFileContent(filePath, offerRecovery = true) {
+async function sendFileContent(filePath, offerRecovery = true, line = null) {
   const file = await fsOps.readFile(filePath);
   let content = file.content;
   let dirty = false;
@@ -421,7 +432,7 @@ async function sendFileContent(filePath, offerRecovery = true) {
     await clearRecoveryDraft(file.path);
   }
 
-  sendToRenderer({ tag: "fileContent", ...file, content, dirty });
+  sendToRenderer({ tag: "fileContent", ...file, content, dirty, line });
 }
 
 async function saveDocument(payload) {
@@ -481,7 +492,8 @@ registerIpc("fence:read-dir", async (data) => {
 });
 
 registerIpc("fence:read-file", async (data) => {
-  await sendFileContent(requireString(data, "path", 32768));
+  const line = Number.isInteger(data.line) ? data.line : null;
+  await sendFileContent(requireString(data, "path", 32768), true, line);
 });
 
 registerIpc("fence:write-file", saveDocument);
@@ -501,9 +513,62 @@ registerIpc("fence:unwatch-dir", async (data) => {
   await fsOps.unwatchDir(requireString(data, "path", 32768));
 });
 
+registerIpc("fence:create-file", async (data) => {
+  const created = await fsOps.createFile(
+    requireString(data, "dir", 32768),
+    requireString(data, "name", 255),
+  );
+  // chokidar's "add" refreshes the tree; opening it is what the user asked for.
+  await sendFileContent(created.path, false);
+});
+
+registerIpc("fence:create-dir", async (data) => {
+  await fsOps.createDir(requireString(data, "dir", 32768), requireString(data, "name", 255));
+});
+
+registerIpc("fence:rename-path", async (data) => {
+  const renamed = await fsOps.renamePath(
+    requireString(data, "path", 32768),
+    requireString(data, "name", 255),
+  );
+  sendToRenderer({ tag: "renamed", from: renamed.from, path: renamed.path });
+});
+
+registerIpc("fence:trash-path", async (data) => {
+  // Trash, never unlink: a misclick has to stay undoable.
+  await shell.trashItem(await fsOps.resolvePath(requireString(data, "path", 32768)));
+});
+
+registerIpc("fence:reveal-path", async (data) => {
+  shell.showItemInFolder(await fsOps.resolvePath(requireString(data, "path", 32768)));
+});
+
+registerIpc("fence:list-files", async (data) => {
+  const root = requireString(data, "path", 32768);
+  sendToRenderer({ tag: "fileList", files: await fsOps.listMarkdownFiles(root) });
+});
+
+registerIpc("fence:search-workspace", async (data) => {
+  const root = requireString(data, "path", 32768);
+  const query = requireString(data, "query", 1024);
+  sendToRenderer({ tag: "searchResults", query, hits: await fsOps.grep(root, query) });
+});
+
 registerIpc("fence:tree-context-menu", async (data) => {
   const filePath = await fsOps.resolvePath(requireString(data, "path", 32768));
+  const isDirectory = (await fs.promises.stat(filePath)).isDirectory();
+  const command = (command_) => () => sendToRenderer({ tag: "treeCommand", command: command_, path: filePath });
   Menu.buildFromTemplate([
+    { label: "New File", click: command("newFile") },
+    { label: "New Folder", click: command("newFolder") },
+    { type: "separator" },
+    { label: "Rename...", click: command("rename") },
+    { label: isDirectory ? "Move Folder to Trash" : "Move to Trash", click: command("trash") },
+    { type: "separator" },
+    {
+      label: process.platform === "darwin" ? "Reveal in Finder" : "Show in Folder",
+      click: () => shell.showItemInFolder(filePath),
+    },
     { label: "Copy Path", click: () => clipboard.writeText(filePath) },
   ]).popup({ window: mainWindow });
 });

@@ -36,9 +36,6 @@
   position: absolute;
   left: 0;
   right: 0;
-  /* Every layer above the spacer is click-transparent: mousedown offsets
-     must be relative to the spacer (the whole document), not the window of
-     rendered rows, or clicks after scrolling land on the wrong line. */
 }
 
 .veditor-row {
@@ -56,25 +53,18 @@
   background: var(--selection);
 }
 
+/* The caret belongs to the focused editor: hidden otherwise, so it never
+   suggests that typing would land here. */
 .veditor-caret {
   position: absolute;
   width: 2px;
   background: var(--text-primary);
-  animation: veditor-blink 1s steps(2, start) infinite;
+  visibility: hidden;
 }
 
-.veditor:focus-within .veditor-selection-layer {
-  position: absolute;
-  inset: 0;
-}
-
-.veditor-selection {
-  position: absolute;
-  background: var(--selection);
-}
-
-.veditor-caret {
+.veditor:focus-within .veditor-caret {
   visibility: visible;
+  animation: veditor-blink 1s steps(2, start) infinite;
 }
 
 @keyframes veditor-blink {

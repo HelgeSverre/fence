@@ -105,6 +105,12 @@ describe("virtual editor: editing", () => {
       }));
       assert.equal(cursors.editor, "text");
       assert.notEqual(cursors.preview, "text");
+
+      // the caret marks where typing goes, so it belongs to the focused editor
+      const caret = () => fence.window.evaluate(() => getComputedStyle(document.querySelector(".veditor-caret")).visibility);
+      assert.equal(await caret(), "visible");
+      await fence.window.evaluate(() => document.getElementById("veditor-input").blur());
+      assert.equal(await caret(), "hidden");
     } finally {
       await fence.close();
     }

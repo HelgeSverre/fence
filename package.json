@@ -38,6 +38,7 @@
     "appId": "no.helgesverre.fence",
     "productName": "Fence",
     "copyright": "Copyright © 2026 Helge Sverre",
+    "forceCodeSigning": true,
     "fileAssociations": [
       {
         "ext": ["md", "markdown", "mdown", "mkd"],

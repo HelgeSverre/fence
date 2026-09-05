@@ -5,7 +5,9 @@ module TextBuffer exposing
     , columnFromVisual
     , cursorAt
     , deleteForward
+    , deleteLines
     , deleteRange
+    , duplicateLines
     , docEnd
     , docStart
     , fromString
@@ -16,6 +18,7 @@ module TextBuffer exposing
     , lineStart
     , moveDown
     , moveLeft
+    , moveLines
     , moveRight
     , moveUp
     , offsetOf
@@ -585,6 +588,54 @@ lineRange cursor lines =
 
     else
         ( { line = cursor.line, col = 0 }, lineEnd cursor lines )
+
+
+{-| Copy the lines `from`..`to` (inclusive) directly below themselves. -}
+duplicateLines : Int -> Int -> Array String -> Array String
+duplicateLines from to lines =
+    let
+        block =
+            Array.slice from (to + 1) lines
+    in
+    Array.append (Array.append (Array.slice 0 (to + 1) lines) block) (Array.slice (to + 1) (Array.length lines) lines)
+
+
+{-| Move the lines `from`..`to` (inclusive) by `delta` lines. A move that
+would leave the document is refused, so the caller can apply it unconditionally.
+-}
+moveLines : Int -> Int -> Int -> Array String -> Array String
+moveLines from to delta lines =
+    if delta == 0 || from + delta < 0 || to + delta > Array.length lines - 1 then
+        lines
+
+    else
+        let
+            block =
+                Array.slice from (to + 1) lines
+
+            without =
+                Array.append (Array.slice 0 from lines) (Array.slice (to + 1) (Array.length lines) lines)
+
+            at =
+                from + delta
+        in
+        Array.append (Array.append (Array.slice 0 at without) block) (Array.slice at (Array.length without) without)
+
+
+{-| Remove the lines `from`..`to` (inclusive). The result always has at least
+one line: `lines` and the document string must keep describing each other.
+-}
+deleteLines : Int -> Int -> Array String -> Array String
+deleteLines from to lines =
+    let
+        kept =
+            Array.append (Array.slice 0 from lines) (Array.slice (to + 1) (Array.length lines) lines)
+    in
+    if Array.isEmpty kept then
+        Array.fromList [ "" ]
+
+    else
+        kept
 
 
 indentLines : Int -> Int -> Array String -> Array String

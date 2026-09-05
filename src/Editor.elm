@@ -83,6 +83,12 @@ type Key
     | ShiftTab
     | Escape
     | Char String
+    | DuplicateLine
+    | MoveLineUp
+    | MoveLineDown
+    | DeleteLine
+    | OpenLineBelow
+    | OpenLineAbove
 
 
 type Msg
@@ -353,6 +359,36 @@ keyPressed key model =
 
         Enter ->
             continueList model
+
+        DuplicateLine ->
+            let
+                ( from, to ) =
+                    lineSpan model
+
+                shift =
+                    to - from + 1
+            in
+            lineEdit (TextBuffer.duplicateLines from to) (moveCursorLines shift) model
+
+        MoveLineUp ->
+            moveSpan -1 model
+
+        MoveLineDown ->
+            moveSpan 1 model
+
+        DeleteLine ->
+            let
+                ( from, to ) =
+                    lineSpan model
+            in
+            lineEdit (TextBuffer.deleteLines from to) (\cursor -> { cursor | line = from }) model
+                |> (\m -> { m | anchor = Nothing })
+
+        OpenLineBelow ->
+            openLine (model.cursor.line + 1) model
+
+        OpenLineAbove ->
+            openLine model.cursor.line model
 
         Tab ->
             case multiLineSelection model of
@@ -765,6 +801,20 @@ editorAction { key, meta, ctrl, shift, alt } =
             else
                 typed
 
+        "d" ->
+            if shortcut && shift then
+                press DuplicateLine
+
+            else
+                typed
+
+        "k" ->
+            if shortcut && shift then
+                press DeleteLine
+
+            else
+                typed
+
         "ArrowLeft" ->
             motion (scoped wordScope WordLeft lineScope Home Left)
 
@@ -772,10 +822,18 @@ editorAction { key, meta, ctrl, shift, alt } =
             motion (scoped wordScope WordRight lineScope End Right)
 
         "ArrowUp" ->
-            motion (scoped False Up lineScope DocStart Up)
+            if alt && not shortcut then
+                press MoveLineUp
+
+            else
+                motion (scoped False Up lineScope DocStart Up)
 
         "ArrowDown" ->
-            motion (scoped False Down lineScope DocEnd Down)
+            if alt && not shortcut then
+                press MoveLineDown
+
+            else
+                motion (scoped False Down lineScope DocEnd Down)
 
         "Home" ->
             motion (scoped False Home shortcut DocStart Home)
@@ -796,7 +854,17 @@ editorAction { key, meta, ctrl, shift, alt } =
             press (scoped wordScope DeleteWordForward False DeleteKey DeleteKey)
 
         "Enter" ->
-            press Enter
+            if shortcut then
+                press
+                    (if shift then
+                        OpenLineAbove
+
+                     else
+                        OpenLineBelow
+                    )
+
+            else
+                press Enter
 
         "Tab" ->
             press
@@ -812,6 +880,81 @@ editorAction { key, meta, ctrl, shift, alt } =
 
         _ ->
             typed
+
+
+{-| The lines a line operation acts on: those the selection touches, or the
+one holding the caret. A selection ending in column 0 stops on the line above,
+so selecting down to the start of a line does not drag it in.
+-}
+lineSpan : Model -> ( Int, Int )
+lineSpan model =
+    case selection model of
+        Just ( s, e ) ->
+            ( s.line
+            , if e.col == 0 && e.line > s.line then
+                e.line - 1
+
+              else
+                e.line
+            )
+
+        Nothing ->
+            ( model.cursor.line, model.cursor.line )
+
+
+moveCursorLines : Int -> Cursor -> Cursor
+moveCursorLines delta cursor =
+    { cursor | line = cursor.line + delta }
+
+
+moveSpan : Int -> Model -> Model
+moveSpan delta model =
+    let
+        ( from, to ) =
+            lineSpan model
+    in
+    lineEdit (TextBuffer.moveLines from to delta) (moveCursorLines delta) model
+
+
+openLine : Int -> Model -> Model
+openLine at model =
+    lineEdit
+        (\lines ->
+            Array.append (Array.append (Array.slice 0 at lines) (Array.fromList [ "" ]))
+                (Array.slice at (Array.length lines) lines)
+        )
+        (\_ -> { line = at, col = 0 })
+        model
+
+
+{-| A whole-line edit: no selection is deleted first (the lines themselves are
+the target), and the caret and selection are carried by `followCursor`.
+-}
+lineEdit : (Array String -> Array String) -> (Cursor -> Cursor) -> Model -> Model
+lineEdit op followCursor model =
+    let
+        lines =
+            op model.lines
+    in
+    if lines == model.lines then
+        model
+
+    else
+        let
+            content =
+                TextBuffer.toString lines
+        in
+        { model
+            | lines = lines
+            , content = content
+            , cursor = TextBuffer.clampCursor lines (followCursor model.cursor)
+            , anchor = Maybe.map (TextBuffer.clampCursor lines << followCursor) model.anchor
+            , maxLineLength = longestOf lines
+            , dirtyState = Dirty
+            , undo = { lines = model.lines, cursor = model.cursor } :: List.take undoLimit model.undo
+            , redo = []
+            , coalesce = NoCoalesce
+        }
 
 
 {-| Enter inside a list item or blockquote repeats the marker on the next

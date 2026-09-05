@@ -173,7 +173,9 @@ describe("file tree", () => {
     }
   });
 
-  test("Move to Trash removes the file from the workspace and the tree", async () => {
+  // The freedesktop trash spec wants a .Trash directory on the file's own
+  // filesystem; CI's temp dir has none, so gio refuses and nothing is deleted.
+  test("Move to Trash removes the file from the workspace and the tree", { skip: process.platform === "linux" && "no desktop trash service" }, async () => {
     const fence = await launchFence({ files, open: "a.md" });
     try {
       const { window } = fence;

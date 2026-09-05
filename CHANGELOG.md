@@ -6,11 +6,10 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
-### Changed
+## [0.2.0] — 2026-09-06
 
-- Clicking anywhere in the editor pane places the caret. It previously only
-  responded on the lines themselves, so a short or new file left most of the
-  pane inert.
+The release that makes Fence a place to write, not only to read: files can be
+created, documents can be searched, and the preview keeps up with the editor.
 
 ### Added
 
@@ -40,6 +39,17 @@ Notable changes to Fence. Dates are release dates; versions follow
 - **The preview follows the editor's scroll position**, anchored on headings
   and moving continuously with it rather than a line at a time.
 - A word, line and character count in the editor's pane header.
+
+### Changed
+
+- Clicking anywhere in the editor pane places the caret. It previously only
+  responded on the lines themselves, so a short or new file left most of the
+  pane inert.
+
+### Fixed
+
+- Scrolling a large document no longer forces a layout of the whole page for
+  the preview to follow it.
 
 ## [0.1.6] — 2026-09-05
 
@@ -158,7 +168,8 @@ First release. A split-view Markdown editor with a file browser, live
 preview, YAML frontmatter, syntax highlighting, several themes, and resizable
 panes.
 
-[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/HelgeSverre/fence/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/HelgeSverre/fence/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/HelgeSverre/fence/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/HelgeSverre/fence/compare/v0.1.3...v0.1.4

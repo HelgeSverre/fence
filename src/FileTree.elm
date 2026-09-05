@@ -1,12 +1,15 @@
 module FileTree exposing
-    ( Model
+    ( EditMode(..)
+    , Model
     , Msg(..)
     , OutCmd(..)
     , handleDirContents
     , handleFolderOpened
     , handleFsEvent
+    , handleRenamed
     , init
     , select
+    , startCommand
     , update
     , view
     )
@@ -27,7 +30,24 @@ type alias Model =
     , expanded : Set FilePath
     , selected : Maybe FilePath
     , focused : Maybe FilePath
+
+    -- an in-place text field in the tree: the only way a name is entered,
+    -- since Electron has no input dialog
+    , editing : Maybe Edit
     }
+
+
+type alias Edit =
+    { mode : EditMode
+    , parent : FilePath -- the directory the name will land in
+    , name : String
+    }
+
+
+type EditMode
+    = CreatingFile
+    | CreatingDir
+    | Renaming FilePath
 
 
 type Msg
@@ -41,6 +61,12 @@ type Msg
     | Activate
     | FocusFirst
     | FocusLast
+    | StartEdit EditMode (Maybe FilePath)
+    | EditNameChanged String
+    | CommitEdit
+    | CancelEdit
+    | Trash FilePath
+    | NoOp
 
 
 type OutCmd
@@ -49,6 +75,11 @@ type OutCmd
     | CmdReadFile FilePath
     | CmdWatchDir FilePath
     | CmdUnwatchDir FilePath
+    | CmdCreateFile FilePath String
+    | CmdCreateDir FilePath String
+    | CmdRename FilePath String
+    | CmdTrash FilePath
+    | CmdFocusEditInput
 
 
 init : Model
@@ -58,6 +89,7 @@ init =
     , expanded = Set.empty
     , selected = Nothing
     , focused = Nothing
+    , editing = Nothing
     }
 
 
@@ -166,6 +198,172 @@ update msg model =
                     visiblePaths model
             in
             moveFocusTo (List.head (List.reverse paths)) model
+
+        StartEdit mode target ->
+            case editParent mode target model of
+                Nothing ->
+                    ( model, [] )
+
+                Just parent ->
+                    let
+                        -- the new row is rendered among the parent's children,
+                        -- so the parent has to be expanded for it to be seen
+                        needsContents =
+                            not (Set.member parent model.expanded)
+                    in
+                    ( { model
+                        | editing = Just { mode = mode, parent = parent, name = initialName mode }
+                        , expanded = Set.insert parent model.expanded
+                      }
+                    , CmdFocusEditInput
+                        :: (if needsContents then
+                                [ CmdReadDir parent, CmdWatchDir parent ]
+
+                            else
+                                []
+                           )
+                    )
+
+        EditNameChanged name ->
+            ( { model | editing = Maybe.map (\edit -> { edit | name = name }) model.editing }, [] )
+
+        CancelEdit ->
+            ( { model | editing = Nothing }, [] )
+
+        CommitEdit ->
+            case model.editing of
+                Nothing ->
+                    ( model, [] )
+
+                Just edit ->
+                    ( { model | editing = Nothing }, commitCmds edit )
+
+        Trash path ->
+            ( model, [ CmdTrash path ] )
+
+        NoOp ->
+            ( model, [] )
+
+
+{-| The command a finished edit produces. A blank name, or a rename that
+changes nothing, is a no-op rather than an error from the main process.
+-}
+commitCmds : Edit -> List OutCmd
+commitCmds edit =
+    let
+        name =
+            String.trim edit.name
+    in
+    if name == "" then
+        []
+
+    else
+        case edit.mode of
+            CreatingFile ->
+                [ CmdCreateFile edit.parent name ]
+
+            CreatingDir ->
+                [ CmdCreateDir edit.parent name ]
+
+            Renaming path ->
+                if name == baseName path then
+                    []
+
+                else
+                    [ CmdRename path name ]
+
+
+initialName : EditMode -> String
+initialName mode =
+    case mode of
+        Renaming path ->
+            baseName path
+
+        _ ->
+            ""
+
+
+{-| Where a new name belongs: for a rename, the edited entry's own directory;
+for a creation, the given directory, the given file's directory, or - with no
+target - whatever is selected, falling back to the workspace root.
+-}
+editParent : EditMode -> Maybe FilePath -> Model -> Maybe FilePath
+editParent mode target model =
+    case mode of
+        Renaming path ->
+            Just (dirName path)
+
+        _ ->
+            case target |> orElse model.selected |> orElse model.focused of
+                Just path ->
+                    if isDirectory path model then
+                        Just path
+
+                    else
+                        Just (dirName path)
+
+                Nothing ->
+                    model.rootPath
+
+
+orElse : Maybe a -> Maybe a -> Maybe a
+orElse fallback primary =
+    case primary of
+        Just _ ->
+            primary
+
+        Nothing ->
+            fallback
+
+
+{-| A completed rename: follow it with the selection so the title bar and the
+next save point at the new path. The tree itself is refreshed by chokidar.
+-}
+handleRenamed : FilePath -> FilePath -> Model -> Model
+handleRenamed from to model =
+    let
+        follow path =
+            if path == from then
+                to
+
+            else
+                path
+    in
+    { model
+        | selected = Maybe.map follow model.selected
+        , focused = Maybe.map follow model.focused
+    }
+
+
+{-| A command from the application menu or the tree's context menu.
+-}
+startCommand : String -> Maybe FilePath -> Model -> ( Model, List OutCmd )
+startCommand name path model =
+    case name of
+        "newFile" ->
+            update (StartEdit CreatingFile path) model
+
+        "newFolder" ->
+            update (StartEdit CreatingDir path) model
+
+        "rename" ->
+            case path of
+                Just target ->
+                    update (StartEdit (Renaming target) path) model
+
+                Nothing ->
+                    ( model, [] )
+
+        "trash" ->
+            case path of
+                Just target ->
+                    update (Trash target) model
+
+                Nothing ->
+                    ( model, [] )
+
+        _ ->
+            ( model, [] )
 
 
 {-| Drop selection/focus that pointed at a path that no longer exists
@@ -387,6 +585,7 @@ freshRoot path entries model =
         , expanded = Set.singleton path
         , selected = Nothing
         , focused = Nothing
+        , editing = Nothing
     }
 
 
@@ -631,7 +830,7 @@ viewEntry model depth entry =
                           else
                             Icon.chevronRight 16
                         ]
-                    , span [ class "name" ] [ text entryName ]
+                    , viewName model entryPath entryName
                     ]
                 , if isExpanded then
                     case fileEntryChildren entry of
@@ -640,14 +839,17 @@ viewEntry model depth entry =
                                 [ class "file-tree-children"
                                 , attribute "role" "group"
                                 ]
-                                (children
-                                    |> List.filter isMarkdownOrDir
-                                    |> List.sortWith directoriesFirst
-                                    |> List.map (viewEntry model (depth + 1))
+                                (viewCreateRow model entryPath (depth + 1)
+                                    ++ (children
+                                            |> List.filter isMarkdownOrDir
+                                            |> List.sortWith directoriesFirst
+                                            |> List.map (viewEntry model (depth + 1))
+                                       )
                                 )
 
                         Nothing ->
-                            text ""
+                            ul [ class "file-tree-children", attribute "role" "group" ]
+                                (viewCreateRow model entryPath (depth + 1))
 
                   else
                     text ""
@@ -683,9 +885,112 @@ viewEntry model depth entry =
                     , onClick (FileSelected entryPath)
                     ]
                     [ span [ class "icon" ] [ Icon.fileText 16 ]
-                    , span [ class "name" ] [ text entryName ]
+                    , viewName model entryPath entryName
                     ]
                 ]
+
+
+{-| An entry's label, or the rename field when this entry is being renamed. -}
+viewName : Model -> FilePath -> String -> Html Msg
+viewName model entryPath entryName =
+    if renamingPath model == Just entryPath then
+        nameInput model
+
+    else
+        span [ class "name" ] [ text entryName ]
+
+
+{-| The row for a file or folder being created, rendered inside its parent. -}
+viewCreateRow : Model -> FilePath -> Int -> List (Html Msg)
+viewCreateRow model parent depth =
+    case model.editing of
+        Just edit ->
+            if edit.parent == parent && creating edit.mode then
+                [ li [ attribute "role" "treeitem" ]
+                    [ div
+                        [ class "file-tree-item editing"
+                        , attribute "data-testid" "tree-new-row"
+                        , style "padding-left" (String.fromInt (12 + depth * 16) ++ "px")
+                        ]
+                        [ span [ class "icon" ]
+                            [ if edit.mode == CreatingDir then
+                                Icon.chevronRight 16
+
+                              else
+                                Icon.fileText 16
+                            ]
+                        , nameInput model
+                        ]
+                    ]
+                ]
+
+            else
+                []
+
+        Nothing ->
+            []
+
+
+creating : EditMode -> Bool
+creating mode =
+    case mode of
+        Renaming _ ->
+            False
+
+        _ ->
+            True
+
+
+renamingPath : Model -> Maybe FilePath
+renamingPath model =
+    case Maybe.map .mode model.editing of
+        Just (Renaming path) ->
+            Just path
+
+        _ ->
+            Nothing
+
+
+nameInput : Model -> Html Msg
+nameInput model =
+    input
+        [ class "tree-name-input"
+        , id treeEditInputId
+        , attribute "data-testid" "tree-name-input"
+        , attribute "aria-label" "Name"
+        , value (Maybe.map .name model.editing |> Maybe.withDefault "")
+        , spellcheck False
+        , attribute "autocomplete" "off"
+        , onInput EditNameChanged
+        , onBlur CommitEdit
+        , Html.Events.custom "keydown" nameKeyDecoder
+
+        -- a click inside the field must not reach the row underneath, which
+        -- would select another file and tear the field down mid-edit
+        , stopPropagationOn "click" (D.succeed ( NoOp, True ))
+        ]
+        []
+
+
+{-| Keys typed in the name field. Every key stops propagating: the tree's own
+handler treats Enter as "open the focused row" and the arrows as navigation,
+which would fight the field the whole time it is open.
+-}
+nameKeyDecoder : D.Decoder { message : Msg, stopPropagation : Bool, preventDefault : Bool }
+nameKeyDecoder =
+    D.field "key" D.string
+        |> D.map
+            (\key ->
+                case key of
+                    "Enter" ->
+                        { message = CommitEdit, stopPropagation = True, preventDefault = True }
+
+                    "Escape" ->
+                        { message = CancelEdit, stopPropagation = True, preventDefault = True }
+
+                    _ ->
+                        { message = NoOp, stopPropagation = True, preventDefault = False }
+            )
 
 
 isMarkdownOrDir : FileEntry -> Bool

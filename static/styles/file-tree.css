@@ -88,3 +88,24 @@
   background: var(--bg-overlay);
   color: var(--text-primary);
 }
+
+/* Inline name field: creating a file or folder, or renaming one. */
+.file-tree-item.editing {
+  cursor: default;
+}
+
+.file-tree-item.editing:hover {
+  background: transparent;
+}
+
+.tree-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  border: 1px solid var(--state-focus-ring);
+  border-radius: 3px;
+  outline: none;
+}

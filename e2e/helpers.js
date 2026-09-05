@@ -13,7 +13,9 @@ const projectRoot = path.resolve(__dirname, "..");
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
 async function launchFence({ files = { "note.md": "# Original\n" }, open = "note.md", userDataDir, state } = {}) {
-  const workspace = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-e2e-"));
+  // realpath: on macOS the temp dir is a symlink (/var -> /private/var) and
+  // the app reports canonical paths, which tests compare against.
+  const workspace = await fs.promises.realpath(await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-e2e-")));
   for (const [rel, content] of Object.entries(files)) {
     const target = path.join(workspace, rel);
     await fs.promises.mkdir(path.dirname(target), { recursive: true });

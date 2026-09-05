@@ -8,6 +8,7 @@ module Types exposing
     , fileEntryPath
     , fileEntryType
     , fileEntryChildren
+    , treeEditInputId
     , treeItemId
     )
 
@@ -71,3 +72,11 @@ always targets the id FileTree renders.
 treeItemId : FilePath -> String
 treeItemId path =
     "tree-item-" ++ String.replace "/" "-" path
+
+
+{-| DOM id of the tree's inline name field, so Main can focus it when an
+edit starts.
+-}
+treeEditInputId : String
+treeEditInputId =
+    "tree-edit-input"

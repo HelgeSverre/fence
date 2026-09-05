@@ -1,7 +1,7 @@
 module FileTreeTest exposing (suite)
 
 import Expect
-import FileTree exposing (Msg(..), OutCmd(..))
+import FileTree exposing (EditMode(..), Msg(..), OutCmd(..))
 import Set
 import Test exposing (Test, describe, test)
 import Types exposing (FileEntry(..), FileType(..), fileEntryChildren, fileEntryPath)
@@ -31,7 +31,97 @@ rootChildren model =
 suite : Test
 suite =
     describe "File tree"
-        [ stateSuite, keyboardSuite, fsEventSuite ]
+        [ stateSuite, keyboardSuite, fsEventSuite, editingSuite ]
+
+
+editingSuite : Test
+editingSuite =
+    let
+        run msgs model =
+            List.foldl (\msg ( m, _ ) -> FileTree.update msg m) ( model, [] ) msgs
+
+        typed name msgs model =
+            run (msgs ++ [ EditNameChanged name, CommitEdit ]) model
+    in
+    describe "creating, renaming and deleting"
+        [ test "a new file is created in the selected directory" <|
+            \_ ->
+                workspace
+                    |> typed "new.md" [ StartEdit CreatingFile (Just "/notes/sub") ]
+                    |> Tuple.second
+                    |> Expect.equal [ CmdCreateFile "/notes/sub" "new.md" ]
+        , test "a new file next to the selected file lands in its directory" <|
+            \_ ->
+                workspace
+                    |> typed "new.md" [ StartEdit CreatingFile (Just "/notes/a.md") ]
+                    |> Tuple.second
+                    |> Expect.equal [ CmdCreateFile "/notes" "new.md" ]
+        , test "with nothing selected a new file lands in the root" <|
+            \_ ->
+                workspace
+                    |> typed "new.md" [ StartEdit CreatingFile Nothing ]
+                    |> Tuple.second
+                    |> Expect.equal [ CmdCreateFile "/notes" "new.md" ]
+        , test "creating expands the target directory so the row is visible" <|
+            \_ ->
+                workspace
+                    |> run [ StartEdit CreatingFile (Just "/notes/sub") ]
+                    |> Tuple.first
+                    |> .expanded
+                    |> Set.member "/notes/sub"
+                    |> Expect.equal True
+        , test "a new folder emits the directory command" <|
+            \_ ->
+                workspace
+                    |> typed "ideas" [ StartEdit CreatingDir (Just "/notes") ]
+                    |> Tuple.second
+                    |> Expect.equal [ CmdCreateDir "/notes" "ideas" ]
+        , test "renaming sends the new name for the edited path" <|
+            \_ ->
+                workspace
+                    |> typed "renamed.md" [ StartEdit (Renaming "/notes/a.md") (Just "/notes/a.md") ]
+                    |> Tuple.second
+                    |> Expect.equal [ CmdRename "/notes/a.md" "renamed.md" ]
+        , test "renaming starts with the current name in the field" <|
+            \_ ->
+                workspace
+                    |> run [ StartEdit (Renaming "/notes/a.md") (Just "/notes/a.md") ]
+                    |> Tuple.first
+                    |> .editing
+                    |> Maybe.map .name
+                    |> Expect.equal (Just "a.md")
+        , test "an empty or unchanged name commits nothing" <|
+            \_ ->
+                Expect.equal
+                    ( [], [] )
+                    ( workspace |> typed "   " [ StartEdit CreatingFile (Just "/notes") ] |> Tuple.second
+                    , workspace |> typed "a.md" [ StartEdit (Renaming "/notes/a.md") (Just "/notes/a.md") ] |> Tuple.second
+                    )
+        , test "cancelling drops the edit without a command" <|
+            \_ ->
+                workspace
+                    |> run [ StartEdit CreatingFile (Just "/notes"), EditNameChanged "x.md", CancelEdit ]
+                    |> (\( model, cmds ) -> Expect.equal ( Nothing, [] ) ( model.editing, cmds ))
+        , test "committing clears the edit" <|
+            \_ ->
+                workspace
+                    |> typed "new.md" [ StartEdit CreatingFile (Just "/notes") ]
+                    |> Tuple.first
+                    |> .editing
+                    |> Expect.equal Nothing
+        , test "trashing sends the path and needs no name" <|
+            \_ ->
+                workspace
+                    |> FileTree.update (Trash "/notes/a.md")
+                    |> Tuple.second
+                    |> Expect.equal [ CmdTrash "/notes/a.md" ]
+        , test "a rename of the open file moves selection to the new path" <|
+            \_ ->
+                workspace
+                    |> FileTree.select "/notes/a.md"
+                    |> FileTree.handleRenamed "/notes/a.md" "/notes/z.md"
+                    |> (\m -> Expect.equal ( Just "/notes/z.md", Just "/notes/z.md" ) ( m.selected, m.focused ))
+        ]
 
 
 stateSuite : Test

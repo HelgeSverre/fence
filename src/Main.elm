@@ -819,6 +819,13 @@ handlePortMessage tag value model =
                     let
                         newEditor =
                             Editor.setContent file.path file.content file.revision file.dirty model.editor
+                                |> (case file.line of
+                                        Just line ->
+                                            Editor.gotoLine line
+
+                                        Nothing ->
+                                            identity
+                                   )
 
                         gen =
                             model.debounceGeneration + 1
@@ -839,6 +846,15 @@ handlePortMessage tag value model =
                         [ setTitleCmd newEditor
                         , setDirtyCmd file.dirty
                         , parseCmd
+
+                        -- opened at a line (a search hit): scroll to the caret,
+                        -- which setContent left at the top of the document
+                        , case ( file.line, Editor.caretFollow newEditor ) of
+                            ( Just _, Just target ) ->
+                                ignoreResult (Browser.Dom.setViewportOf "veditor" target.left target.top)
+
+                            _ ->
+                                Cmd.none
                         ]
                     )
 
@@ -906,6 +922,35 @@ handlePortMessage tag value model =
                     ( { model | fileTree = newTree }
                     , if shouldReload then
                         command "readFile" [ ( "path", E.string path ) ]
+
+                      else
+                        Cmd.none
+                    )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        "treeCommand" ->
+            case D.decodeValue treeCommandDecoder value of
+                Ok ( name, path ) ->
+                    let
+                        ( newTree, outCmds ) =
+                            FileTree.startCommand name path model.fileTree
+                    in
+                    ( { model | fileTree = newTree }, outCmdsToPortCmds outCmds )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        "renamed" ->
+            case D.decodeValue renamedDecoder value of
+                Ok ( from, to ) ->
+                    ( { model
+                        | fileTree = FileTree.handleRenamed from to model.fileTree
+                        , editor = Editor.followRename from to model.editor
+                      }
+                    , if model.editor.filePath == Just from then
+                        setTitleCmd (Editor.followRename from to model.editor)
 
                       else
                         Cmd.none
@@ -1144,6 +1189,21 @@ outCmdToCommand cmd =
         FileTree.CmdUnwatchDir path ->
             forPath "unwatchDir" path
 
+        FileTree.CmdCreateFile dir name ->
+            command "createFile" [ ( "dir", E.string dir ), ( "name", E.string name ) ]
+
+        FileTree.CmdCreateDir dir name ->
+            command "createDir" [ ( "dir", E.string dir ), ( "name", E.string name ) ]
+
+        FileTree.CmdRename path name ->
+            command "renamePath" [ ( "path", E.string path ), ( "name", E.string name ) ]
+
+        FileTree.CmdTrash path ->
+            forPath "trashPath" path
+
+        FileTree.CmdFocusEditInput ->
+            focusSilently treeEditInputId
+
 
 -- DECODERS
 
@@ -1194,16 +1254,18 @@ type alias FileContentPayload =
     , content : String
     , revision : String
     , dirty : Bool
+    , line : Maybe Int -- 1-based line to put the caret on, for search results
     }
 
 
 fileContentDecoder : D.Decoder FileContentPayload
 fileContentDecoder =
-    D.map4 FileContentPayload
+    D.map5 FileContentPayload
         (D.field "path" D.string)
         (D.field "content" D.string)
         (D.field "revision" D.string)
         (D.field "dirty" D.bool)
+        (D.maybe (D.field "line" D.int))
 
 
 fileSavedDecoder : D.Decoder ( FilePath, String )
@@ -1211,6 +1273,20 @@ fileSavedDecoder =
     D.map2 Tuple.pair
         (D.field "path" D.string)
         (D.field "revision" D.string)
+
+
+treeCommandDecoder : D.Decoder ( String, Maybe FilePath )
+treeCommandDecoder =
+    D.map2 Tuple.pair
+        (D.field "command" D.string)
+        (D.maybe (D.field "path" D.string))
+
+
+renamedDecoder : D.Decoder ( FilePath, FilePath )
+renamedDecoder =
+    D.map2 Tuple.pair
+        (D.field "from" D.string)
+        (D.field "path" D.string)
 
 
 fsEventDecoder : D.Decoder ( String, FilePath )

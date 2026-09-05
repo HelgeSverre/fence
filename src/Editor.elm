@@ -6,6 +6,8 @@ module Editor exposing
     , Key(..)
     , caretFollow
     , dragging
+    , followRename
+    , gotoLine
     , highlightLine
     , keyDecoder
     , selectedText
@@ -148,6 +150,30 @@ setContent path content revision dirty model =
         , dragPointer = Nothing
         , undo = []
         , redo = []
+        , coalesce = NoCoalesce
+    }
+
+
+{-| Follow a rename of the open file, so the title bar and the next save
+point at the new path.
+-}
+followRename : FilePath -> FilePath -> Model -> Model
+followRename from to model =
+    if model.filePath == Just from then
+        { model | filePath = Just to }
+
+    else
+        model
+
+
+{-| Put the caret at the start of a 1-based line, for opening a file at a
+search hit. Out-of-range lines clamp to the document.
+-}
+gotoLine : Int -> Model -> Model
+gotoLine line model =
+    { model
+        | cursor = TextBuffer.clampCursor model.lines { line = line - 1, col = 0 }
+        , anchor = Nothing
         , coalesce = NoCoalesce
     }
 

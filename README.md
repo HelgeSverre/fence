@@ -39,6 +39,7 @@ brew install --cask helgesverre/tap/fence
 ```
 
 Or grab a DMG from the [releases page](https://github.com/HelgeSverre/fence/releases).
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## Getting Started
 

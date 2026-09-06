@@ -274,6 +274,7 @@ function createWindow() {
     width: 1400,
     height: 900,
     show: false,
+    backgroundColor: "#0d1117", // dark canvas before the renderer's first paint
     title: "Fence",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 12, y: 10 },
@@ -741,6 +742,10 @@ registerIpc("fence:set-theme", (data) => {
 
 registerIpc("fence:set-font", (data) => {
   updateState(() => ({ font: requireString(data, "font", 256) }));
+});
+
+registerIpc("fence:set-soft-wrap", (data) => {
+  if (typeof data.softWrap === "boolean") updateState(() => ({ softWrap: data.softWrap }));
 });
 
 registerIpc("fence:set-font-size", (data) => {

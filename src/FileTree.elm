@@ -710,7 +710,7 @@ view model =
     div [ class "sidebar", attribute "data-testid" "sidebar" ]
         [ div [ class "sidebar-header" ]
             [ span [ class "sidebar-title" ] [ text "Workspace" ]
-            , button [ class "open-folder-btn", attribute "data-testid" "open-folder-button", onClick OpenFolder ] [ Icon.folderPlus 16 ]
+            , button [ class "icon-button open-folder-btn", attribute "data-testid" "open-folder-button", onClick OpenFolder ] [ Icon.folderPlus 16 ]
             ]
         , div [ class "sidebar-content" ]
             [ case model.root of

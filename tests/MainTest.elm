@@ -93,6 +93,13 @@ initSuite =
                     ()
         , test "a malformed flag falls back to its default instead of failing init" <|
             \_ -> (withFlags [ ( "sidebarFraction", E.string "wide" ) ]).sidebarFraction |> Expect.within (Expect.Absolute 0.0001) 0.17
+        , test "soft wrap defaults on and accepts only a persisted Boolean" <|
+            \_ ->
+                Expect.equal [ True, False, True ]
+                    [ fresh.editor.softWrap
+                    , (withFlags [ ( "softWrap", E.bool False ) ]).editor.softWrap
+                    , (withFlags [ ( "softWrap", E.string "false" ) ]).editor.softWrap
+                    ]
         , test "previewDelay grows with document size" <|
             \_ ->
                 [ String.repeat 10 "x", String.repeat 300000 "x", String.repeat 1100000 "x" ]

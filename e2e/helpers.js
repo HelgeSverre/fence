@@ -22,6 +22,7 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
     await fs.promises.writeFile(target, content, "utf-8");
   }
   const stateDir = userDataDir ?? (await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-e2e-state-")));
+  if (process.env.FENCE_E2E_WRAP === "off") state = { softWrap: false, ...state };
   // Pre-seed persisted settings (state.json) for tests that need a non-default setup.
   if (state) await fs.promises.writeFile(path.join(stateDir, "state.json"), JSON.stringify(state), "utf-8");
 
@@ -55,10 +56,10 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
   };
 }
 
-// The document text as the editor shows it: the visible rows, which is the
+// Source fragments joined with newlines only between logical lines; the visible rows are the
 // whole document for the short files these tests use.
 function editorText(window) {
-  return window.evaluate(() => [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n"));
+  return window.evaluate(() => [...document.querySelectorAll(".veditor-row")].reduce((text, row, index, rows) => text + (index > 0 && row.dataset.sourceLine !== rows[index - 1].dataset.sourceLine ? "\n" : "") + (row.dataset.sourceText ?? row.textContent), ""));
 }
 
 // Only visible rows are in the DOM, so compare the exposed document length and
@@ -68,7 +69,7 @@ function waitForEditorValue(window, expected, timeout = 10000) {
     (value) => {
       const ve = document.querySelector("[data-testid=veditor]");
       if (!ve || Number(ve.dataset.length) !== value.length) return false;
-      const rows = [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n");
+      const rows = [...document.querySelectorAll(".veditor-row")].reduce((text, row, index, rows) => text + (index > 0 && row.dataset.sourceLine !== rows[index - 1].dataset.sourceLine ? "\n" : "") + (row.dataset.sourceText ?? row.textContent), "");
       return value.startsWith(rows) || ve.scrollTop > 0;
     },
     expected,
@@ -95,7 +96,7 @@ async function setEditorContent(window, content) {
 // after a keystroke. Falls back to a plain assert so failures show both texts.
 async function expectEditorText(window, expected) {
   await window
-    .waitForFunction((want) => [...document.querySelectorAll(".veditor-row")].map((r) => r.textContent).join("\n") === want, expected, { timeout: 3000 })
+    .waitForFunction((want) => [...document.querySelectorAll(".veditor-row")].reduce((text, row, index, rows) => text + (index > 0 && row.dataset.sourceLine !== rows[index - 1].dataset.sourceLine ? "\n" : "") + (row.dataset.sourceText ?? row.textContent), "") === want, expected, { timeout: 3000 })
     .catch(async () => assert.equal(await editorText(window), expected));
 }
 

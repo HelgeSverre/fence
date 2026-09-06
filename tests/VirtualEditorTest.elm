@@ -1,6 +1,7 @@
 module VirtualEditorTest exposing (suite)
 
 import Array
+import EditorLayout
 import Expect
 import Fuzz
 import Html
@@ -56,6 +57,10 @@ suite =
                 VirtualEditor.view
                     { onScroll = \_ _ -> ()
                     , highlightLine = Html.text
+                    , highlightFragment = .text >> Html.text
+                    , layout = EditorLayout.build 0 lines
+                    , affinity = EditorLayout.Downstream
+                    , softWrap = False
                     , keyDecoder = D.fail "n/a"
                     , onInput = always ()
                     , onPaste = always ()

@@ -19,7 +19,10 @@ export function setupVirtualInput() {
     const box = spacer.getBoundingClientRect();
     const lineHeight = parseFloat(input.style.height) || 20;
     input.style.top = `${Math.max(0, Math.floor((e.clientY - box.top) / lineHeight) * lineHeight)}px`;
-    input.style.left = `${Math.max(0, e.clientX - box.left)}px`;
+    const clickedX = Math.max(0, e.clientX - box.left);
+    // A quick key after a click in the right padding must not make Chromium
+    // horizontally reveal the temporary input position in a wrapped pane.
+    input.style.left = `${scroller.classList.contains("wrapped") ? Math.min(clickedX, Math.max(0, spacer.clientWidth - 2)) : clickedX}px`;
     input.focus({ preventScroll: true });
   }, true);
   document.addEventListener("input", (e) => {

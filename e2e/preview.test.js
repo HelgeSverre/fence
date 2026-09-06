@@ -1,8 +1,25 @@
 const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
+const fs = require("node:fs");
+const path = require("node:path");
 const { launchFence, setEditorContent } = require("./helpers");
 
 describe("preview", () => {
+  test("the virtualized editor plan renders instead of showing the welcome screen", async () => {
+    const source = fs.readFileSync(path.join(__dirname, "../docs/plans/2026-09-02-virtualized-editor.md"), "utf8");
+    const fence = await launchFence({ files: { "plan.md": source }, open: "plan.md" });
+    try {
+      const preview = fence.window.getByTestId("preview-content");
+      await preview.locator("h1#virtualized-editor-in-elm").waitFor();
+      assert.match(await preview.innerText(), /<2ms of layout/);
+      assert.equal(await preview.locator("h2").count(), 5);
+      assert.equal(await fence.window.getByTestId("preview-welcome").count(), 0);
+      assert.equal(fs.readFileSync(fence.file("plan.md"), "utf8"), source);
+    } finally {
+      await fence.close();
+    }
+  });
+
   test("headings get anchor ids and repeated headings are disambiguated", async () => {
     const fence = await launchFence();
     try {

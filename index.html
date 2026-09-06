@@ -8,7 +8,15 @@
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: http://localhost:*; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>Fence</title>
+    <!-- Paint dark while the stylesheets and saved theme are loading. -->
+    <style>
+      html { background: #0d1117; }
+    </style>
+    <link rel="stylesheet" href="/static/styles/fonts.css" />
+    <link rel="stylesheet" href="/static/styles/themes.css" />
     <link rel="stylesheet" href="/static/styles/main.css" />
+    <link rel="stylesheet" href="/static/styles/settings.css" />
+    <link rel="stylesheet" href="/static/styles/palette.css" />
     <link rel="stylesheet" href="/static/styles/file-tree.css" />
     <link rel="stylesheet" href="/static/styles/editor.css" />
     <link rel="stylesheet" href="/static/styles/preview.css" />

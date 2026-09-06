@@ -11,11 +11,12 @@ module VirtualEditor exposing
 {-| The editor's view: a spacer the size of the whole document and only the
 rows that intersect the viewport (plus overscan) rendered as real DOM, a
 caret, selection boxes and a hidden input under the caret for keys, IME and
-paste. No wrapping; long lines scroll horizontally. See
+paste. Soft breaks are supplied by EditorLayout. See
 docs/plans/2026-09-02-virtualized-editor.md.
 -}
 
 import Array exposing (Array)
+import EditorLayout
 import Html exposing (Html, div, textarea)
 import Html.Attributes exposing (attribute, class, id, spellcheck, style, value)
 import Html.Events exposing (on, preventDefaultOn)
@@ -24,7 +25,8 @@ import Json.Decode as D
 import TextBuffer exposing (Cursor)
 
 
-{-| Measured once per font/size change by js/editor-metrics.js. -}
+{-| Measured once per font/size change by js/editor-metrics.js.
+-}
 type alias Metrics =
     { lineHeight : Float
     , charWidth : Float
@@ -54,7 +56,8 @@ metricsDecoder =
         (D.field "viewportLeft" D.float)
 
 
-{-| Pixel position of the caret inside the spacer (before padding). -}
+{-| Pixel position of the caret inside the spacer (before padding).
+-}
 caretPosition : Metrics -> Array String -> Cursor -> { x : Float, y : Float }
 caretPosition metrics lines cursor =
     let
@@ -67,8 +70,15 @@ caretPosition metrics lines cursor =
 
 
 type alias Config msg =
-    { onScroll : Float -> Float -> msg -- scrollTop scrollLeft
+    { onScroll :
+        Float
+        -> Float
+        -> msg -- scrollTop scrollLeft
     , highlightLine : String -> Html msg
+    , highlightFragment : EditorLayout.Fragment -> Html msg
+    , layout : EditorLayout.Layout
+    , affinity : EditorLayout.Affinity
+    , softWrap : Bool
     , keyDecoder : D.Decoder ( msg, Bool )
     , onInput : String -> msg
     , onPaste : String -> msg
@@ -110,7 +120,7 @@ view : Config msg -> Metrics -> Float -> Int -> Array String -> Html msg
 view config metrics scrollTop maxLineLength lines =
     let
         lineCount =
-            Array.length lines
+            EditorLayout.rowCount config.layout
 
         ( from, to ) =
             visibleRange metrics scrollTop lineCount
@@ -119,12 +129,36 @@ view config metrics scrollTop maxLineLength lines =
             String.fromFloat n ++ "px"
 
         caret =
-            caretPosition metrics lines config.cursor
+            if config.softWrap then
+                let
+                    at =
+                        EditorLayout.screenPosition { cursor = config.cursor, affinity = config.affinity } config.layout
+                in
+                { x = toFloat at.cell * metrics.charWidth, y = toFloat at.row * metrics.lineHeight }
+
+            else
+                caretPosition metrics lines config.cursor
+
+        fragments =
+            EditorLayout.fragments from to config.layout
     in
     div
-        [ class "veditor"
+        [ class
+            (if config.softWrap then
+                "veditor wrapped"
+
+             else
+                "veditor"
+            )
         , id "veditor"
         , attribute "data-testid" "veditor"
+        , attribute "data-wrap"
+            (if config.softWrap then
+                "true"
+
+             else
+                "false"
+            )
         , attribute "data-length" (String.fromInt config.contentLength)
         , on "scroll" (D.map2 config.onScroll (D.at [ "target", "scrollTop" ] D.float) (D.at [ "target", "scrollLeft" ] D.float))
 
@@ -143,22 +177,42 @@ view config metrics scrollTop maxLineLength lines =
         [ div
             [ class "veditor-spacer"
             , style "height" (px (toFloat lineCount * metrics.lineHeight))
-            , style "min-width" (px (toFloat (maxLineLength + 1) * metrics.charWidth))
+            , style "min-width"
+                (if config.softWrap then
+                    "0"
+
+                 else
+                    px (toFloat (maxLineLength + 1) * metrics.charWidth)
+                )
             ]
             [ div [ class "veditor-highlight-layer" ]
-                (List.concatMap (rangeRects "veditor-highlight" metrics lines from to) config.highlights
-                    ++ List.concatMap (rangeRects "veditor-highlight active" metrics lines from to) (maybeToList config.activeHighlight)
+                (List.concatMap (rangeRects "veditor-highlight" metrics fragments) config.highlights
+                    ++ List.concatMap (rangeRects "veditor-highlight active" metrics fragments) (maybeToList config.activeHighlight)
                 )
-            , div [ class "veditor-selection-layer" ] (selectionRects config.selection metrics lines from to)
+            , div [ class "veditor-selection-layer" ] (selectionRects config.selection metrics fragments)
             , div
                 [ class "veditor-rows"
                 , style "top" (px (toFloat from * metrics.lineHeight))
                 , style "line-height" (px metrics.lineHeight)
                 ]
-                (Array.slice from to lines
-                    |> Array.toList
-                    -- lazy: only the edited row re-tokenizes and re-diffs
-                    |> List.map (\line -> div [ class "veditor-row", style "height" (px metrics.lineHeight) ] [ Html.Lazy.lazy config.highlightLine line ])
+                (List.map
+                    (\fragment ->
+                        div
+                            [ class "veditor-row"
+                            , style "height" (px metrics.lineHeight)
+                            , attribute "data-source-line" (String.fromInt fragment.line)
+                            , attribute "data-source-start" (String.fromInt fragment.segment.start)
+                            , attribute "data-source-end" (String.fromInt fragment.segment.end)
+                            , attribute "data-source-text" (String.slice fragment.segment.start fragment.segment.end fragment.text)
+                            ]
+                            [ if config.softWrap then
+                                config.highlightFragment fragment
+
+                              else
+                                Html.Lazy.lazy config.highlightLine fragment.text
+                            ]
+                    )
+                    fragments
                 )
             , div
                 [ class "veditor-caret"
@@ -220,50 +274,72 @@ maybeToList maybe =
 
 
 {-| One highlight box per visible selected row; rows ending inside the
-selection get an extra cell for the line break. -}
-selectionRects : Maybe ( Cursor, Cursor ) -> Metrics -> Array String -> Int -> Int -> List (Html msg)
-selectionRects maybeSelection metrics lines from to =
-    case maybeSelection of
-        Nothing ->
-            []
-
-        Just range ->
-            rangeRects "veditor-selection" metrics lines from to range
+selection get an extra cell for the line break.
+-}
+selectionRects : Maybe ( Cursor, Cursor ) -> Metrics -> List EditorLayout.Fragment -> List (Html msg)
+selectionRects maybeSelection metrics fragments =
+    maybeSelection |> Maybe.map (rangeRects "veditor-selection" metrics fragments) |> Maybe.withDefault []
 
 
-{-| The boxes covering a range, clipped to the rendered rows. -}
-rangeRects : String -> Metrics -> Array String -> Int -> Int -> ( Cursor, Cursor ) -> List (Html msg)
-rangeRects cls metrics lines from to ( s, e ) =
-    List.range (Basics.max from s.line) (Basics.min (to - 1) e.line)
-        |> List.map
-            (\row ->
+rangeRects : String -> Metrics -> List EditorLayout.Fragment -> ( Cursor, Cursor ) -> List (Html msg)
+rangeRects cls metrics fragments ( s, e ) =
+    fragments
+        |> List.filterMap
+            (\fragment ->
                 let
-                    line =
-                        Array.get row lines |> Maybe.withDefault ""
+                    segment =
+                        fragment.segment
+
+                    start =
+                        if fragment.line == s.line then
+                            max segment.start s.col
+
+                        else
+                            segment.start
+
+                    end =
+                        if fragment.line == e.line then
+                            min segment.end e.col
+
+                        else
+                            segment.end
+
+                    newline =
+                        fragment.last && fragment.line < e.line
+
+                    cells col =
+                        -- Scan only this fragment, even near the end of a huge paragraph.
+                        EditorLayout.expandTabs segment.startCell (String.slice segment.start col fragment.text)
+                            |> String.toList
+                            |> List.length
 
                     startCell =
-                        if row == s.line then
-                            TextBuffer.visualColumn line s.col
-
-                        else
-                            0
+                        cells start
 
                     endCell =
-                        if row == e.line then
-                            TextBuffer.visualColumn line e.col
+                        cells end
+                            + (if newline then
+                                1
 
-                        else
-                            TextBuffer.visualColumn line (String.length line) + 1
+                               else
+                                0
+                              )
 
                     px n =
                         String.fromFloat n ++ "px"
                 in
-                div
-                    [ class cls
-                    , style "left" (px (toFloat startCell * metrics.charWidth))
-                    , style "top" (px (toFloat row * metrics.lineHeight))
-                    , style "width" (px (toFloat (endCell - startCell) * metrics.charWidth))
-                    , style "height" (px metrics.lineHeight)
-                    ]
-                    []
+                if fragment.line < s.line || fragment.line > e.line || end < start || endCell <= startCell then
+                    Nothing
+
+                else
+                    Just
+                        (div
+                            [ class cls
+                            , style "left" (px (toFloat startCell * metrics.charWidth))
+                            , style "top" (px (toFloat fragment.row * metrics.lineHeight))
+                            , style "width" (px (toFloat (endCell - startCell) * metrics.charWidth))
+                            , style "height" (px metrics.lineHeight)
+                            ]
+                            []
+                        )
             )

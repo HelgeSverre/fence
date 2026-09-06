@@ -1,0 +1,268 @@
+/* Settings keeps its anchor and font separate from the shared icon button. */
+.settings-btn {
+  anchor-name: --settings-btn;
+  font-family: var(--font-sans);
+}
+
+/* Settings dropdown */
+.settings-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 99;
+}
+
+.settings-dropdown {
+  position: fixed;
+  position-anchor: --settings-btn;
+  top: anchor(bottom);
+  right: anchor(right);
+  margin-top: 4px;
+  inset-area: none;
+  position-try-fallbacks: flip-inline;
+  position-visibility: anchors-visible;
+  z-index: 100;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  /* wide enough that the longest label ("Toggle right sidebar") keeps clear of
+     its control; in em so it grows with the UI font size the labels use */
+  font-size: var(--font-size-ui);
+  min-width: 23em;
+  box-shadow: 0 4px 12px oklch(0 0 0 / 0.3);
+}
+
+.settings-dropdown-label {
+  padding: 6px 10px 4px;
+  font-size: var(--font-size-ui-sm);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.settings-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--font-size-ui);
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-sans);
+}
+
+.settings-dropdown-item-label {
+  flex: 1;
+}
+
+.settings-dropdown-item:hover {
+  background: var(--state-hover);
+}
+
+/* Keep the shared ring inside full-width rows and clipped stepper controls.
+   Plain :focus covers roving-tabindex navigation, and the checkbox's row carries
+   its ring so the switch itself can stay small. */
+.settings-btn:focus-visible,
+.settings-dropdown :focus-visible,
+.settings-dropdown-item:focus,
+.settings-dropdown-row:has(input[type="checkbox"]:focus-visible) {
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.settings-dropdown-item:focus {
+  background: var(--state-hover);
+}
+
+.settings-dropdown-item:active {
+  background: var(--state-active);
+}
+
+.settings-dropdown-item.active {
+  color: var(--accent);
+}
+
+/* Theme and font lists: long enough to need scrolling rather than a dropdown
+   taller than the window. Sized in em so it still shows about five rows when
+   the UI font size changes. */
+.settings-dropdown-list {
+  outline: none;
+  font-size: var(--font-size-ui);
+  max-height: calc(5 * (1.35em + 12px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.settings-dropdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 10px;
+}
+
+/* A real checkbox, drawn as a switch: keyboard behaviour and screen-reader
+   semantics stay exactly what a checkbox gives us. */
+.settings-dropdown-row input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 2em;
+  height: 1.15em;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 1em;
+  background: var(--bg-base);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.settings-dropdown-row input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 0.85em;
+  height: 0.85em;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transform: translate(0, -50%);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.settings-dropdown-row input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.settings-dropdown-row input[type="checkbox"]:checked::after {
+  background: var(--bg-base);
+  transform: translate(calc(2em - 0.85em - 6px), -50%);
+}
+
+/* The row carries the switch's focus ring. */
+.settings-dropdown-row input[type="checkbox"]:focus-visible {
+  outline: none;
+}
+
+.settings-dropdown-row-label {
+  /* the label yields before the control does, however long it gets */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-ui);
+  color: var(--text-primary);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+.stepper-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  font-family: var(--font-sans);
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.stepper-btn:active {
+  background: var(--state-active);
+}
+
+.stepper-input {
+  width: 52px;
+  text-align: center;
+  background: none;
+  border: none;
+  -moz-appearance: textfield;
+}
+
+.stepper-input,
+.stepper-value {
+  height: 26px;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-ui);
+}
+
+.stepper-input::-webkit-inner-spin-button,
+.stepper-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.stepper-input:focus {
+  background: var(--state-hover);
+}
+
+.settings-dropdown-check {
+  display: flex;
+  align-items: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* Settings: outline depth value + shortcut rebind button */
+.stepper-value {
+  min-width: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rebind-btn {
+  /* wide enough for the capturing label, so the row does not jump when the
+     button switches between the shortcut and "Press keys…" */
+  min-width: 104px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-ui);
+  cursor: pointer;
+}
+
+.rebind-btn:hover {
+  background: var(--state-hover);
+}
+
+.rebind-btn.capturing {
+  border-color: var(--accent, var(--text-primary));
+  color: var(--text-secondary);
+}

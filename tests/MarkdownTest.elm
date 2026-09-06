@@ -168,6 +168,49 @@ renderSuite =
             \_ -> (Markdown.parse "# A\n\n### C\n\n## B\n").outline |> List.map .level |> Expect.equal [ 1, 3, 2 ]
         , test "a README with an unclosed <img> inside a <div> still renders" <|
             \_ -> render "<div align=\"center\">\n\n<img src=\"x.png\" alt=\"logo\">\n\n# Title\n\n</div>\n" |> Query.find [ Selector.tag "h1" ] |> Query.has [ Selector.text "Title" ]
+        , test "a numeric comparison on a list continuation line renders as text" <|
+            \_ ->
+                render "# Performance\n\n1. A keystroke costs\n   <2ms of layout (trace).\n\n# Next\n"
+                    |> Query.find [ Selector.tag "li" ]
+                    |> Query.has [ Selector.text "<2ms of layout (trace)." ]
+        , test "comparison recovery preserves headings and following sections" <|
+            \_ ->
+                (Markdown.parse "# Performance\n\n<2ms\n\n# Next\n").outline
+                    |> List.map .text
+                    |> Expect.equal [ "Performance", "Next" ]
+        , test "comparison recovery leaves code contents intact" <|
+            \_ ->
+                let
+                    result =
+                        render "# Performance\n\n<2ms\n\n```text\n<3ms\n```\n\n~~~text\n<4ms\n~~~\n\n    <5ms\n\n`<6ms`\n"
+                in
+                Expect.all
+                    [ \_ -> result |> Query.findAll [ Selector.tag "code" ] |> Query.count (Expect.equal 4)
+                    , \_ -> result |> Query.findAll [ Selector.tag "code" ] |> Query.each (Query.hasNot [ Selector.text "\\<" ])
+                    , \_ -> result |> Query.has [ Selector.text "<3ms", Selector.text "<4ms", Selector.text "<5ms", Selector.text "<6ms" ]
+                    ]
+                    ()
+        , test "unrecoverable HTML parsing displays the source rather than an empty preview" <|
+            \_ ->
+                render "# Keep me\n\n<div>unclosed\n"
+                    |> Query.find [ Selector.tag "pre" ]
+                    |> Query.has [ Selector.text "# Keep me\n\n<div>unclosed\n" ]
+        , test "parse recovery terminates with an isolated low surrogate" <|
+            \_ ->
+                Markdown.parse "\nb👩‍💻]\u{2028}~🌈Zk\n\u{000D}\u{DE00}"
+                    |> .html
+                    |> List.isEmpty
+                    |> Expect.equal False
+        , test "comparison recovery preserves a tilde fence nested in a list" <|
+            \_ ->
+                render "<2ms\n\n- ~~~text\n  <3ms\n  ~~~\n"
+                    |> Query.find [ Selector.tag "code" ]
+                    |> Query.hasNot [ Selector.text "\\<" ]
+        , test "unsupported multiline code spans fall back without inserting escapes into code" <|
+            \_ ->
+                render "<2ms\n\n`multiline\n<6ms`\n"
+                    |> Query.find [ Selector.tag "pre" ]
+                    |> Query.has [ Selector.text "<2ms\n\n`multiline\n<6ms`\n" ]
         ]
 
 

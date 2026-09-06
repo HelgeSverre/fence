@@ -19,6 +19,7 @@ const app = Elm.Main.init({
     sidebarFraction: initialState.sidebarFraction ?? null,
     editorFraction: initialState.editorFraction ?? null,
     font: initialState.font ?? "",
+    softWrap: initialState.softWrap ?? null,
     editorFontSize: initialState.editorFontSize ?? null,
     previewFontSize: initialState.previewFontSize ?? null,
     uiFontSize: initialState.uiFontSize ?? null,

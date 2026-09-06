@@ -1,0 +1,78 @@
+/* Command palette: quick-open and workspace search. */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+  background: oklch(0 0 0 / 0.35);
+}
+
+.palette {
+  width: min(640px, 80vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px oklch(0 0 0 / 0.4);
+}
+
+.palette-input {
+  padding: 12px 14px;
+  font: inherit;
+  font-size: calc(var(--font-size-ui) + 2px);
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+}
+
+/* the palette clips its content, so the ring is drawn inside the field */
+.palette-input:focus-visible {
+  outline-offset: -2px;
+}
+
+.palette-results {
+  overflow-y: auto;
+}
+
+.palette-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: var(--font-size-ui);
+}
+
+.palette-row:hover {
+  background: var(--state-hover);
+}
+
+.palette-row.active {
+  background: var(--state-selected);
+}
+
+.palette-primary {
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.palette-secondary {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: calc(var(--font-size-ui) - 1px);
+  white-space: nowrap;
+}
+
+.palette-empty {
+  padding: 14px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-ui);
+}

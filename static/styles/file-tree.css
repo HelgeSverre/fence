@@ -36,7 +36,6 @@
 
 /* Keyboard focus ring */
 .file-tree-item:focus-visible {
-  outline: 2px solid var(--state-focus-ring);
   outline-offset: -2px;
 }
 
@@ -73,22 +72,6 @@
   margin: 0;
 }
 
-.open-folder-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-}
-
-.open-folder-btn:hover {
-  background: var(--bg-overlay);
-  color: var(--text-primary);
-}
-
 /* Inline name field: creating a file or folder, or renaming one. */
 .file-tree-item.editing {
   cursor: default;
@@ -105,6 +88,8 @@
   font: inherit;
   color: var(--text-primary);
   background: var(--bg-base);
+  /* the field only exists while it is being typed in, so its border carries
+     the focus colour instead of stacking a ring on a very small control */
   border: 1px solid var(--state-focus-ring);
   border-radius: 3px;
   outline: none;

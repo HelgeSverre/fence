@@ -22,9 +22,12 @@ module Editor exposing
     )
 
 import Array exposing (Array)
+import Dict exposing (Dict)
+import EditorLayout
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
+import Html.Lazy
 import Json.Decode as D
 import Regex
 import TextBuffer exposing (Cursor)
@@ -41,6 +44,12 @@ type alias Model =
     , scrollLeft : Float
     , lines : Array String -- the content split by line, for the virtual view
     , maxLineLength : Int
+    , layout : EditorLayout.Layout
+    , softWrap : Bool
+    , wrapColumns : Int
+    , affinity : EditorLayout.Affinity
+    , desiredColumn : Maybe Int
+    , tokenCache : Dict Int CachedTokens
     , metrics : VirtualEditor.Metrics
     , cursor : Cursor
     , anchor : Maybe Cursor -- other end of the selection, when there is one
@@ -99,6 +108,7 @@ type Key
 type Msg
     = ScrollChanged Float Float -- scrollTop scrollLeft
     | MetricsChanged VirtualEditor.Metrics
+    | SetSoftWrap Bool
     | KeyPressed Key
     | Select Key -- shift + a movement key extends the selection
     | InsertText String
@@ -125,6 +135,12 @@ init =
     -- silently a no-op, so typing here would do nothing
     , lines = TextBuffer.fromString ""
     , maxLineLength = 0
+    , layout = EditorLayout.build 95 (TextBuffer.fromString "")
+    , softWrap = True
+    , wrapColumns = EditorLayout.columns True 800 8.4
+    , affinity = EditorLayout.Downstream
+    , desiredColumn = Nothing
+    , tokenCache = Dict.empty
     , metrics = VirtualEditor.defaultMetrics
     , cursor = TextBuffer.docStart
     , anchor = Nothing
@@ -153,6 +169,11 @@ setContent path content revision dirty model =
                 Clean
         , revision = Just revision
         , scrollTop = 0
+        , scrollLeft = 0
+        , layout = EditorLayout.build model.wrapColumns lines
+        , affinity = EditorLayout.Downstream
+        , desiredColumn = Nothing
+        , tokenCache = Dict.empty
         , lines = lines
         , maxLineLength = longestOf lines
         , cursor = TextBuffer.docStart
@@ -163,6 +184,7 @@ setContent path content revision dirty model =
         , redo = []
         , coalesce = NoCoalesce
     }
+        |> refreshTokens
 
 
 {-| Select a range, which is how a search hit is shown: the caret lands on it
@@ -170,7 +192,7 @@ so the usual caret-following scroll brings it into view.
 -}
 selectRange : ( Cursor, Cursor ) -> Model -> Model
 selectRange ( s, e ) model =
-    { model | anchor = Just s, cursor = e, coalesce = NoCoalesce }
+    { model | anchor = Just s, cursor = e, affinity = EditorLayout.Downstream, desiredColumn = Nothing, coalesce = NoCoalesce }
 
 
 {-| Replace several ranges in one undo step. The ranges must be in document
@@ -196,6 +218,7 @@ replaceRanges ranges replacement model =
                     ranges
             )
             { model | anchor = Nothing }
+            |> refreshTokens
 
 
 {-| Follow a rename of the open file, so the title bar and the next save
@@ -217,6 +240,8 @@ gotoLine : Int -> Model -> Model
 gotoLine line model =
     { model
         | cursor = TextBuffer.clampCursor model.lines { line = line - 1, col = 0 }
+        , affinity = EditorLayout.Downstream
+        , desiredColumn = Nothing
         , anchor = Nothing
         , coalesce = NoCoalesce
     }
@@ -237,12 +262,20 @@ markSaved savedContent revision model =
 
 update : Msg -> Model -> Model
 update msg model =
+    updateHelp msg model |> refreshTokens
+
+
+updateHelp : Msg -> Model -> Model
+updateHelp msg model =
     case msg of
         ScrollChanged scrollTop scrollLeft ->
             { model | scrollTop = scrollTop, scrollLeft = scrollLeft }
 
         MetricsChanged metrics ->
-            { model | metrics = metrics }
+            reflow metrics model.softWrap model
+
+        SetSoftWrap enabled ->
+            reflow model.metrics enabled model
 
         KeyPressed key ->
             keyPressed key model
@@ -277,8 +310,11 @@ update msg model =
 
         PointerDown { x, y, shift, clicks } ->
             let
+                position =
+                    positionAtWindow { x = x, y = y } model
+
                 at =
-                    cursorAtWindow { x = x, y = y } model
+                    position.cursor
 
                 ( anchor, cursor ) =
                     if shift then
@@ -293,14 +329,32 @@ update msg model =
                     else
                         ( Nothing, at )
             in
-            { model | cursor = cursor, anchor = anchor, dragging = clicks == 1 && not shift, coalesce = NoCoalesce }
+            { model
+                | cursor = cursor
+                , anchor = anchor
+                , affinity =
+                    if clicks == 1 then
+                        position.affinity
+
+                    else
+                        EditorLayout.Downstream
+                , desiredColumn = Nothing
+                , dragging = clicks == 1 && not shift
+                , coalesce = NoCoalesce
+            }
 
         PointerMoved x y ->
             if model.dragging then
+                let
+                    at =
+                        positionAtWindow { x = x, y = y } model
+                in
                 { model
                     | anchor = Just (Maybe.withDefault model.cursor model.anchor)
                     , dragPointer = Just { x = x, y = y }
-                    , cursor = cursorAtWindow { x = x, y = y } model
+                    , cursor = at.cursor
+                    , affinity = at.affinity
+                    , desiredColumn = Nothing
                 }
 
             else
@@ -313,16 +367,29 @@ update msg model =
                         scrolled =
                             { model | scrollLeft = left, scrollTop = top }
                     in
-                    { scrolled | cursor = cursorAtWindow pointer scrolled }
+                    let
+                        at =
+                            positionAtWindow pointer scrolled
+                    in
+                    { scrolled | cursor = at.cursor, affinity = at.affinity, desiredColumn = Nothing }
 
                 _ ->
                     model
 
         PointerUp ->
-            { model | dragging = False, dragPointer = Nothing, anchor = model.anchor |> Maybe.andThen (\a -> if a == model.cursor then Nothing else Just a) }
+            { model
+                | dragging = False, dragPointer = Nothing
+                , anchor =
+                    model.anchor |> Maybe.andThen
+                            (\a ->
+                                if a == model.cursor then Nothing
+
+                                else
+                                    Just a
+                            ) }
 
         SelectAll ->
-            { model | anchor = Just TextBuffer.docStart, cursor = TextBuffer.docEnd model.lines, coalesce = NoCoalesce }
+            { model | anchor = Just TextBuffer.docStart, cursor = TextBuffer.docEnd model.lines, affinity = EditorLayout.Downstream, desiredColumn = Nothing, coalesce = NoCoalesce }
 
         CutSelection ->
             case selection model of
@@ -353,7 +420,7 @@ keyPressed : Key -> Model -> Model
 keyPressed key model =
     let
         move f =
-            { model | cursor = f model.cursor model.lines, anchor = Nothing, coalesce = NoCoalesce }
+            { model | cursor = f model.cursor model.lines, anchor = Nothing, affinity = EditorLayout.Downstream, desiredColumn = Nothing, coalesce = NoCoalesce }
 
         pageRows =
             Basics.max 1 (floor (model.metrics.viewportHeight / model.metrics.lineHeight) - 1)
@@ -372,22 +439,46 @@ keyPressed key model =
             move TextBuffer.wordRight
 
         Up ->
-            move (TextBuffer.moveUp 1)
+            if model.softWrap then
+                moveScreen -1 model
+
+            else
+                move (TextBuffer.moveUp 1)
 
         Down ->
-            move (TextBuffer.moveDown 1)
+            if model.softWrap then
+                moveScreen 1 model
+
+            else
+                move (TextBuffer.moveDown 1)
 
         PageUp ->
-            move (TextBuffer.moveUp pageRows)
+            if model.softWrap then
+                moveScreen -pageRows model
+
+            else
+                move (TextBuffer.moveUp pageRows)
 
         PageDown ->
-            move (TextBuffer.moveDown pageRows)
+            if model.softWrap then
+                moveScreen pageRows model
+
+            else
+                move (TextBuffer.moveDown pageRows)
 
         Home ->
-            move (\c _ -> TextBuffer.lineStart c)
+            if model.softWrap then
+                screenEdge False model
+
+            else
+                move (\c _ -> TextBuffer.lineStart c)
 
         End ->
-            move TextBuffer.lineEnd
+            if model.softWrap then
+                screenEdge True model
+
+            else
+                move TextBuffer.lineEnd
 
         DocStart ->
             move (\_ _ -> TextBuffer.docStart)
@@ -513,7 +604,13 @@ multiLineSelection model =
         |> Maybe.andThen
             (\( s, e ) ->
                 if e.line > s.line then
-                    Just ( s.line, e.line - (if e.col == 0 then 1 else 0) )
+                    Just ( s.line
+                        , e.line
+                            - (if e.col == 0 then 1
+
+                               else
+                                0
+                              ) )
 
                 else
                     Nothing
@@ -540,6 +637,9 @@ editLines f model =
     else
         { model
             | lines = lines
+            , layout = EditorLayout.sync model.wrapColumns 0 model.lines lines model.layout
+            , affinity = EditorLayout.Downstream
+            , desiredColumn = Nothing
             , content = TextBuffer.toString lines
             , cursor = followLine model.cursor
             , anchor = Maybe.map followLine model.anchor
@@ -582,10 +682,14 @@ autoScrollStep model =
                     clamp -autoScrollMaxStep autoScrollMaxStep (distance * autoScrollFactor)
 
                 top =
-                    Basics.max 0 (model.scrollTop + speed (beyond m.viewportTop (m.viewportTop + m.viewportHeight) pointer.y))
+                    clamp 0 (Basics.max 0 (toFloat (EditorLayout.rowCount model.layout) * m.lineHeight - m.viewportHeight)) (model.scrollTop + speed (beyond m.viewportTop (m.viewportTop + m.viewportHeight) pointer.y))
 
                 left =
-                    Basics.max 0 (model.scrollLeft + speed (beyond m.viewportLeft (m.viewportLeft + m.viewportWidth) pointer.x))
+                    if model.softWrap then
+                        0
+
+                    else
+                        Basics.max 0 (model.scrollLeft + speed (beyond m.viewportLeft (m.viewportLeft + m.viewportWidth) pointer.x))
             in
             if top == model.scrollTop && left == model.scrollLeft then
                 Nothing
@@ -606,27 +710,151 @@ autoScrollFactor =
 
 {-| A pointer position in window coordinates as a position in the document.
 -}
-cursorAtWindow : { x : Float, y : Float } -> Model -> Cursor
-cursorAtWindow pointer model =
-    cursorAtPixel
-        (pointer.x - model.metrics.viewportLeft + model.scrollLeft)
-        (pointer.y - model.metrics.viewportTop + model.scrollTop)
-        model
-
-
-cursorAtPixel : Float -> Float -> Model -> Cursor
-cursorAtPixel x y model =
+positionAtWindow : { x : Float, y : Float } -> Model -> EditorLayout.Position
+positionAtWindow pointer model =
     let
-        line =
-            clamp 0 (Basics.max 0 (Array.length model.lines - 1)) (floor (y / model.metrics.lineHeight))
+        x =
+            pointer.x - model.metrics.viewportLeft + model.scrollLeft
 
-        text =
-            Array.get line model.lines |> Maybe.withDefault ""
+        y =
+            pointer.y - model.metrics.viewportTop + model.scrollTop
     in
-    { line = line, col = TextBuffer.columnFromVisual text (round (x / model.metrics.charWidth)) }
+    if model.softWrap then
+        EditorLayout.positionAt (floor (y / model.metrics.lineHeight)) (round (x / model.metrics.charWidth)) model.layout
+
+    else
+        let
+            line =
+                clamp 0 (Basics.max 0 (Array.length model.lines - 1)) (floor (y / model.metrics.lineHeight))
+
+            text =
+                Array.get line model.lines |> Maybe.withDefault ""
+        in
+        { cursor = { line = line, col = TextBuffer.columnFromVisual text (round (x / model.metrics.charWidth)) }, affinity = EditorLayout.Downstream }
 
 
-{-| The selection in document order, if any text is selected. -}
+moveScreen : Int -> Model -> Model
+moveScreen delta model =
+    let
+        screen =
+            EditorLayout.screenPosition { cursor = model.cursor, affinity = model.affinity } model.layout
+
+        desired =
+            Maybe.withDefault screen.cell model.desiredColumn
+
+        at =
+            EditorLayout.positionAt (screen.row + delta) desired model.layout
+    in
+    { model | cursor = at.cursor, affinity = at.affinity, desiredColumn = Just desired, anchor = Nothing, coalesce = NoCoalesce }
+
+
+screenEdge : Bool -> Model -> Model
+screenEdge end model =
+    let
+        screen =
+            EditorLayout.screenPosition { cursor = model.cursor, affinity = model.affinity } model.layout
+
+        fragment =
+            EditorLayout.fragmentAt screen.row model.layout
+
+        at =
+            EditorLayout.positionAt screen.row
+                (if end then
+                    fragment.segment.endCell - fragment.segment.startCell
+
+                 else
+                    0
+                )
+                model.layout
+    in
+    { model | cursor = at.cursor, affinity = at.affinity, desiredColumn = Nothing, anchor = Nothing, coalesce = NoCoalesce }
+
+
+{-| Preserve the source position at the top across reflow. An off-screen caret
+must not pull a reader back to an old editing position during a pane resize.
+-}
+reflow : VirtualEditor.Metrics -> Bool -> Model -> Model
+reflow metrics enabled model =
+    let
+        width =
+            EditorLayout.columns enabled metrics.viewportWidth metrics.charWidth
+
+        changed =
+            width /= model.wrapColumns
+
+        layout =
+            if changed then
+                EditorLayout.build width model.lines
+
+            else
+                model.layout
+
+        oldRow =
+            model.scrollTop / model.metrics.lineHeight
+
+        atTop =
+            EditorLayout.positionAt (floor oldRow) 0 model.layout
+
+        newRow =
+            EditorLayout.screenPosition atTop layout
+
+        top =
+            (toFloat newRow.row + oldRow - toFloat (floor oldRow)) * metrics.lineHeight
+
+        oldCaret =
+            caretPixels model
+
+        visible =
+            oldCaret.y >= model.scrollTop && oldCaret.y + model.metrics.lineHeight <= model.scrollTop + model.metrics.viewportHeight
+
+        measured =
+            { model
+                | metrics = metrics
+                , layout = layout
+                , softWrap = enabled
+                , wrapColumns = width
+                , scrollTop = clamp 0 (Basics.max 0 (toFloat (EditorLayout.rowCount layout) * metrics.lineHeight - metrics.viewportHeight)) top
+                , scrollLeft =
+                    if enabled then
+                        0
+
+                    else
+                        model.scrollLeft
+                , desiredColumn =
+                    if changed then
+                        Nothing
+
+                    else
+                        model.desiredColumn
+            }
+    in
+    if visible then
+        case caretFollow measured of
+            Just target ->
+                { measured | scrollTop = target.top, scrollLeft = target.left }
+
+            Nothing ->
+                measured
+
+    else
+        measured
+
+
+caretPixels : Model -> { x : Float, y : Float }
+caretPixels model =
+    if model.softWrap then
+        let
+            at =
+                EditorLayout.screenPosition { cursor = model.cursor, affinity = model.affinity } model.layout
+        in
+        { x = toFloat at.cell * model.metrics.charWidth, y = toFloat at.row * model.metrics.lineHeight }
+
+    else
+        VirtualEditor.caretPosition model.metrics model.lines model.cursor
+
+
+{-| The selection in document order, if any text is selected.
+-}
 selection : Model -> Maybe ( Cursor, Cursor )
 selection model =
     model.anchor
@@ -685,11 +913,24 @@ edit kind op model =
             TextBuffer.toString lines
     in
     if lines == model.lines then
-        { model | cursor = cursor, anchor = Nothing }
+        { model | cursor = cursor, anchor = Nothing, affinity = EditorLayout.Downstream, desiredColumn = Nothing }
 
     else
         { model
             | lines = lines
+            , layout =
+                if kind == NoCoalesce then
+                    EditorLayout.sync model.wrapColumns 0 model.lines lines model.layout
+
+                else
+                    EditorLayout.syncRange model.wrapColumns
+                        (Basics.max 0 (baseCursor.line - 1))
+                        (Basics.min (Array.length model.lines) (Basics.max model.cursor.line (Maybe.map .line model.anchor |> Maybe.withDefault model.cursor.line) + 2))
+                        model.lines
+                        lines
+                        model.layout
+            , affinity = EditorLayout.Downstream
+            , desiredColumn = Nothing
             , cursor = cursor
             , anchor = Nothing
             , content = newContent
@@ -741,6 +982,9 @@ restore : Snapshot -> Model -> Model
 restore snapshot model =
     { model
         | lines = snapshot.lines
+        , layout = EditorLayout.sync model.wrapColumns 0 model.lines snapshot.lines model.layout
+        , affinity = EditorLayout.Downstream
+        , desiredColumn = Nothing
         , cursor = TextBuffer.clampCursor snapshot.lines snapshot.cursor
         , content = TextBuffer.toString snapshot.lines
         , anchor = Nothing
@@ -764,13 +1008,10 @@ caretFollow : Model -> Maybe { left : Float, top : Float }
 caretFollow model =
     let
         caret =
-            VirtualEditor.caretPosition model.metrics model.lines model.cursor
+            caretPixels model
 
         m =
             model.metrics
-
-        pad =
-            16
 
         within lo size lo0 span =
             -- keep [lo, lo + size] inside the window [lo0, lo0 + span]
@@ -784,10 +1025,14 @@ caretFollow model =
                 lo0
 
         left =
-            within caret.x (m.charWidth + pad * 2) model.scrollLeft m.viewportWidth
+            if model.softWrap then
+                0
+
+            else
+                within caret.x m.charWidth model.scrollLeft m.viewportWidth
 
         top =
-            within caret.y (m.lineHeight + pad * 2) model.scrollTop m.viewportHeight
+            within caret.y m.lineHeight model.scrollTop m.viewportHeight
     in
     if left == model.scrollLeft && top == model.scrollTop then
         Nothing
@@ -1191,6 +1436,9 @@ lineEdit op followCursor model =
         in
         { model
             | lines = lines
+            , layout = EditorLayout.sync model.wrapColumns 0 model.lines lines model.layout
+            , affinity = EditorLayout.Downstream
+            , desiredColumn = Nothing
             , content = content
             , cursor = TextBuffer.clampCursor lines (followCursor model.cursor)
             , anchor = Maybe.map (TextBuffer.clampCursor lines << followCursor) model.anchor
@@ -1328,6 +1576,10 @@ view found model =
             [ VirtualEditor.view
                 { onScroll = ScrollChanged
                 , highlightLine = highlightLine
+                , highlightFragment = viewFragment model.tokenCache
+                , layout = model.layout
+                , affinity = model.affinity
+                , softWrap = model.softWrap
                 , keyDecoder = keyDecoder
                 , onInput = InsertText
                 , onPaste = InsertText
@@ -1369,8 +1621,132 @@ headerText model =
 -- SYNTAX HIGHLIGHTING
 
 
-{-| One run of highlighted text with an optional class. The concatenated
-token text of a line is always the line itself (see EditorTest).
+{-| Only the visible source lines are tokenized. Token offsets let fragments
+near the end of a huge paragraph skip earlier syntax runs with binary search.
+-}
+type alias CachedTokens =
+    { source : String, tokens : Array IndexedToken }
+
+
+type alias IndexedToken =
+    { start : Int, end : Int, token : Token }
+
+
+indexTokens : String -> Array IndexedToken
+indexTokens source =
+    lineTokens source
+        |> List.foldl
+            (\token ( offset, acc ) ->
+                let
+                    end =
+                        offset + String.length token.text
+                in
+                ( end, { start = offset, end = end, token = token } :: acc )
+            )
+            ( 0, [] )
+        |> Tuple.second
+        |> List.reverse
+        |> Array.fromList
+
+
+refreshTokens : Model -> Model
+refreshTokens model =
+    if not model.softWrap then
+        { model | tokenCache = Dict.empty }
+
+    else
+        let
+            ( from, to ) =
+                VirtualEditor.visibleRange model.metrics model.scrollTop (EditorLayout.rowCount model.layout)
+
+            add fragment cache =
+                if Dict.member fragment.line cache then
+                    cache
+
+                else
+                    let
+                        cached =
+                            case Dict.get fragment.line model.tokenCache of
+                                Just old ->
+                                    if old.source == fragment.text then
+                                        old
+
+                                    else
+                                        { source = fragment.text, tokens = indexTokens fragment.text }
+
+                                Nothing ->
+                                    { source = fragment.text, tokens = indexTokens fragment.text }
+                    in
+                    Dict.insert fragment.line cached cache
+        in
+        { model | tokenCache = List.foldl add Dict.empty (EditorLayout.fragments from to model.layout) }
+
+
+viewFragment : Dict Int CachedTokens -> EditorLayout.Fragment -> Html msg
+viewFragment cache fragment =
+    let
+        tokens =
+            case Dict.get fragment.line cache of
+                Just cached ->
+                    if cached.source == fragment.text then
+                        cached.tokens
+
+                    else
+                        indexTokens fragment.text
+
+                Nothing ->
+                    indexTokens fragment.text
+    in
+    Html.Lazy.lazy3 fragmentTokens tokens fragment.segment fragment.text
+
+
+fragmentTokens : Array IndexedToken -> EditorLayout.Segment -> String -> Html msg
+fragmentTokens tokens segment source =
+    let
+        search lo hi =
+            if lo >= hi then
+                lo
+
+            else
+                let
+                    mid =
+                        (lo + hi) // 2
+
+                    end =
+                        Array.get mid tokens |> Maybe.map .end |> Maybe.withDefault 0
+                in
+                if end <= segment.start then
+                    search (mid + 1) hi
+
+                else
+                    search lo mid
+
+        collect index cell acc =
+            case Array.get index tokens of
+                Just indexed ->
+                    if indexed.start >= segment.end then
+                        List.reverse acc
+
+                    else
+                        let
+                            part =
+                                String.slice (Basics.max segment.start indexed.start) (Basics.min segment.end indexed.end) source
+
+                            expanded =
+                                EditorLayout.expandTabs cell part
+
+                            token =
+                                indexed.token
+                        in
+                        collect (index + 1) (cell + List.length (String.toList expanded)) (viewToken { token | text = expanded } :: acc)
+
+                Nothing ->
+                    List.reverse acc
+    in
+    div [ class "editor-line" ] (collect (search 0 (Array.length tokens)) segment.startCell [])
+
+
+{-| One highlighted run. Concatenating the tokens reproduces the source line.
 -}
 type alias Token =
     { class : Maybe String, text : String }

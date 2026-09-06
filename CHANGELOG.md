@@ -6,6 +6,31 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+### Added
+
+- **Soft wrap**, enabled by default with a persistent toggle in Settings.
+  Long lines fit the editor width without adding newlines to saved files or
+  copied text. Caret movement, selection, search highlights, and preview
+  synchronization follow the wrapped rows.
+
+### Changed
+
+- Wrapped editing keeps rendering limited to visible rows and reuses cached
+  layout and syntax highlighting. Resize measurements are coalesced per frame.
+- Stylesheets are organized by theme and component, with shared control,
+  focus, and layout rules. Editor syntax styles are scoped to the editor.
+- Outline navigation scrolls the editor to the selected heading and keeps
+  the preview synchronized. Settings use a more compact layout and track
+  keyboard focus when controls receive focus.
+
+### Fixed
+
+- The window and initial HTML use a dark background while the app loads,
+  preventing the default white startup flash.
+- Markdown comparisons such as `<2ms` at the start of a line no longer cause
+  the preview to show the welcome screen. Unrecoverable parse errors display
+  the document source instead of an empty preview.
+
 ## [0.2.0] — 2026-09-06
 
 The release that makes Fence a place to write, not only to read: files can be

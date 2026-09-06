@@ -520,17 +520,18 @@ editingSuite =
                 in
                 Expect.all
                     [ \_ -> Editor.caretFollow m |> Expect.equal Nothing
-                    , \_ -> Editor.caretFollow (press Editor.DocEnd m) |> Maybe.map .top |> Expect.equal (Just (100 * 20 + 20 + 32 - 200))
+                    , \_ -> Editor.caretFollow (press Editor.DocEnd m) |> Maybe.map .top |> Expect.equal (Just (100 * 20 + 20 - 200))
                     , \_ -> Editor.caretFollow (m |> press Editor.DocEnd |> Editor.update (Editor.ScrollChanged 1900 0)) |> Expect.equal Nothing
                     , \_ -> Editor.caretFollow (Editor.update (Editor.ScrollChanged 900 0) m) |> Maybe.map .top |> Expect.equal (Just 0)
                     , \_ -> Editor.caretFollow (m |> press Editor.End) |> Expect.equal Nothing
                     , \_ ->
                         Editor.setContent "/n/w.md" (String.repeat 50 "x") "r" False Editor.init
+                            |> Editor.update (Editor.SetSoftWrap False)
                             |> Editor.update (Editor.MetricsChanged { lineHeight = 20, charWidth = 10, viewportHeight = 200, viewportWidth = 300, viewportTop = 0, viewportLeft = 0 })
                             |> press Editor.End
                             |> Editor.caretFollow
                             |> Maybe.map .left
-                            |> Expect.equal (Just (50 * 10 + 10 + 32 - 300))
+                            |> Expect.equal (Just (50 * 10 + 10 - 300))
                     ]
                     ()
         , test "Escape clears the selection without moving the caret" <|

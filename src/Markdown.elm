@@ -193,7 +193,10 @@ wholeDocument : Progress msg -> Progress msg
 wholeDocument (Progress p) =
     let
         blocks =
-            parseChunk p.body |> Result.withDefault []
+            -- A parse error is not an empty document. Keep the source visible
+            -- (as text, never raw HTML) if whole-document recovery also fails.
+            parseChunk p.body
+                |> Result.withDefault [ Block.CodeBlock { body = p.body, language = Nothing } ]
 
         ( _, ids ) =
             assignIds Dict.empty blocks
@@ -258,10 +261,126 @@ runToEnd progress =
 
 
 parseChunk chunk =
-    chunk
-        |> escapeHtmlAmpersands
-        |> selfCloseVoidTags
-        |> Markdown.Parser.parse
+    let
+        prepared =
+            chunk |> escapeHtmlAmpersands |> selfCloseVoidTags
+    in
+    case Markdown.Parser.parse prepared of
+        Ok blocks ->
+            Ok blocks
+
+        Err errors ->
+            let
+                recovered =
+                    escapeLeadingComparisons prepared
+            in
+            if recovered == prepared then
+                Err errors
+
+            else
+                Markdown.Parser.parse recovered
+
+
+{-| elm-markdown treats a line starting with `<2ms` as an HTML block,
+including list continuation lines. Escape that literal less-than sign on
+the error path only. Leave fenced/indented code and multiline code spans
+alone so recovery does not change their displayed contents.
+-}
+escapeLeadingComparisons : String -> String
+escapeLeadingComparisons source =
+    let
+        scan line ( openFence, openSpan, linesRev ) =
+            let
+                fenceLine =
+                    Regex.replace codeContainerPrefix (\_ -> "") line
+            in
+            case openFence of
+                Just ( char, len ) ->
+                    ( if String.isEmpty (dropLeadingChar char (String.trim fenceLine)) && String.length (String.trim fenceLine) >= len then
+                        Nothing
+
+                      else
+                        openFence
+                    , openSpan
+                    , line :: linesRev
+                    )
+
+                Nothing ->
+                    case ( openSpan, fenceOf fenceLine ) of
+                        ( Nothing, Just fence ) ->
+                            ( Just fence, Nothing, line :: linesRev )
+
+                        _ ->
+                            let
+                                trimmed =
+                                    String.trimLeft line
+
+                                indent =
+                                    String.length line - String.length trimmed
+
+                                isComparison =
+                                    String.startsWith "<" trimmed
+                                        && (String.dropLeft 1 trimmed
+                                                |> String.uncons
+                                                |> Maybe.map (Tuple.first >> Char.isDigit)
+                                                |> Maybe.withDefault False
+                                           )
+
+                                escaped =
+                                    if openSpan == Nothing && indent <= 3 && isComparison then
+                                        String.left indent line ++ "\\" ++ trimmed
+
+                                    else
+                                        line
+
+                                nextSpan =
+                                    if indent >= 4 && openSpan == Nothing then
+                                        Nothing
+
+                                    else
+                                        Regex.find codeSpanDelimiter line
+                                            |> List.foldl
+                                                (\match spanLength ->
+                                                    if String.startsWith "\\" match.match && spanLength == Nothing then
+                                                        spanLength
+
+                                                    else if String.startsWith "\\" match.match then
+                                                        -- Backslashes are literal inside code spans;
+                                                        -- a following backtick can still close one.
+                                                        if match.match == "\\`" && spanLength == Just 1 then
+                                                            Nothing
+
+                                                        else
+                                                            spanLength
+
+                                                    else if spanLength == Just (String.length match.match) then
+                                                        Nothing
+
+                                                    else if spanLength == Nothing then
+                                                        Just (String.length match.match)
+
+                                                    else
+                                                        spanLength
+                                                )
+                                                openSpan
+                            in
+                            ( Nothing, nextSpan, escaped :: linesRev )
+    in
+    String.split "\n" source
+        |> List.foldl scan ( Nothing, Nothing, [] )
+        |> (\( _, _, linesRev ) -> String.join "\n" (List.reverse linesRev))
+
+
+codeSpanDelimiter : Regex.Regex
+codeSpanDelimiter =
+    Regex.fromString "\\\\.|`+" |> Maybe.withDefault Regex.never
+
+
+codeContainerPrefix : Regex.Regex
+codeContainerPrefix =
+    -- Code fences can also start inside lists and blockquotes.
+    Regex.fromString "^(?: {0,3}(?:[-+*][ \\t]+|[0-9]{1,9}[.)][ \\t]+|>[ \\t]?))+"
+        |> Maybe.withDefault Regex.never
 
 
 

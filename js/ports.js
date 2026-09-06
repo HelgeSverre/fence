@@ -52,6 +52,7 @@ export function wirePorts(app) {
           setTheme: "setTheme",
           setFont: "setFont",
           setFontSize: "setFontSize",
+          setSoftWrap: "setSoftWrap",
           saveRecoveryDraft: "saveRecoveryDraft",
         }[data.tag];
         if (method && typeof window.electronAPI[method] === "function") {

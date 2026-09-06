@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   setTheme: send("fence:set-theme"),
   setFont: send("fence:set-font"),
   setFontSize: send("fence:set-font-size"),
+  setSoftWrap: send("fence:set-soft-wrap"),
   saveRecoveryDraft: send("fence:save-recovery-draft"),
   onMessage: (callback) => {
     const listener = (_event, data) => callback(data);

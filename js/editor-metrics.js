@@ -6,6 +6,8 @@ let app = null;
 let probe = null;
 let observer = null;
 let observed = null;
+let scheduled = false;
+let previous = null;
 
 const CONTAINER = ".editor-container";
 const SCROLLER = "[data-testid=veditor]";
@@ -28,7 +30,7 @@ function measure() {
   // untouched, so follow the pane itself and re-attach if Elm replaces it.
   if (container && container !== observed) {
     observer?.disconnect();
-    observer = new ResizeObserver(() => measure());
+    observer = new ResizeObserver(remeasureEditorMetrics);
     observer.observe(container);
     observed = container;
   }
@@ -42,8 +44,8 @@ function measure() {
   const metrics = {
     lineHeight: parseFloat(getComputedStyle(probe).lineHeight) || rect.height,
     charWidth: rect.width / 100,
-    viewportHeight: container ? container.clientHeight : window.innerHeight,
-    viewportWidth: container ? container.clientWidth : window.innerWidth,
+    viewportHeight: scroller ? scroller.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom) : window.innerHeight,
+    viewportWidth: scroller ? scroller.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight) : window.innerWidth,
     viewportTop: box ? box.top + parseFloat(padding.paddingTop) : 0,
     viewportLeft: box ? box.left + parseFloat(padding.paddingLeft) : 0,
   };
@@ -53,7 +55,7 @@ function measure() {
   // good values and try again on the next frame instead.
   const usable = ["lineHeight", "charWidth"].every((k) => Number.isFinite(metrics[k]) && metrics[k] > 0) && Boolean(box);
   if (!usable) {
-    requestAnimationFrame(measure);
+    remeasureEditorMetrics();
     return;
   }
   for (const k of ["viewportTop", "viewportLeft"]) {
@@ -62,16 +64,26 @@ function measure() {
   for (const k of ["viewportHeight", "viewportWidth"]) {
     if (!Number.isFinite(metrics[k]) || metrics[k] <= 0) metrics[k] = 1;
   }
-  app.ports.editorMetrics.send(metrics);
+  const encoded = JSON.stringify(metrics);
+  if (encoded !== previous) {
+    previous = encoded;
+    app.ports.editorMetrics.send(metrics);
+  }
 }
 
 export function setupEditorMetrics(elmApp) {
   app = elmApp;
-  requestAnimationFrame(measure);
-  document.fonts?.ready?.then(() => requestAnimationFrame(measure));
-  window.addEventListener("resize", measure);
+  remeasureEditorMetrics();
+  document.fonts?.ready?.then(remeasureEditorMetrics);
+  document.fonts?.addEventListener("loadingdone", remeasureEditorMetrics);
+  window.addEventListener("resize", remeasureEditorMetrics);
 }
 
 export function remeasureEditorMetrics() {
-  requestAnimationFrame(measure);
+  if (scheduled) return;
+  scheduled = true;
+  requestAnimationFrame(() => {
+    scheduled = false;
+    measure();
+  });
 }

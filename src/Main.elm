@@ -16,6 +16,7 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Editor
+import EditorLayout
 import FileTree
 import Find
 import Html exposing (..)
@@ -135,11 +136,13 @@ type Msg
     | ToggleSettings
     | SetTheme String
     | SetFont String
+    | SetSoftWrap Bool
     | SetEditorFontSize Float
     | SetPreviewFontSize Float
     | SetUIFontSize Float
     | CloseSettings
     | SettingsKeyDown String
+    | SettingsFocused Int
     | DividerMouseDown DragTarget Float
     | DividerMouseMove Float
     | DividerMouseUp
@@ -325,7 +328,7 @@ init flagsValue =
                 |> Result.withDefault default
     in
     ( { fileTree = FileTree.init
-      , editor = Editor.init
+      , editor = Editor.update (Editor.SetSoftWrap (flag "softWrap" D.bool True)) Editor.init
       , previewHtml = []
       , parseCache = Markdown.emptyCache
       , parseProgress = Nothing
@@ -400,6 +403,13 @@ update msg model =
             , command "setFont" [ ( "font", E.string fontValue ) ]
             )
 
+        SetSoftWrap enabled ->
+            let
+                ( changed, cmd ) =
+                    update (EditorMsg (Editor.SetSoftWrap enabled)) model
+            in
+            ( changed, Cmd.batch [ cmd, command "setSoftWrap" [ ( "softWrap", E.bool enabled ) ] ] )
+
         SetEditorFontSize size ->
             let
                 clamped =
@@ -429,6 +439,9 @@ update msg model =
 
         CloseSettings ->
             ( { model | settingsOpen = False }, Cmd.none )
+
+        SettingsFocused idx ->
+            ( { model | settingsFocus = idx }, Cmd.none )
 
         SettingsKeyDown key ->
             let
@@ -565,7 +578,7 @@ update msg model =
             ( newModel, saveSplitsCmd newModel )
 
         ScrollToHeading anchorId ->
-            ( model, scrollToHeadingCmd anchorId )
+            ( model, scrollToHeadingCmd anchorId model )
 
         StartRebind target ->
             ( { model | rebinding = Just target }, Cmd.none )
@@ -753,7 +766,7 @@ update msg model =
                 -- mousemove after every scroll, so following the caret here
                 -- would fight the drag frame by frame.
                 followCaret =
-                    case ( newEditor.cursor /= model.editor.cursor && not (Editor.dragging newEditor), Editor.caretFollow newEditor ) of
+                    case ( (newEditor.cursor /= model.editor.cursor || newEditor.affinity /= model.editor.affinity || newEditor.content /= model.editor.content) && not (Editor.dragging newEditor), Editor.caretFollow newEditor ) of
                         ( True, Just target ) ->
                             ignoreResult (Browser.Dom.setViewportOf "veditor" target.left target.top)
 
@@ -762,12 +775,12 @@ update msg model =
             in
             if newEditor.content /= model.editor.content then
                 let
-                        gen =
-                            model.debounceGeneration + 1
+                    gen =
+                        model.debounceGeneration + 1
 
-                        recoveryGen =
-                            model.recoveryGeneration + 1
-                    in
+                    recoveryGen =
+                        model.recoveryGeneration + 1
+                in
                 ( { model
                     | editor = newEditor
                     , debounceGeneration = gen
@@ -795,7 +808,23 @@ update msg model =
 
             else
                 ( { model | editor = newEditor }
-                , Cmd.batch [ followCaret, syncPreview newEditor model ]
+                , Cmd.batch
+                    [ followCaret
+                    , syncPreview newEditor model
+                    , case subMsg of
+                        Editor.SetSoftWrap _ ->
+                            scrollDuringDrag
+
+                        Editor.MetricsChanged _ ->
+                            if ( newEditor.scrollTop, newEditor.scrollLeft ) /= ( model.editor.scrollTop, model.editor.scrollLeft ) then
+                                scrollDuringDrag
+
+                            else
+                                Cmd.none
+
+                        _ ->
+                            Cmd.none
+                    ]
                 )
 
         DebouncedParse gen ->
@@ -933,10 +962,10 @@ update msg model =
                     -- every font change, so this is also where the preview's
                     -- rendered positions are known to have moved
                     let
-                        measured =
-                            { model | editor = Editor.update (Editor.MetricsChanged metrics) model.editor }
+                        ( measured, scrollCmd ) =
+                            update (EditorMsg (Editor.MetricsChanged metrics)) model
                     in
-                    ( measured, measureSyncPoints measured )
+                    ( measured, Cmd.batch [ scrollCmd, measureSyncPoints measured ] )
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -1557,7 +1586,11 @@ syncPreview : Editor.Model -> Model -> Cmd Msg
 syncPreview editor model =
     let
         topLine =
-            editor.scrollTop / Basics.max 1 editor.metrics.lineHeight
+            if editor.softWrap then
+                EditorLayout.sourceLine (editor.scrollTop / Basics.max 1 editor.metrics.lineHeight) editor.layout
+
+            else
+                editor.scrollTop / Basics.max 1 editor.metrics.lineHeight
     in
     if Editor.dragging editor then
         Cmd.none
@@ -1571,7 +1604,8 @@ syncPreview editor model =
                 Cmd.none
 
 
-{-| The measured points bracketing a line. -}
+{-| The measured points bracketing a line.
+-}
 bracketing : Float -> List SyncPoint -> Maybe ( SyncPoint, SyncPoint )
 bracketing topLine points =
     case points of
@@ -1678,11 +1712,37 @@ syncAnchors content entries =
         []
 
 
+{-| Scroll to a heading picked in the outline.
+
+The editor is what moves: the outline lists the rendered document, but the
+heading's source line is known, and scrolling the editor there carries the
+preview with it through the usual sync. Scrolling both directly instead would
+race - the preview scroll is computed from the container's current offset,
+which sync is moving at the same time, and the result overshoots.
+
+Only a heading whose source line cannot be resolved (see `syncAnchors`) falls
+back to scrolling the preview on its own.
+
+-}
+scrollToHeadingCmd : String -> Model -> Cmd Msg
+scrollToHeadingCmd anchorId model =
+    case model.headingAnchors |> List.filter (\( _, id ) -> id == anchorId) |> List.head of
+        Just ( line, _ ) ->
+            ignoreResult
+                (Browser.Dom.setViewportOf "veditor"
+                    0
+                    (toFloat (EditorLayout.lineStartRow line model.editor.layout) * model.editor.metrics.lineHeight)
+                )
+
+        Nothing ->
+            scrollPreviewToHeadingCmd anchorId
+
+
 {-| Scroll the preview pane so the heading with `anchorId` is at the top.
 Computes the heading's offset relative to the scrollable preview container.
 -}
-scrollToHeadingCmd : String -> Cmd Msg
-scrollToHeadingCmd anchorId =
+scrollPreviewToHeadingCmd : String -> Cmd Msg
+scrollPreviewToHeadingCmd anchorId =
     Task.map3
         (\heading container containerVp ->
             -- Heading offset within the container's scrollable content.
@@ -2377,7 +2437,7 @@ viewTitleBar model =
                     text ""
             ]
         , div [ class "titlebar-actions" ]
-            [ button [ class "settings-btn", attribute "data-testid" "settings-button", onClick ToggleSettings ] [ Icon.settings 16 ]
+            [ button [ class "icon-button settings-btn", attribute "data-testid" "settings-button", onClick ToggleSettings ] [ Icon.settings 16 ]
             , if model.settingsOpen then
                 viewSettingsDropdown model
 
@@ -2438,6 +2498,17 @@ viewSettingsDropdown model =
 
         fontOffset =
             List.length themes
+
+        {- Each list keeps its own tab stop: the option the arrow keys are on
+           when they are in that list, otherwise the selected one. A listbox
+           whose only tab stop lives in a sibling list cannot be tabbed into.
+        -}
+        tabbableIn offset items activeValue =
+            if model.settingsFocus >= offset && model.settingsFocus < offset + List.length items then
+                model.settingsFocus
+
+            else
+                offset + (indexOfValue activeValue items |> Maybe.withDefault 0)
     in
     div []
         [ div [ class "settings-backdrop", onClick CloseSettings ] []
@@ -2448,15 +2519,21 @@ viewSettingsDropdown model =
             , attribute "aria-label" "Settings"
             ]
             [ div [ class "settings-dropdown-label" ] [ text "Theme" ]
-            , div [] (List.indexedMap (\i item -> viewSettingsItem model SetTheme model.theme (themeOffset + i) item) themes)
+            , div [ class "settings-dropdown-list", tabindex -1 ]
+                (List.indexedMap (\i item -> viewSettingsItem model SetTheme model.theme (tabbableIn themeOffset themes model.theme) (themeOffset + i) item) themes)
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Font" ]
-            , div [] (List.indexedMap (\i item -> viewSettingsItem model SetFont model.font (fontOffset + i) item) fonts)
+            , div [ class "settings-dropdown-list", tabindex -1 ]
+                (List.indexedMap (\i item -> viewSettingsItem model SetFont model.font (tabbableIn fontOffset fonts model.font) (fontOffset + i) item) fonts)
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Font Size" ]
             , viewStepper "Editor" model.editorFontSize SetEditorFontSize
             , viewStepper "Preview" model.previewFontSize SetPreviewFontSize
             , viewStepper "UI" model.uiFontSize SetUIFontSize
+            , label [ class "settings-dropdown-row" ]
+                [ span [ class "settings-dropdown-row-label" ] [ text "Soft wrap" ]
+                , input [ type_ "checkbox", checked model.editor.softWrap, onCheck SetSoftWrap, attribute "data-testid" "soft-wrap-toggle" ] []
+                ]
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Outline" ]
             , viewOutlineLevelStepper model.outlineMaxLevel
@@ -2517,17 +2594,27 @@ viewRebindRow label binding target rebinding =
         ]
 
 
+{-| Where a value sits in one of the settings lists. -}
+indexOfValue : String -> List ( String, String ) -> Maybe Int
+indexOfValue wanted items =
+    items
+        |> List.indexedMap (\i ( value, _ ) -> ( i, value ))
+        |> List.filter (\( _, value ) -> value == wanted)
+        |> List.head
+        |> Maybe.map Tuple.first
+
+
 {-| One selectable row in the settings listbox. Used for both the theme and
 font lists; only the active value and the click message differ.
 -}
-viewSettingsItem : Model -> (String -> Msg) -> String -> Int -> ( String, String ) -> Html Msg
-viewSettingsItem model toMsg activeValue idx ( itemValue, displayName ) =
+viewSettingsItem : Model -> (String -> Msg) -> String -> Int -> Int -> ( String, String ) -> Html Msg
+viewSettingsItem model toMsg activeValue tabbable idx ( itemValue, displayName ) =
     let
         isActive =
             activeValue == itemValue
 
         isFocused =
-            model.settingsFocus == idx
+            tabbable == idx
     in
     button
         [ class "settings-dropdown-item"
@@ -2558,6 +2645,7 @@ viewSettingsItem model toMsg activeValue idx ( itemValue, displayName ) =
                 "false"
             )
         , onClick (toMsg itemValue)
+        , onFocus (SettingsFocused idx)
         , preventDefaultOn "keydown" settingsKeyDecoder
         ]
         [ span [ class "settings-dropdown-item-label" ] [ text displayName ]

@@ -6,6 +6,8 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-06
+
 ### Added
 
 - **Soft wrap**, enabled by default with a persistent toggle in Settings.
@@ -193,7 +195,8 @@ First release. A split-view Markdown editor with a file browser, live
 preview, YAML frontmatter, syntax highlighting, several themes, and resizable
 panes.
 
-[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/HelgeSverre/fence/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/HelgeSverre/fence/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/HelgeSverre/fence/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/HelgeSverre/fence/compare/v0.1.4...v0.1.5

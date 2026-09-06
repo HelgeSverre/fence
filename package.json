@@ -38,7 +38,6 @@
     "appId": "no.helgesverre.fence",
     "productName": "Fence",
     "copyright": "Copyright © 2026 Helge Sverre",
-    "forceCodeSigning": true,
     "fileAssociations": [
       {
         "ext": ["md", "markdown", "mdown", "mkd"],
@@ -59,6 +58,7 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "forceCodeSigning": true,
       "icon": "build/icons/icon.icns",
       "target": [
         {

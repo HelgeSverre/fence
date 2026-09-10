@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="screenshot.png" alt="Fence — Split-view Markdown Editor" width="800" />
+  <img src="screenshot.png" alt="Fence editing Sema’s embedding.md with interpreter search highlights, syntax-highlighted Rust examples, live preview, and document outline" width="800" />
 
 </p>
 

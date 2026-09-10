@@ -263,7 +263,7 @@ runToEnd progress =
 parseChunk chunk =
     let
         prepared =
-            chunk |> escapeHtmlAmpersands |> selfCloseVoidTags
+            normalizeHtmlOutsideFences chunk
     in
     case Markdown.Parser.parse prepared of
         Ok blocks ->
@@ -279,6 +279,88 @@ parseChunk chunk =
 
             else
                 Markdown.Parser.parse recovered
+
+
+
+{-| HTML compatibility rewrites must never change fenced code, including
+Mermaid operators and literal HTML examples. Normalize whole prose segments
+so multiline HTML attributes still work.
+-}
+normalizeHtmlOutsideFences : String -> String
+normalizeHtmlOutsideFences source =
+    let
+        flush pending output =
+            if List.isEmpty pending then
+                output
+
+            else
+                (pending |> List.reverse |> String.join "\n" |> escapeHtmlAmpersands |> selfCloseVoidTags) :: output
+
+        stripQuotes count line =
+            if count == 0 then
+                Just line
+
+            else
+                case String.uncons (String.trimLeft line) of
+                    Just ( '>', rest ) ->
+                        stripQuotes (count - 1) rest
+
+                    _ ->
+                        Nothing
+
+        closesFence fence line =
+            stripQuotes fence.quotes line
+                |> Maybe.map
+                    (\rest ->
+                        let
+                            trimmed =
+                                String.trimLeft rest
+                        in
+                        String.length rest - String.length trimmed <= fence.indent
+                            && String.length (String.trim trimmed) >= fence.len
+                            && String.isEmpty (String.trim (dropLeadingChar fence.char trimmed))
+                    )
+                |> Maybe.withDefault False
+
+        scan line ( openFence, pending, output ) =
+            let
+                fenceLine =
+                    Regex.replace codeContainerPrefix (\_ -> "") line
+            in
+            case openFence of
+                Just fence ->
+                    ( if closesFence fence line then
+                        Nothing
+
+                      else
+                        openFence
+                    , []
+                    , line :: output
+                    )
+
+                Nothing ->
+                    case fenceOf fenceLine of
+                        Just ( char, len ) ->
+                            let
+                                prefix =
+                                    String.left (String.length line - String.length fenceLine) line
+                            in
+                            ( Just
+                                { char = char
+                                , len = len
+                                , quotes = String.length (String.filter ((==) '>') prefix)
+                                , indent = String.length prefix + 3
+                                }
+                            , []
+                            , line :: flush pending output
+                            )
+
+                        Nothing ->
+                            ( Nothing, line :: pending, output )
+    in
+    String.split "\n" source
+        |> List.foldl scan ( Nothing, [], [] )
+        |> (\( _, pending, output ) -> flush pending output |> List.reverse |> String.join "\n")
 
 
 {-| elm-markdown treats a line starting with `<2ms` as an HTML block,
@@ -658,8 +740,6 @@ document renders blank. Common in GitHub READMEs with centered logos.
 -}
 selfCloseVoidTags : String -> String
 selfCloseVoidTags =
-    -- ponytail: also rewrites inside code spans/fences (same as escapeHtmlAmpersands);
-    -- skip fenced blocks if that ever matters.
     Regex.replace voidTag
         (\m ->
             case m.submatches of
@@ -928,7 +1008,9 @@ renderCodeBlock : { body : String, language : Maybe String } -> Html msg
 renderCodeBlock { body, language } =
     case Maybe.map String.toLower language of
         Just "mermaid" ->
-            Html.pre [ class "mermaid" ] [ text body ]
+            -- Elm owns the source attribute; JS owns the rendered children.
+            -- Updating a diagram must not diff SVG/error DOM as an Elm text node.
+            Html.div [ class "mermaid", attribute "data-source" body ] []
 
         _ ->
             -- lazy: highlighting is the most expensive part of a re-parse, and

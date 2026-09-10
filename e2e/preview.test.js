@@ -78,10 +78,69 @@ describe("preview", () => {
     const fence = await launchFence();
     try {
       const { window } = fence;
-      await setEditorContent(window, "```mermaid\ngraph TD\n  A --> B\n```\n");
-      await window.getByTestId("preview-content").locator("pre.mermaid svg").waitFor({ timeout: 15000 });
+      await setEditorContent(window, "```mermaid\ngraph TD\n  A & B --> C\n```\n");
+      const diagram = window.getByTestId("preview-content").locator('.mermaid[data-state="rendered"]');
+      await diagram.locator("svg .node").first().waitFor({ timeout: 15000 });
+      assert.equal(await diagram.locator("svg .node").count(), 3);
+      assert.equal(await diagram.locator(".error-icon, .error-text").count(), 0);
+      assert.match(await diagram.getAttribute("data-source"), /A & B --> C/);
     } finally {
       await fence.close();
     }
   });
+
+  test("invalid Mermaid shows a safe error and source while neighboring diagrams render", async () => {
+    const invalid = 'graph TD\n A[unfinished\n <img src=x onerror="window.mermaidInjected=true">\n';
+    const source = `\`\`\`mermaid\n${invalid}\`\`\`\n\n\`\`\`mermaid\ngraph TD\n X --> Y\n\`\`\`\n`;
+    const fence = await launchFence({ files: { "note.md": source } });
+    try {
+      const { window } = fence;
+      const error = window.locator('.mermaid[data-state="error"]');
+      await error.locator(".mermaid-error-title").waitFor();
+      assert.equal(await error.locator(".mermaid-error-title").textContent(), "Couldn’t render diagram");
+      assert.match(await error.locator(".mermaid-error-message").textContent(), /Parse error|Lexical error/);
+      assert.equal(await error.locator("details").getAttribute("open"), null);
+      await error.locator("summary").click();
+      assert.equal(await error.locator(".mermaid-source").textContent(), invalid);
+      assert.equal(await error.locator("img, script, svg").count(), 0);
+      assert.equal(await window.evaluate(() => window.mermaidInjected), undefined);
+      const valid = window.locator('.mermaid[data-state="rendered"]');
+      await valid.locator("svg .node").first().waitFor();
+      assert.equal(await valid.locator("svg .node").count(), 2);
+      assert.equal(await window.locator("svg .error-icon, svg .error-text").count(), 0);
+
+      const previousId = await valid.locator("svg").getAttribute("id");
+      await window.getByTestId("settings-button").click();
+      await window.getByTestId("settings-item-light").click();
+      await window.waitForFunction((id) => {
+        const svg = document.querySelector('.mermaid[data-state="rendered"] svg');
+        return svg && svg.id !== id;
+      }, previousId);
+      await error.locator(".mermaid-error-title").waitFor();
+      assert.equal(await error.locator(".mermaid-source").textContent(), invalid);
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("editing Mermaid recovers from errors and updates an existing diagram", async () => {
+    const fence = await launchFence({ files: { "note.md": "```mermaid\ngraph TD\n A[unfinished\n```\n" } });
+    try {
+      const { window } = fence;
+      await window.locator('.mermaid[data-state="error"]').waitFor();
+      await setEditorContent(window, "```mermaid\ngraph TD\n A & B --> Fixed\n```\n");
+      await window.locator('.mermaid[data-state="rendered"] svg .node').filter({ hasText: "Fixed" }).waitFor();
+      assert.equal(await window.locator(".mermaid-error-title").count(), 0);
+      await setEditorContent(window, "```mermaid\ngraph TD\n A --> Updated\n```\n");
+      await window.locator('.mermaid[data-state="rendered"] svg .node').filter({ hasText: "Updated" }).waitFor();
+      assert.equal(await window.locator(".mermaid svg .node").count(), 2);
+      await setEditorContent(window, "```mermaid\ngraph TD\n A[broken again\n```\n");
+      await window.locator('.mermaid[data-state="error"]').waitFor();
+      assert.equal(await window.locator(".mermaid svg").count(), 0);
+      assert.match(await window.locator(".mermaid-source").textContent(), /broken again/);
+    } finally {
+      await fence.close();
+    }
+  });
+
 });

@@ -7,27 +7,84 @@ function getMermaidTheme() {
 
 let renderTimeout = null;
 let observer = null;
+let rendering = false;
+let renderAgain = false;
+let nextDiagramId = 0;
+const rendered = new WeakMap();
+
+function showRenderError(el, source, error) {
+  const title = document.createElement("strong");
+  title.className = "mermaid-error-title";
+  title.textContent = "Couldn’t render diagram";
+
+  const message = document.createElement("pre");
+  message.className = "mermaid-error-message";
+  message.textContent = error?.message || error?.str || String(error);
+
+  const details = document.createElement("details");
+  const summary = document.createElement("summary");
+  summary.textContent = "Show diagram source";
+  const code = document.createElement("pre");
+  code.className = "mermaid-source";
+  code.textContent = source;
+  details.append(summary, code);
+  el.replaceChildren(title, message, details);
+  el.dataset.state = "error";
+}
 
 async function renderMermaidBlocks() {
-  const blocks = document.querySelectorAll("pre.mermaid:not([data-processed])");
-  if (blocks.length === 0) return;
-
-  // Save source text before mermaid replaces innerHTML with SVG
-  blocks.forEach((el) => {
-    if (!el.getAttribute("data-source")) {
-      el.setAttribute("data-source", el.textContent);
-    }
-  });
-
+  // Serialize renders, including theme changes, because Mermaid has global config.
+  if (rendering) {
+    renderAgain = true;
+    return;
+  }
+  rendering = true;
   try {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: getMermaidTheme(),
-      securityLevel: "strict",
-    });
-    await mermaid.run({ nodes: blocks });
-  } catch (e) {
-    console.warn("[mermaid] render error:", e.message);
+    for (const el of document.querySelectorAll(".preview-content .mermaid[data-source]")) {
+      if (!el.isConnected) continue;
+      const source = el.dataset.source ?? "";
+      const theme = getMermaidTheme();
+      const previous = rendered.get(el);
+      if (previous?.source === source && previous?.theme === theme) continue;
+      rendered.set(el, { source, theme });
+      el.dataset.state = "rendering";
+      el.removeAttribute("data-processed");
+      el.textContent = "Rendering diagram…";
+
+      // Source or theme may change while Mermaid is awaiting layout/imports.
+      const isCurrent = () => el.isConnected && el.dataset.source === source && getMermaidTheme() === theme;
+      try {
+        mermaid.initialize({
+          startOnLoad: false,
+          theme,
+          securityLevel: "strict",
+          suppressErrorRendering: true,
+        });
+        const { svg, bindFunctions } = await mermaid.render(`fence-mermaid-${++nextDiagramId}`, source);
+        if (!isCurrent()) {
+          rendered.delete(el);
+          renderAgain = true;
+          continue;
+        }
+        el.innerHTML = svg;
+        bindFunctions?.(el);
+        el.dataset.state = "rendered";
+      } catch (error) {
+        if (!isCurrent()) {
+          rendered.delete(el);
+          renderAgain = true;
+          continue;
+        }
+        showRenderError(el, source, error);
+      }
+      el.dataset.processed = "true";
+    }
+  } finally {
+    rendering = false;
+    if (renderAgain) {
+      renderAgain = false;
+      scheduleRender();
+    }
   }
 }
 
@@ -37,22 +94,14 @@ function scheduleRender() {
 }
 
 function observePreview(target) {
-  // Disconnect any previous observer
   if (observer) observer.disconnect();
-
   observer = new MutationObserver(scheduleRender);
-  observer.observe(target, { childList: true, subtree: true });
+  observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-source"] });
   renderMermaidBlocks();
 }
 
 export function initMermaid() {
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: getMermaidTheme(),
-    securityLevel: "strict",
-  });
-
-  // Retry until .preview-content appears (Elm may not have rendered yet)
+  // Retry until .preview-content appears (Elm may not have rendered yet).
   function tryAttach() {
     const target = document.querySelector(".preview-content");
     if (target) {
@@ -61,15 +110,9 @@ export function initMermaid() {
       requestAnimationFrame(tryAttach);
     }
   }
-
   tryAttach();
 }
 
 export function reRenderMermaid() {
-  document.querySelectorAll("pre.mermaid[data-processed]").forEach((el) => {
-    el.removeAttribute("data-processed");
-    const source = el.getAttribute("data-source");
-    if (source) el.textContent = source;
-  });
   renderMermaidBlocks();
 }

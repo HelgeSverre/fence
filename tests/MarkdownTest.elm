@@ -6,6 +6,7 @@ import Markdown
 import Markdown.Block as Block
 import Markdown.Parser
 import Html
+import Html.Attributes
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
@@ -13,7 +14,7 @@ import Test.Html.Selector as Selector
 
 suite : Test
 suite =
-    describe "Markdown" [ selfCloseSuite, headingIdSuite, chunkSuite, renderSuite, progressSuite, headingLineSuite ]
+    describe "Markdown" [ selfCloseSuite, headingIdSuite, chunkSuite, renderSuite, progressSuite, headingLineSuite, fencedSourceSuite ]
 
 
 headingLineSuite : Test
@@ -150,8 +151,8 @@ renderSuite =
             \_ -> render "```js\nconst x = 1;\n```\n" |> Query.findAll [ Selector.class "md-code-block" ] |> Query.count (Expect.equal 1)
         , test "fenced code with an unknown language falls back to a plain block tagged with the language" <|
             \_ -> render "```brainfuck\n+++\n```\n" |> Query.find [ Selector.tag "code" ] |> Query.has [ Selector.class "language-brainfuck", Selector.text "+++" ]
-        , test "mermaid fences become a pre.mermaid for the renderer" <|
-            \_ -> render "```mermaid\ngraph TD\n```\n" |> Query.find [ Selector.tag "pre" ] |> Query.has [ Selector.class "mermaid", Selector.text "graph TD" ]
+        , test "mermaid fences supply source to the renderer" <|
+            \_ -> render "```mermaid\ngraph TD\n```\n" |> Query.find [ Selector.class "mermaid" ] |> Query.has [ Selector.attribute (Html.Attributes.attribute "data-source" "graph TD\n") ]
         , test "frontmatter is stripped from the rendered body and returned separately" <|
             \_ ->
                 let
@@ -282,4 +283,52 @@ progressSuite =
                 Tuple.second (Markdown.parseCached Markdown.emptyCache doc)
                     |> .outline
                     |> Expect.equal (Markdown.outline (runToEnd fresh))
+        ]
+
+
+fencedSourceSuite : Test
+fencedSourceSuite =
+    let
+        body =
+            "graph LR\nA & B --> C\nD[\"<img src='a&b'>\"]\n"
+
+        check source =
+            Query.fromHtml (Html.div [] (Markdown.parse source).html)
+                |> Query.find [ Selector.class "mermaid" ]
+                |> Query.has [ Selector.attribute (Html.Attributes.attribute "data-source" body) ]
+    in
+    describe "fenced source preservation"
+        [ test "backtick fences preserve operators and literal HTML" <|
+            \_ -> check ("```mermaid\n" ++ body ++ "```\n")
+        , test "tilde fences preserve operators and literal HTML" <|
+            \_ -> check ("~~~mermaid\n" ++ body ++ "~~~\n")
+        , test "unclosed fences preserve source through end of file" <|
+            \_ -> check ("```mermaid\n" ++ body)
+        , test "blockquote fences preserve source" <|
+            \_ -> check ("> ```mermaid\n> " ++ String.replace "\n" "\n> " body ++ "```\n")
+        , test "list fences preserve source" <|
+            \_ -> check ("- ```mermaid\n  " ++ String.replace "\n" "\n  " body ++ "```\n")
+        , test "shorter fences and mismatched markers do not end a code block" <|
+            \_ ->
+                let
+                    literal =
+                        "```\n~~~\n<img src='a&b'>\n"
+                in
+                Query.fromHtml (Html.div [] (Markdown.parse ("````text\n" ++ literal ++ "````\n")).html)
+                    |> Query.find [ Selector.tag "code" ]
+                    |> Query.has [ Selector.text literal ]
+        , test "quoted and deeply indented fence-looking lines stay inside top-level code" <|
+            \_ ->
+                let
+                    literal =
+                        "> ```\n<img src='a&b'>\n    ```\n<img src='c&d'>\n"
+                in
+                Query.fromHtml (Html.div [] (Markdown.parse ("```text\n" ++ literal ++ "```\n")).html)
+                    |> Query.find [ Selector.tag "code" ]
+                    |> Query.has [ Selector.text literal ]
+        , test "HTML outside fences still normalizes multiline attributes" <|
+            \_ ->
+                Query.fromHtml (Html.div [] (Markdown.parse ("```mermaid\n" ++ body ++ "```\n\n<div>\n<img\n src=\"https://example.com/?a=1&b=2\">\n\n# After\n\n</div>\n")).html)
+                    |> Query.find [ Selector.tag "h1" ]
+                    |> Query.has [ Selector.text "After" ]
         ]

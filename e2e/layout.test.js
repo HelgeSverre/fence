@@ -162,14 +162,14 @@ describe("document layouts", () => {
     const fence = await launchFence({ files: { "note.md": "```mermaid\ngraph TD\n A --> B\n```\n" }, state: { layoutMode: "editor" } });
     try {
       const { window } = fence;
-      await window.locator("pre.mermaid svg").waitFor({ state: "attached" });
+      await window.locator(".mermaid svg").waitFor({ state: "attached" });
       await choose(window, "preview");
-      await window.locator("pre.mermaid svg").waitFor();
+      await window.locator(".mermaid svg").waitFor();
       await window.getByTestId("settings-button").click();
       await window.getByTestId("settings-item-light").click();
       await window.keyboard.press("Escape");
-      await window.locator("pre.mermaid svg").waitFor();
-      assert.ok((await window.locator("pre.mermaid svg").boundingBox()).width > 0);
+      await window.locator(".mermaid svg").waitFor();
+      assert.ok((await window.locator(".mermaid svg").boundingBox()).width > 0);
     } finally { await fence.close(); }
   });
 

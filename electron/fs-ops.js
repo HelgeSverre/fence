@@ -318,6 +318,9 @@ async function watchDir(dirPath, callback) {
   const watcher = chokidar.watch(canonical, {
     depth: 0,
     ignoreInitial: true,
+    // Coalesce writes until stable instead of dropping change events in the
+    // default 50 ms throttle window (e.g. an external edit just after a save).
+    awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 20 },
     ignored: (candidate) =>
       candidate !== canonical && path.basename(candidate).startsWith("."),
   });

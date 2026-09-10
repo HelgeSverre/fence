@@ -515,8 +515,15 @@ registerIpc("fence:read-dir", async (data) => {
 });
 
 registerIpc("fence:read-file", async (data) => {
+  const filePath = requireString(data, "path", 32768);
+  if (Number.isSafeInteger(data.reloadId)) {
+    // Background refreshes never open recovery dialogs or navigate the editor.
+    const file = await fsOps.readFile(filePath);
+    sendToRenderer({ tag: "fileReloaded", ...file, dirty: false, reloadId: data.reloadId });
+    return;
+  }
   const line = Number.isInteger(data.line) ? data.line : null;
-  await sendFileContent(requireString(data, "path", 32768), true, line);
+  await sendFileContent(filePath, true, line);
 });
 
 registerIpc("fence:write-file", saveDocument);

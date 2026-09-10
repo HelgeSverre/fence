@@ -64,7 +64,7 @@ keyDown key meta =
 suite : Test
 suite =
     describe "Main"
-        [ layoutModeSuite, initSuite, bindingSuite, dragSuite, layoutSuite, previewSuite, fileSuite, progressiveSuite ]
+        [ layoutModeSuite, initSuite, bindingSuite, dragSuite, layoutSuite, previewSuite, fileSuite, progressiveSuite, reloadSuite ]
 
 
 initSuite : Test
@@ -406,4 +406,112 @@ layoutModeSuite =
                         fresh |> step (SetLayoutMode PreviewOnly) |> step (OpenFind False)
                 in
                 Expect.equal ( PreviewOnly, Split ) ( preview.layoutMode, (step (OpenFind True) preview).layoutMode )
+        ]
+
+
+reloadSuite : Test
+reloadSuite =
+    let
+        path =
+            "/notes/a.md"
+
+        source =
+            String.repeat 500 "original line\n"
+
+        opened =
+            openFile path source fresh
+                |> step (EditorMsg (Editor.ScrollChanged 7000 0))
+
+        request =
+            step (fromElectron "fsEvent" [ ( "event", E.string "change" ), ( "path", E.string path ) ])
+
+        reply id content revision =
+            step
+                (fromElectron "fileReloaded"
+                    [ ( "path", E.string path )
+                    , ( "content", E.string content )
+                    , ( "revision", E.string revision )
+                    , ( "dirty", E.bool False )
+                    , ( "reloadId", E.int id )
+                    ]
+                )
+    in
+    describe "background file reloads"
+        [ test "a genuine external change loads the new content without resetting scroll" <|
+            \_ ->
+                opened |> request |> reply 1 (source ++ "new line\n") "rev-2"
+                    |> (\m -> Expect.equal ( source ++ "new line\n", 7000, Just "rev-2" ) ( m.editor.content, m.editor.scrollTop, m.editor.revision ))
+        , test "an unchanged revision preserves the complete editor including undo" <|
+            \_ ->
+                let
+                    saved =
+                        opened |> edit (source ++ "edit") |> step (keyDown "s" True)
+                            |> step (fromElectron "fileSaved" [ ( "path", E.string path ), ( "revision", E.string "rev-2" ) ])
+                            |> step (EditorMsg (Editor.ScrollChanged 7000 0))
+                in
+                saved |> request |> reply 1 saved.editor.content "rev-2" |> .editor |> Expect.equal saved.editor
+        , test "a reload response cannot overwrite an edit made while reading" <|
+            \_ ->
+                opened |> request |> edit "unsaved" |> reply 1 "external" "rev-2"
+                    |> .editor |> .content |> Expect.equal "unsaved"
+        , test "a response remains stale even if a later edit has already been saved" <|
+            \_ ->
+                opened |> request |> edit "new saved text" |> step (keyDown "s" True)
+                    |> step (fromElectron "fileSaved" [ ( "path", E.string path ), ( "revision", E.string "rev-3" ) ])
+                    |> reply 1 "old disk text" "rev-2"
+                    |> .editor |> .content |> Expect.equal "new saved text"
+        , test "a response from an earlier visit cannot replace the reopened file" <|
+            \_ ->
+                opened |> request |> openFile "/notes/b.md" "other" |> openFile path "reopened"
+                    |> reply 1 "old visit" "rev-2" |> .editor |> .content |> Expect.equal "reopened"
+        , test "a response cannot switch back to a file we left" <|
+            \_ ->
+                opened |> request |> openFile "/notes/b.md" "other" |> reply 1 "old visit" "rev-2"
+                    |> .editor |> .filePath |> Expect.equal (Just "/notes/b.md")
+        , test "only the newest outstanding reload response can apply" <|
+            \_ ->
+                opened |> request |> request |> reply 1 "stale" "rev-2" |> reply 2 "latest" "rev-3"
+                    |> .editor |> .content |> Expect.equal "latest"
+        , test "a late older response cannot undo a newer reload" <|
+            \_ ->
+                opened |> request |> request |> reply 2 "latest" "rev-3" |> reply 1 "stale" "rev-2"
+                    |> .editor |> .content |> Expect.equal "latest"
+        , test "external reloads preserve the caret and selection when they still fit" <|
+            \_ ->
+                let
+                    editor =
+                        opened.editor
+
+                    positioned =
+                        { opened | editor = { editor | cursor = { line = 300, col = 8 }, anchor = Just { line = 299, col = 4 } } }
+
+                    reloaded =
+                        positioned |> request |> reply 1 (source ++ "new line\n") "rev-2"
+                in
+                Expect.equal
+                    ( positioned.editor.cursor, positioned.editor.anchor )
+                    ( reloaded.editor.cursor, reloaded.editor.anchor )
+        , test "external reloads clamp the caret and selection to shorter content" <|
+            \_ ->
+                let
+                    editor =
+                        opened.editor
+
+                    positioned =
+                        { opened | editor = { editor | cursor = { line = 300, col = 8 }, anchor = Just { line = 299, col = 4 } } }
+
+                    reloaded =
+                        positioned |> request |> reply 1 "short" "rev-2"
+                in
+                Expect.equal
+                    ( { line = 0, col = 5 }, Nothing )
+                    ( reloaded.editor.cursor, reloaded.editor.anchor )
+        , test "changed content is not discarded even if a reload incorrectly repeats the revision" <|
+            \_ ->
+                opened |> request |> reply 1 "short" "rev-1"
+                    |> .editor |> .content |> String.length |> Expect.equal 5
+        , test "shrinking files clamp the virtual viewport" <|
+            \_ ->
+                opened |> request |> reply 1 "short" "rev-2"
+                    |> (\m -> Expect.equal ( "short", 0 ) ( m.editor.content, m.editor.scrollTop ))
         ]

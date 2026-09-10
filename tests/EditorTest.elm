@@ -15,7 +15,7 @@ import Types exposing (DirtyState(..))
 suite : Test
 suite =
     describe "Editor"
-        [ stateSuite, overlaySuite, editingSuite, selectionSuite, referenceSuite, continuationSuite, lineOpsSuite, markdownSuite ]
+        [ stateSuite, overlaySuite, editingSuite, selectionSuite, referenceSuite, continuationSuite, lineOpsSuite, markdownSuite, reloadSuite ]
 
 
 markdownSuite : Test
@@ -960,3 +960,46 @@ referenceSuite =
                 , codePointIndex editor editor.cursor
                 , Editor.selection editor |> Maybe.map (\( s, _ ) -> codePointIndex editor s)
                 )
+
+
+reloadSuite : Test
+reloadSuite =
+    let
+        original =
+            Editor.setContent "/notes/a.md" (String.repeat 500 "line\n" ++ "x") "r1" False Editor.init
+
+        positioned cursor anchor =
+            { original | cursor = cursor, anchor = anchor }
+
+        reload content =
+            Editor.reloadContent "/notes/a.md" content "r2"
+    in
+    describe "reload truncation"
+        [ test "a deleted caret line moves to EOF rather than keeping its old column" <|
+            \_ ->
+                positioned { line = 500, col = 1 } Nothing
+                    |> reload (String.repeat 249 "line\n" ++ "a longer final line")
+                    |> .cursor |> Expect.equal { line = 249, col = 19 }
+        , test "a surviving caret line clamps only its column" <|
+            \_ ->
+                positioned { line = 0, col = 4 } Nothing
+                    |> reload "hi\nlonger final line"
+                    |> .cursor |> Expect.equal { line = 0, col = 2 }
+        , test "truncating to an empty file clamps caret, selection and scroll" <|
+            \_ ->
+                let
+                    old =
+                        positioned { line = 500, col = 1 } (Just { line = 450, col = 2 })
+
+                    result =
+                        reload "" { old | scrollTop = 10000, scrollLeft = 100 }
+                in
+                Expect.equal
+                    ( { line = 0, col = 0 }, Nothing, ( 0, 0 ) )
+                    ( result.cursor, result.anchor, ( result.scrollTop, result.scrollLeft ) )
+        , test "a selection spanning the deletion keeps its surviving anchor" <|
+            \_ ->
+                positioned { line = 500, col = 1 } (Just { line = 0, col = 2 })
+                    |> reload "first\nlast line"
+                    |> (\e -> Expect.equal ( { line = 1, col = 9 }, Just { line = 0, col = 2 } ) ( e.cursor, e.anchor ))
+        ]

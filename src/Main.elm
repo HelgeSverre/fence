@@ -129,6 +129,8 @@ type alias Model =
     , debounceGeneration : Int
     , recoveryGeneration : Int
     , savingContent : Maybe String
+    , reloadGeneration : Int
+    , pendingReload : Maybe { id : Int, path : FilePath, editGeneration : Int }
     , theme : String
     , font : String
     , editorFontSize : Float
@@ -390,6 +392,8 @@ init flagsValue =
       , debounceGeneration = 0
       , recoveryGeneration = 0
       , savingContent = Nothing
+      , reloadGeneration = 0
+      , pendingReload = Nothing
       , theme = flag "theme" D.string "github-dark"
       , font = flag "font" D.string ""
       , editorFontSize = flag "editorFontSize" D.float defaultEditorFontSize
@@ -928,6 +932,7 @@ update msg model =
                     | editor = newEditor
                     , debounceGeneration = gen
                     , recoveryGeneration = recoveryGen
+                    , pendingReload = Nothing
                   }
                 , Cmd.batch
                     [ Task.perform (\_ -> DebouncedParse gen) (Process.sleep (previewDelay newEditor.content))
@@ -1292,7 +1297,7 @@ saveFile : Model -> ( Model, Cmd Msg )
 saveFile model =
     case ( model.editor.filePath, model.savingContent ) of
         ( Just path, Nothing ) ->
-            ( { model | savingContent = Just model.editor.content }
+            ( { model | savingContent = Just model.editor.content, pendingReload = Nothing }
             , command "writeFile"
                 [ ( "path", E.string path )
                 , ( "content", E.string model.editor.content )
@@ -1356,6 +1361,7 @@ handlePortMessage tag value model =
                     ( { parsedModel
                         | closeAfterSave = False
                         , savingContent = Nothing
+                        , pendingReload = Nothing
                         , history =
                             if model.navigating then
                                 model.history
@@ -1375,18 +1381,59 @@ handlePortMessage tag value model =
                         , setDirtyCmd file.dirty
                         , parseCmd
 
-                        -- opened at a line (a search hit): scroll to the caret,
-                        -- which setContent left at the top of the document
+                        -- Match the browser viewport to the new virtual rows,
+                        -- including ordinary file opens while scrolled down.
                         , case ( file.line, Editor.caretFollow newEditor ) of
                             ( Just _, Just target ) ->
                                 ignoreResult (Browser.Dom.setViewportOf "veditor" target.left target.top)
 
                             _ ->
-                                Cmd.none
+                                ignoreResult (Browser.Dom.setViewportOf "veditor" newEditor.scrollLeft newEditor.scrollTop)
                         ]
                     )
 
                 Err _ ->
+                    ( model, Cmd.none )
+
+        "fileReloaded" ->
+            case ( model.pendingReload, D.decodeValue (D.map2 Tuple.pair (D.field "reloadId" D.int) fileContentDecoder) value ) of
+                ( Just pending, Ok ( reloadId, file ) ) ->
+                    if reloadId /= pending.id then
+                        ( model, Cmd.none )
+
+                    else
+                        let
+                            settled =
+                                { model | pendingReload = Nothing }
+                        in
+                        if file.path /= pending.path || model.editor.filePath /= Just file.path || pending.editGeneration /= model.debounceGeneration || model.editor.dirtyState /= Clean || model.savingContent /= Nothing then
+                            ( settled, Cmd.none )
+
+                        else if model.editor.revision == Just file.revision && model.editor.content == file.content then
+                            -- The watcher can report our own save after its acknowledgement.
+                            -- Keep scroll, selection, undo and pending preview work intact.
+                            ( settled, Cmd.none )
+
+                        else
+                            let
+                                newEditor =
+                                    Editor.reloadContent file.path file.content file.revision model.editor
+
+                                ( parsed, parseCmd ) =
+                                    startParse model.parseCache
+                                        { settled
+                                            | editor = newEditor
+                                            , debounceGeneration = model.debounceGeneration + 1
+                                        }
+                            in
+                            ( parsed
+                            , Cmd.batch
+                                [ parseCmd
+                                , ignoreResult (Browser.Dom.setViewportOf "veditor" newEditor.scrollLeft newEditor.scrollTop)
+                                ]
+                            )
+
+                _ ->
                     ( model, Cmd.none )
 
         "fileSaved" ->
@@ -1446,10 +1493,28 @@ handlePortMessage tag value model =
                                 == Just path
                                 && model.editor.dirtyState
                                 == Clean
+                                && model.savingContent == Nothing
+
+                        reloadId =
+                            model.reloadGeneration + 1
                     in
-                    ( { model | fileTree = newTree }
+                    ( { model
+                        | fileTree = newTree
+                        , reloadGeneration =
+                            if shouldReload then
+                                reloadId
+
+                            else
+                                model.reloadGeneration
+                        , pendingReload =
+                            if shouldReload then
+                                Just { id = reloadId, path = path, editGeneration = model.debounceGeneration }
+
+                            else
+                                model.pendingReload
+                      }
                     , if shouldReload then
-                        command "readFile" [ ( "path", E.string path ) ]
+                        command "readFile" [ ( "path", E.string path ), ( "reloadId", E.int reloadId ) ]
 
                       else
                         Cmd.none

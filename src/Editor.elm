@@ -16,6 +16,7 @@ module Editor exposing
     , selection
     , lineTokens
     , markSaved
+    , reloadContent
     , setContent
     , update
     , view
@@ -184,6 +185,69 @@ setContent path content revision dirty model =
         , redo = []
         , coalesce = NoCoalesce
     }
+        |> refreshTokens
+
+
+{-| Apply an actual external change while keeping the user's place. Unlike a
+save echo, changed disk contents invalidate the previous undo history.
+-}
+reloadContent : FilePath -> String -> String -> Model -> Model
+reloadContent path content revision model =
+    let
+        loaded =
+            setContent path content revision False model
+
+        clampPosition position =
+            if position.line >= Array.length loaded.lines then
+                TextBuffer.docEnd loaded.lines
+
+            else
+                TextBuffer.clampCursor loaded.lines position
+
+        cursor =
+            clampPosition model.cursor
+
+        anchor =
+            Maybe.map clampPosition model.anchor
+
+        positioned =
+            { loaded
+                | cursor = cursor
+                , anchor =
+                    if anchor == Just cursor then
+                        Nothing
+
+                    else
+                        anchor
+                , affinity =
+                    if cursor == model.cursor then
+                        model.affinity
+
+                    else
+                        EditorLayout.Downstream
+                , scrollTop =
+                    clamp 0 (Basics.max 0 (toFloat (EditorLayout.rowCount loaded.layout) * model.metrics.lineHeight - model.metrics.viewportHeight)) model.scrollTop
+                , scrollLeft =
+                    clamp 0 (Basics.max 0 (toFloat (loaded.maxLineLength + 1) * model.metrics.charWidth - model.metrics.viewportWidth)) model.scrollLeft
+            }
+
+        oldCaret =
+            caretPixels model
+
+        -- Browser scroll offsets round fractional font metrics to CSS pixels.
+        wasVisible =
+            oldCaret.y >= model.scrollTop - 1
+                && oldCaret.y + model.metrics.lineHeight <= model.scrollTop + model.metrics.viewportHeight + 1
+                && oldCaret.x >= model.scrollLeft - 1
+                && oldCaret.x + model.metrics.charWidth <= model.scrollLeft + model.metrics.viewportWidth + 1
+    in
+    (case ( cursor /= model.cursor && wasVisible, caretFollow positioned ) of
+        ( True, Just target ) ->
+            { positioned | scrollTop = target.top, scrollLeft = target.left }
+
+        _ ->
+            positioned
+    )
         |> refreshTokens
 
 

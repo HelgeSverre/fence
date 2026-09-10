@@ -6,6 +6,20 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-09-10
+
+### Fixed
+
+- Local images in Markdown and HTML now resolve relative to the open document,
+  fixing the broken screenshot when viewing Fence's own README. Image loading
+  follows file switches and source edits, including encoded filenames.
+- Exports embed local images so they remain visible outside Fence.
+
+### Changed
+
+- Refreshed the README screenshot with the native window frame, Sema's embedding
+  guide, and an active search for “interpreter”.
+
 ## [0.4.0] — 2026-09-10
 
 ### Added
@@ -223,7 +237,8 @@ First release. A split-view Markdown editor with a file browser, live
 preview, YAML frontmatter, syntax highlighting, several themes, and resizable
 panes.
 
-[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/HelgeSverre/fence/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/HelgeSverre/fence/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/HelgeSverre/fence/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/HelgeSverre/fence/compare/v0.1.6...v0.2.0

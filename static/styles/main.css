@@ -413,3 +413,6 @@ body {
   flex: 1;
   min-width: 0;
 }
+
+/* Navigation applies a document snapshot atomically; native dialogs stay interactive. */
+.app-shell.navigation-busy { cursor: progress; pointer-events: none; }

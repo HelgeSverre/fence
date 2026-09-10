@@ -116,3 +116,13 @@ export function initMermaid() {
 export function reRenderMermaid() {
   renderMermaidBlocks();
 }
+
+// Export joins any render already in flight, then handles newly parsed blocks.
+export async function finishMermaidRendering() {
+  do {
+    while (rendering) await new Promise(resolve => requestAnimationFrame(resolve));
+    clearTimeout(renderTimeout);
+    await renderMermaidBlocks();
+  } while (rendering || renderAgain || [...document.querySelectorAll(".preview-content .mermaid[data-source]")].some(el =>
+    !["rendered", "error"].includes(el.dataset.state) || rendered.get(el)?.source !== el.dataset.source || rendered.get(el)?.theme !== getMermaidTheme()));
+}

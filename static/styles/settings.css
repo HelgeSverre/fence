@@ -36,7 +36,11 @@
   /* wide enough that the longest label ("Toggle right sidebar") keeps clear of
      its control; in em so it grows with the UI font size the labels use */
   font-size: var(--font-size-ui);
-  min-width: 23em;
+  min-width: min(23em, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - var(--titlebar-height) - 12px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   box-shadow: 0 4px 12px oklch(0 0 0 / 0.3);
 }
 

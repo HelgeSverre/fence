@@ -27,10 +27,9 @@ async function closeWatchers() {
 }
 
 async function setWorkspace(dirPath) {
+  const next = dirPath ? await fs.promises.realpath(path.resolve(dirPath)) : null;
   await closeWatchers();
-  currentWorkspace = dirPath
-    ? await fs.promises.realpath(path.resolve(dirPath))
-    : null;
+  currentWorkspace = next;
 }
 
 async function canonicalPath(target) {
@@ -268,8 +267,8 @@ async function readFile(filePath) {
   return { path: canonical, content, revision: revisionForContent(content) };
 }
 
-async function writeFile(filePath, content, expectedRevision = null) {
-  const canonical = await pathWithinWorkspace(filePath);
+async function writeFile(filePath, content, expectedRevision = null, selectedBySaveDialog = false) {
+  const canonical = selectedBySaveDialog ? await canonicalPath(filePath) : await pathWithinWorkspace(filePath);
   let mode = 0o666;
 
   try {
@@ -331,7 +330,8 @@ async function watchDir(dirPath, callback) {
 }
 
 async function unwatchDir(dirPath) {
-  const canonical = await pathWithinWorkspace(dirPath);
+  const resolved = path.resolve(dirPath);
+  const canonical = watchers.has(resolved) ? resolved : await pathWithinWorkspace(dirPath);
   const watcher = watchers.get(canonical);
   if (watcher) {
     await watcher.close();

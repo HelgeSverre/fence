@@ -128,6 +128,8 @@ type alias Model =
     , frontmatter : Maybe Yaml.Value
     , debounceGeneration : Int
     , recoveryGeneration : Int
+    , navigationBusy : Bool
+    , pendingExport : Maybe String
     , savingContent : Maybe String
     , reloadGeneration : Int
     , pendingReload : Maybe { id : Int, path : FilePath, editGeneration : Int }
@@ -391,6 +393,8 @@ init flagsValue =
       , frontmatter = Nothing
       , debounceGeneration = 0
       , recoveryGeneration = 0
+      , navigationBusy = False
+      , pendingExport = Nothing
       , savingContent = Nothing
       , reloadGeneration = 0
       , pendingReload = Nothing
@@ -898,82 +902,15 @@ update msg model =
             )
 
         EditorMsg subMsg ->
-            let
-                newEditor =
-                    Editor.update subMsg model.editor
-
-                -- an auto-scrolling drag sets the offsets itself; the caret is
-                -- meant to be at the edge, so it must not be followed as well
-                scrollDuringDrag =
-                    ignoreResult (Browser.Dom.setViewportOf "veditor" newEditor.scrollLeft newEditor.scrollTop)
-
-                -- Keep the caret on screen after it moves, except during a
-                -- drag: there the caret sits at the edge on purpose and the
-                -- auto-scroll owns the offsets. Chromium also emits a
-                -- mousemove after every scroll, so following the caret here
-                -- would fight the drag frame by frame.
-                followCaret =
-                    case ( (newEditor.cursor /= model.editor.cursor || newEditor.affinity /= model.editor.affinity || newEditor.content /= model.editor.content) && not (Editor.dragging newEditor), Editor.caretFollow newEditor ) of
-                        ( True, Just target ) ->
-                            ignoreResult (Browser.Dom.setViewportOf "veditor" target.left target.top)
-
-                        _ ->
-                            Cmd.none
-            in
-            if newEditor.content /= model.editor.content then
-                let
-                    gen =
-                        model.debounceGeneration + 1
-
-                    recoveryGen =
-                        model.recoveryGeneration + 1
-                in
-                ( { model
-                    | editor = newEditor
-                    , debounceGeneration = gen
-                    , recoveryGeneration = recoveryGen
-                    , pendingReload = Nothing
-                  }
-                , Cmd.batch
-                    [ Task.perform (\_ -> DebouncedParse gen) (Process.sleep (previewDelay newEditor.content))
-                    , Task.perform (\_ -> RecoveryDraftDue recoveryGen) (Process.sleep 1000)
-                    , setTitleCmd newEditor
-                    , setDirtyCmd True
-                    , followCaret
-                    ]
-                )
-
-            else if subMsg == Editor.AutoScrolled then
-                -- a frame that scrolled nothing (the drag ended, or the pointer
-                -- came back inside) must not push a stale offset at the DOM
-                ( { model | editor = newEditor }
-                , if ( newEditor.scrollTop, newEditor.scrollLeft ) /= ( model.editor.scrollTop, model.editor.scrollLeft ) then
-                    scrollDuringDrag
-
-                  else
-                    Cmd.none
-                )
+            if model.navigationBusy && (case subMsg of
+                Editor.MetricsChanged _ -> False
+                Editor.ScrollChanged _ _ -> False
+                _ -> True
+            ) then
+                ( model, Cmd.none )
 
             else
-                ( { model | editor = newEditor }
-                , Cmd.batch
-                    [ followCaret
-                    , syncPreview newEditor model
-                    , case subMsg of
-                        Editor.SetSoftWrap _ ->
-                            scrollDuringDrag
-
-                        Editor.MetricsChanged _ ->
-                            if ( newEditor.scrollTop, newEditor.scrollLeft ) /= ( model.editor.scrollTop, model.editor.scrollLeft ) then
-                                scrollDuringDrag
-
-                            else
-                                Cmd.none
-
-                        _ ->
-                            Cmd.none
-                    ]
-                )
+                updateEditor subMsg model
 
         DebouncedParse gen ->
             if gen == model.debounceGeneration then
@@ -1050,8 +987,8 @@ update msg model =
                         ( newModel, saveSplitsCmd newModel )
 
                 Nothing ->
-                    if key == "s" && (metaKey || ctrlKey) then
-                        saveFile model
+                    if String.toLower key == "s" && (metaKey || ctrlKey) then
+                        saveFileAs shiftKey model
 
                     else if key == "Escape" && model.settingsOpen then
                         ( { model | settingsOpen = False }, Cmd.none )
@@ -1167,6 +1104,89 @@ searchDelay =
 {-| Show the active match: select it in the editor and scroll it into view.
 Focus stays in the find field, so Enter keeps stepping through matches.
 -}
+updateEditor : Editor.Msg -> Model -> ( Model, Cmd Msg )
+updateEditor subMsg model =
+    let
+        newEditor =
+            Editor.update subMsg model.editor
+
+        -- an auto-scrolling drag sets the offsets itself; the caret is
+        -- meant to be at the edge, so it must not be followed as well
+        scrollDuringDrag =
+            ignoreResult (Browser.Dom.setViewportOf "veditor" newEditor.scrollLeft newEditor.scrollTop)
+
+        -- Keep the caret on screen after it moves, except during a
+        -- drag: there the caret sits at the edge on purpose and the
+        -- auto-scroll owns the offsets. Chromium also emits a
+        -- mousemove after every scroll, so following the caret here
+        -- would fight the drag frame by frame.
+        followCaret =
+            case ( (newEditor.cursor /= model.editor.cursor || newEditor.affinity /= model.editor.affinity || newEditor.content /= model.editor.content) && not (Editor.dragging newEditor), Editor.caretFollow newEditor ) of
+                ( True, Just target ) ->
+                    ignoreResult (Browser.Dom.setViewportOf "veditor" target.left target.top)
+
+                _ ->
+                    Cmd.none
+    in
+    if newEditor.content /= model.editor.content then
+        let
+            gen =
+                model.debounceGeneration + 1
+
+            recoveryGen =
+                model.recoveryGeneration + 1
+        in
+        ( { model
+            | editor = newEditor
+            , debounceGeneration = gen
+            , recoveryGeneration = recoveryGen
+            , pendingReload = Nothing
+          }
+        , Cmd.batch
+            [ Task.perform (\_ -> DebouncedParse gen) (Process.sleep (previewDelay newEditor.content))
+            , Task.perform (\_ -> RecoveryDraftDue recoveryGen) (Process.sleep 1000)
+            , setTitleCmd newEditor
+            , sessionCmd newEditor
+            , setDirtyCmd True
+            , followCaret
+            ]
+        )
+
+    else if subMsg == Editor.AutoScrolled then
+        -- a frame that scrolled nothing (the drag ended, or the pointer
+        -- came back inside) must not push a stale offset at the DOM
+        ( { model | editor = newEditor }
+        , if ( newEditor.scrollTop, newEditor.scrollLeft ) /= ( model.editor.scrollTop, model.editor.scrollLeft ) then
+            scrollDuringDrag
+
+          else
+            Cmd.none
+        )
+
+    else
+        ( { model | editor = newEditor }
+        , Cmd.batch
+            [ followCaret
+            , sessionCmd newEditor
+            , syncPreview newEditor model
+            , case subMsg of
+                Editor.SetSoftWrap _ ->
+                    scrollDuringDrag
+
+                Editor.MetricsChanged _ ->
+                    if ( newEditor.scrollTop, newEditor.scrollLeft ) /= ( model.editor.scrollTop, model.editor.scrollLeft ) then
+                        scrollDuringDrag
+
+                    else
+                        Cmd.none
+
+                _ ->
+                    Cmd.none
+            ]
+        )
+
+
+
 goToActive : Model -> ( Model, Cmd Msg )
 goToActive model =
     case Find.activeMatch model.find of
@@ -1257,10 +1277,27 @@ continueParse budget progress model =
                 , framePainted = False
             }
     in
-    ( parsed
-      -- the rendered document just changed, so every heading may have moved
+    ( if complete then
+        { parsed | pendingExport = Nothing }
+
+      else
+        parsed
     , if complete then
-        measureSyncPoints parsed
+        Cmd.batch
+            [ measureSyncPoints parsed
+            , case parsed.pendingExport of
+                Just format ->
+                    command "exportDocument"
+                        [ ( "format", E.string format )
+                        , ( "path", E.string (Maybe.withDefault "" parsed.editor.filePath) )
+                        , ( "generation", E.int parsed.debounceGeneration )
+                        , ( "title", E.string (Maybe.map baseName parsed.editor.filePath |> Maybe.withDefault "document") )
+                        , ( "base", E.string (Maybe.map (\p -> "file://" ++ dirName p ++ "/") parsed.editor.filePath |> Maybe.withDefault "") )
+                        ]
+
+                Nothing ->
+                    Cmd.none
+            ]
 
       else
         Cmd.none
@@ -1294,12 +1331,18 @@ previewDelay content =
 
 
 saveFile : Model -> ( Model, Cmd Msg )
-saveFile model =
+saveFile =
+    saveFileAs False
+
+
+saveFileAs : Bool -> Model -> ( Model, Cmd Msg )
+saveFileAs saveAs model =
     case ( model.editor.filePath, model.savingContent ) of
-        ( Just path, Nothing ) ->
+        ( path, Nothing ) ->
             ( { model | savingContent = Just model.editor.content, pendingReload = Nothing }
             , command "writeFile"
-                [ ( "path", E.string path )
+                [ ( "path", path |> Maybe.map E.string |> Maybe.withDefault E.null )
+                , ( "saveAs", E.bool saveAs )
                 , ( "content", E.string model.editor.content )
                 , ( "expectedRevision", model.editor.revision |> Maybe.map E.string |> Maybe.withDefault E.null )
                 ]
@@ -1332,6 +1375,87 @@ handlePortMessage tag value model =
 
                 Err _ ->
                     ( model, Cmd.none )
+
+        "navigationCancelled" ->
+            ( { model
+                | navigating = False
+                , historyPos = List.indexedMap Tuple.pair model.history |> List.filter (\( _, path ) -> Just path == model.editor.filePath) |> List.head |> Maybe.map Tuple.first |> Maybe.withDefault model.historyPos
+                , fileTree = Maybe.map (\path -> FileTree.select path model.fileTree) model.editor.filePath |> Maybe.withDefault model.fileTree
+              }
+            , Cmd.none
+            )
+
+        "navigationBusy" ->
+            ( { model | navigationBusy = D.decodeValue (D.field "busy" D.bool) value |> Result.withDefault False }, Cmd.none )
+
+        "requestDocumentState" ->
+            ( model
+            , command "documentState"
+                (( "id", D.decodeValue (D.field "id" D.int) value |> Result.withDefault 0 |> E.int )
+                    :: ( "content", E.string model.editor.content )
+                    :: ( "dirty", E.bool (model.editor.dirtyState == Dirty) )
+                    :: ( "revision", model.editor.revision |> Maybe.map E.string |> Maybe.withDefault E.null )
+                    :: sessionFields model.editor
+                )
+            )
+
+        "documentClosed" ->
+            let
+                empty =
+                    Editor.setContent "" "" "" False model.editor
+
+                editor =
+                    { empty | filePath = Nothing, revision = Nothing }
+            in
+            startParse Markdown.emptyCache
+                { model | editor = editor, savingContent = Nothing, pendingReload = Nothing, history = [], historyPos = 0, pendingExport = Nothing, debounceGeneration = model.debounceGeneration + 1 }
+                |> (\( updated, cmd ) -> ( updated, Cmd.batch [ cmd, setDirtyCmd False, setTitleCmd editor, sessionCmd editor ] ))
+
+        "restoreSession" ->
+            case D.decodeValue (D.map4 (\line col top left -> ( { line = line, col = col }, top, left )) (D.field "line" D.int) (D.field "col" D.int) (D.field "top" D.float) (D.field "left" D.float)) value of
+                Ok ( cursor, top, left ) ->
+                    let
+                        editor =
+                            Editor.restorePosition cursor top left model.editor
+                    in
+                    ( { model | editor = editor }
+                    , Cmd.batch [ sessionCmd editor, ignoreResult (Browser.Dom.setViewportOf "veditor" editor.scrollLeft editor.scrollTop) ]
+                    )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        "fileSavedAs" ->
+            case D.decodeValue fileContentDecoder value of
+                Ok file ->
+                    if D.decodeValue (D.field "originalPath" (D.nullable D.string)) value /= Ok model.editor.filePath then
+                        ( model, Cmd.none )
+
+                    else
+                        let
+                            old =
+                                model.editor
+
+                            editor =
+                                { old | filePath = Just file.path }
+                        in
+                        handlePortMessage "fileSaved" value
+                            { model
+                                | editor = editor
+                                , savingContent = Just file.content
+                                , fileTree = FileTree.select file.path model.fileTree
+                                , history = file.path :: List.filter ((/=) file.path) model.history |> List.take historyLimit
+                                , historyPos = 0
+                            }
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        "saveRequested" ->
+            saveFile model
+
+        "saveAsRequested" ->
+            saveFileAs True model
 
         "fileContent" ->
             case D.decodeValue fileContentDecoder value of
@@ -1378,6 +1502,7 @@ handlePortMessage tag value model =
                       }
                     , Cmd.batch
                         [ setTitleCmd newEditor
+                        , sessionCmd newEditor
                         , setDirtyCmd file.dirty
                         , parseCmd
 
@@ -1441,7 +1566,8 @@ handlePortMessage tag value model =
                 Ok ( path, revision ) ->
                     let
                         savedContent =
-                            Maybe.withDefault model.editor.content model.savingContent
+                            D.decodeValue (D.field "content" D.string) value
+                                |> Result.withDefault (Maybe.withDefault model.editor.content model.savingContent)
 
                         newEditor =
                             if model.editor.filePath == Just path then
@@ -1466,6 +1592,7 @@ handlePortMessage tag value model =
                         ( { updatedModel | closeAfterSave = False }
                         , Cmd.batch
                             [ setTitleCmd newEditor
+                            , sessionCmd newEditor
                             , setDirtyCmd (newEditor.dirtyState == Dirty)
                             , if model.closeAfterSave then
                                 closeWindowCmd
@@ -1524,19 +1651,11 @@ handlePortMessage tag value model =
                     ( model, Cmd.none )
 
         "exportRequested" ->
-            case ( D.decodeValue (D.field "format" D.string) value, model.editor.filePath ) of
-                ( Ok format, path ) ->
-                    ( model
-                    , command "exportDocument"
-                        [ ( "format", E.string format )
-                        , ( "title", E.string (Maybe.map baseName path |> Maybe.withDefault "document") )
+            case D.decodeValue (D.field "format" D.string) value of
+                Ok format ->
+                    startParse model.parseCache { model | pendingExport = Just format }
 
-                        -- so relative image sources resolve in the export
-                        , ( "base", E.string (Maybe.map (\p -> "file://" ++ dirName p ++ "/") path |> Maybe.withDefault "") )
-                        ]
-                    )
-
-                _ ->
+                Err _ ->
                     ( model, Cmd.none )
 
         "attachmentSaved" ->
@@ -1588,29 +1707,18 @@ handlePortMessage tag value model =
                         | fileTree = FileTree.handleRenamed from to model.fileTree
                         , editor = Editor.followRename from to model.editor
                       }
-                    , if model.editor.filePath == Just from then
-                        setTitleCmd (Editor.followRename from to model.editor)
-
-                      else
-                        Cmd.none
+                    , Cmd.batch [ setTitleCmd (Editor.followRename from to model.editor), sessionCmd (Editor.followRename from to model.editor) ]
                     )
 
                 Err _ ->
                     ( model, Cmd.none )
 
         "saveAndClose" ->
-            -- Close happens when "fileSaved" comes back, so a slow write
-            -- can't lose data. An "error" cancels the pending close.
-            case model.editor.filePath of
-                Just _ ->
-                    let
-                        ( newModel, saveCmd ) =
-                            saveFile model
-                    in
-                    ( { newModel | closeAfterSave = True }, saveCmd )
-
-                Nothing ->
-                    ( model, closeWindowCmd )
+            let
+                ( newModel, saveCmd ) =
+                    saveFile model
+            in
+            ( { newModel | closeAfterSave = True }, saveCmd )
 
         "saveCancelled" ->
             ( { model | closeAfterSave = False, savingContent = Nothing }
@@ -1685,6 +1793,21 @@ setDirtyCmd dirty =
 closeWindowCmd : Cmd Msg
 closeWindowCmd =
     command "closeWindow" []
+
+
+sessionFields : Editor.Model -> List ( String, E.Value )
+sessionFields editor =
+    [ ( "path", editor.filePath |> Maybe.map E.string |> Maybe.withDefault E.null )
+    , ( "line", E.int editor.cursor.line )
+    , ( "col", E.int editor.cursor.col )
+    , ( "top", E.float editor.scrollTop )
+    , ( "left", E.float editor.scrollLeft )
+    ]
+
+
+sessionCmd : Editor.Model -> Cmd Msg
+sessionCmd editor =
+    command "saveSession" (sessionFields editor)
 
 
 saveRecoveryDraftCmd : Editor.Model -> Cmd Msg
@@ -2342,7 +2465,7 @@ view model =
             String.join " " (List.map (Tuple.second >> Tuple.first) sections)
     in
     div []
-        [ div [ class "app-shell" ]
+        [ div [ class "app-shell", attribute "aria-busy" (if model.navigationBusy then "true" else "false"), classList [ ( "navigation-busy", model.navigationBusy ) ] ]
             [ viewTitleBar model
             , Html.Keyed.node "div"
                 [ class "app-layout"
@@ -2421,6 +2544,7 @@ viewPreviewPane : Model -> Html Msg
 viewPreviewPane model =
     div
         ([ class "preview-pane-wrap"
+         , attribute "data-render-generation" (String.fromInt model.debounceGeneration)
          , classList [ ( "pane-offscreen", model.layoutMode == EditorOnly ) ]
          ]
             ++ (if model.layoutMode == EditorOnly then

@@ -16,6 +16,7 @@ module Editor exposing
     , selection
     , lineTokens
     , markSaved
+    , restorePosition
     , reloadContent
     , setContent
     , update
@@ -294,7 +295,37 @@ followRename from to model =
         { model | filePath = Just to }
 
     else
-        model
+        case model.filePath of
+            Just current ->
+                if String.startsWith (from ++ "/") current || String.startsWith (from ++ "\\") current then
+                    { model | filePath = Just (to ++ String.dropLeft (String.length from) current) }
+
+                else
+                    model
+
+            Nothing ->
+                model
+
+
+restorePosition : Cursor -> Float -> Float -> Model -> Model
+restorePosition cursor top left model =
+    { model
+        | cursor =
+            if cursor.line >= Array.length model.lines then
+                TextBuffer.docEnd model.lines
+
+            else
+                TextBuffer.clampCursor model.lines cursor
+        , anchor = Nothing
+        , scrollTop = clamp 0 (Basics.max 0 (toFloat (EditorLayout.rowCount model.layout) * model.metrics.lineHeight - model.metrics.viewportHeight)) top
+        , scrollLeft =
+            if model.softWrap then
+                0
+
+            else
+                clamp 0 (Basics.max 0 (toFloat (model.maxLineLength + 1) * model.metrics.charWidth - model.metrics.viewportWidth)) left
+    }
+        |> refreshTokens
 
 
 {-| Put the caret at the start of a 1-based line, for opening a file at a

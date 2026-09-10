@@ -12,7 +12,7 @@ const { _electron: electron } = require("playwright");
 const projectRoot = path.resolve(__dirname, "..");
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
-async function launchFence({ files = { "note.md": "# Original\n" }, open = "note.md", userDataDir, state } = {}) {
+async function launchFence({ files = { "note.md": "# Original\n" }, open = "note.md", userDataDir, state, restoreSession = false } = {}) {
   // realpath: on macOS the temp dir is a symlink (/var -> /private/var) and
   // the app reports canonical paths, which tests compare against.
   const workspace = await fs.promises.realpath(await fs.promises.mkdtemp(path.join(os.tmpdir(), "fence-e2e-")));
@@ -27,14 +27,14 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
   if (state) await fs.promises.writeFile(path.join(stateDir, "state.json"), JSON.stringify(state), "utf-8");
 
   const app = await electron.launch({
-    args: [path.join(projectRoot, "dist-electron/main.js"), open ? path.join(workspace, open) : workspace],
+    args: [path.join(projectRoot, "dist-electron/main.js"), ...(restoreSession ? [] : [open ? path.join(workspace, open) : workspace])],
     cwd: projectRoot,
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "true", FENCE_USER_DATA: stateDir, FENCE_QUIET_WINDOW: "1" },
   });
   const window = await app.firstWindow();
   await window.getByTestId("veditor").waitFor({ state: "attached" });
   try {
-    if (open) await waitForEditorValue(window, files[open]);
+    if (open && !restoreSession) await waitForEditorValue(window, files[open]);
   } catch (error) {
     await app.close().catch(() => {});
     throw error;
@@ -46,11 +46,11 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
     workspace,
     userDataDir: stateDir,
     file: (rel) => path.join(workspace, rel),
-    async close({ keepUserData = false } = {}) {
+    async close({ keepUserData = false, keepWorkspace = false } = {}) {
       // Unsaved edits would pop a native "save changes?" dialog on close.
       await window.evaluate(() => window.electronAPI?.setDirty({ dirty: false })).catch(() => {});
       await app.close();
-      await fs.promises.rm(workspace, { recursive: true, force: true });
+      if (!keepWorkspace) await fs.promises.rm(workspace, { recursive: true, force: true });
       if (!keepUserData) await fs.promises.rm(stateDir, { recursive: true, force: true });
     },
   };

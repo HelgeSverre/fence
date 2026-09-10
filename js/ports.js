@@ -1,7 +1,7 @@
 import { resolvePreviewImages } from "./preview-images.js";
 import { setupPreviewFind } from "./preview-find.js";
 import { setupLayout } from "./layout.js";
-import { reRenderMermaid } from "./mermaid-init.js";
+import { reRenderMermaid, finishMermaidRendering } from "./mermaid-init.js";
 import { applyFontFamily, applyFontSizesFromState } from "./font-settings.js";
 import { setupEditorMetrics, remeasureEditorMetrics } from "./editor-metrics.js";
 import { setupVirtualInput } from "./virtual-input.js";
@@ -39,7 +39,7 @@ export function wirePorts(app, initialState = {}) {
         applyFontSizesFromState(data);
         remeasureEditorMetrics();
       } else if (data.tag === "exportDocument") {
-        exportPreview(data);
+        exportPreview(data, app);
         return;
       }
 
@@ -48,6 +48,8 @@ export function wirePorts(app, initialState = {}) {
           openFolder: "openFolder",
           readDir: "readDir",
           readFile: "readFile",
+          documentState: "documentState",
+          saveSession: "saveSession",
           writeFile: "writeFile",
           watchDir: "watchDir",
           unwatchDir: "unwatchDir",
@@ -83,7 +85,11 @@ export function wirePorts(app, initialState = {}) {
   // Electron → Elm
   if (window.electronAPI && app.ports.fromElectron) {
     window.electronAPI.onMessage((data) => {
-      app.ports.fromElectron.send(data);
+      if (data.tag === "navigateHeading") {
+        navigatePreviewHeading(data);
+      } else {
+        app.ports.fromElectron.send(data);
+      }
     });
   }
 
@@ -105,18 +111,34 @@ export function wirePorts(app, initialState = {}) {
   setupEditorMetrics(app);
   setupVirtualInput();
   setupFileDrop();
+  document.addEventListener("click", event => {
+    const link = event.target.closest?.(".preview-content a[href]");
+    if (!link || event.button !== 0) return;
+    const href = link.getAttribute("href");
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("file:")) return;
+    if (href.startsWith("//")) return;
+    event.preventDefault();
+    const documentPath = link.closest(".preview-content").dataset.documentPath;
+    if (documentPath) window.electronAPI?.openLink({ documentPath, href });
+  });
 }
 
 // Export takes the preview exactly as rendered - mermaid diagrams included -
 // plus the stylesheet text behind it, and lets the main process turn that into
 // a PDF, an HTML file or rich text on the clipboard.
-async function exportPreview(data) {
+async function exportPreview(data, app) {
   // the rendered document itself, without the pane's own header
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const pane = document.querySelector(".preview-content");
-  if (!pane || !window.electronAPI) return;
+  if (!pane || !window.electronAPI || pane.dataset.documentPath !== data.path) return;
   const documentPath = pane.dataset.documentPath;
   await resolvePreviewImages();
+  await finishMermaidRendering();
   if (!pane.isConnected || pane.dataset.documentPath !== documentPath) return;
+  if (pane.closest(".preview-pane-wrap").dataset.renderGeneration !== String(data.generation)) {
+    app.ports.fromElectron.send({ tag: "exportRequested", format: data.format });
+    return;
+  }
   window.electronAPI.exportDocument({
     format: data.format,
     title: data.title || "document",
@@ -157,4 +179,27 @@ function setupFileDrop() {
     const path = window.electronAPI.pathForFile(file);
     if (path) window.electronAPI.openPath({ path });
   });
+}
+
+let headingObserver;
+let headingTimeout;
+function navigatePreviewHeading({ path, fragment }) {
+  headingObserver?.disconnect();
+  clearTimeout(headingTimeout);
+  if (!fragment) return;
+  const find = () => {
+    const pane = document.querySelector(".preview-content");
+    if (pane?.dataset.documentPath !== path) return false;
+    const heading = [...pane.querySelectorAll("[id]")].find(el => el.id === fragment);
+    if (!heading) return false;
+    heading.scrollIntoView({ block: "start" });
+    headingObserver?.disconnect();
+    clearTimeout(headingTimeout);
+    return true;
+  };
+  if (!find()) {
+    headingObserver = new MutationObserver(find);
+    headingObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-document-path"] });
+    headingTimeout = setTimeout(() => headingObserver.disconnect(), 5000);
+  }
 }

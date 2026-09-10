@@ -55,11 +55,21 @@ Open a file or folder from any working directory:
 fence README.md
 fence .
 fence ~/notes
+fence --help
+fence --version
 ```
+
+Missing paths and unsupported options report an error and return a nonzero exit
+status. Use `--` before a path whose name starts with a dash.
 
 With Fence already running, the command opens the requested path in that
 instance. When launching it for the first time, the process stays attached to
 the terminal; use `fence README.md &` to run it in the background.
+
+Files and workspaces can be opened without losing unsaved edits: Fence offers
+Save, Discard, or Cancel before navigation. Use **File > Save As**
+(Cmd/Ctrl+Shift+S) to save an untitled document or create a copy. Starting Fence
+without a path restores the last document and your position in it.
 
 ## Getting Started
 

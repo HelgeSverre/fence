@@ -1,0 +1,171 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const { test } = require('node:test');
+const { launchFence, setEditorContent, waitForEditorValue, editorText, waitForFile, MOD } = require('./helpers');
+
+test('navigation offers Cancel and Save before replacing dirty content', async () => {
+  const f = await launchFence({ files: { 'note.md': '# Old\n', 'other.md': '# Other\n' } });
+  try {
+    await f.app.evaluate(({ dialog }) => { globalThis.answer = 2; globalThis.prompts = 0; dialog.showMessageBox = async () => { globalThis.prompts++; return { response: globalThis.answer }; }; });
+    await setEditorContent(f.window, '# Unsaved\n');
+    await f.window.getByTestId('tree-file').filter({ hasText: 'other.md' }).click();
+    await f.window.waitForTimeout(100);
+    assert.equal(await editorText(f.window), '# Unsaved\n');
+    assert.equal(await f.app.evaluate(() => globalThis.prompts), 1);
+    await f.app.evaluate(() => { globalThis.answer = 0; });
+    await f.window.getByTestId('tree-file').filter({ hasText: 'other.md' }).click();
+    await waitForEditorValue(f.window, '# Other\n');
+    assert.equal(await fs.readFile(f.file('note.md'), 'utf8'), '# Unsaved\n');
+  } finally { await f.close(); }
+});
+
+test('saving an untitled document uses Save As and preserves content', async () => {
+  const f = await launchFence({ open: null });
+  try {
+    await f.window.getByTestId('tree-file').waitFor();
+    await f.app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, f.file('new.md'));
+    await setEditorContent(f.window, '# Scratch\n');
+    await f.window.keyboard.press(`${MOD}+s`);
+    await f.window.waitForFunction(() => document.querySelector('#veditor-input').dataset.path.endsWith('/new.md'));
+    assert.equal(await fs.readFile(f.file('new.md'), 'utf8'), '# Scratch\n');
+  } finally { await f.close(); }
+});
+
+test('renaming an open document parent updates its save path', async () => {
+  const f = await launchFence({ files: { 'note.md': '', 'dir/child.md': '# Child\n' } });
+  try {
+    await f.window.getByTestId('tree-dir').filter({ hasText: 'dir' }).click();
+    await f.window.getByTestId('tree-file').filter({ hasText: 'child.md' }).click();
+    await waitForEditorValue(f.window, '# Child\n');
+    await f.window.evaluate(args => window.electronAPI.renamePath(args), { path: f.file('dir'), name: 'renamed' });
+    await f.window.waitForFunction(() => document.querySelector('#veditor-input').dataset.path.endsWith('/renamed/child.md'));
+    await setEditorContent(f.window, '# Changed\n');
+    await f.window.keyboard.press(`${MOD}+s`);
+    await waitForFile(f.file('renamed/child.md'), '# Changed\n');
+    assert.equal(await fs.readFile(f.file('renamed/child.md'), 'utf8'), '# Changed\n');
+  } finally { await f.close(); }
+});
+
+test('export immediately after an edit includes the current source', async () => {
+  const f = await launchFence();
+  try {
+    await f.window.getByTestId('preview-content').locator('h1').waitFor();
+    await f.app.evaluate(({ clipboard }) => { globalThis.copied = null; clipboard.write = data => { globalThis.copied = data; }; });
+    await f.window.evaluate(() => document.querySelector('#veditor-input').dispatchEvent(new CustomEvent('fencepaste', { detail: 'FRESH ', bubbles: true })));
+    await f.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('fromElm', { tag: 'exportRequested', format: 'clipboard' }));
+    await f.window.waitForTimeout(200);
+    assert.match(await f.app.evaluate(() => globalThis.copied?.text), /FRESH/);
+  } finally { await f.close(); }
+});
+
+test('switching workspace checks unsaved work and clears the previous editor', async () => {
+  const f = await launchFence({ files: { 'note.md': '# Old\n', 'next/other.md': '# Next\n' } });
+  try {
+    await f.app.evaluate(({ dialog }, folder) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
+      dialog.showMessageBox = async () => ({ response: 0 });
+    }, f.file('next'));
+    await setEditorContent(f.window, '# Saved before switch\n');
+    await f.window.evaluate(() => window.electronAPI.openFolder());
+    await waitForEditorValue(f.window, '');
+    assert.equal(await fs.readFile(f.file('note.md'), 'utf8'), '# Saved before switch\n');
+    assert.equal(await f.window.locator('#veditor-input').getAttribute('data-path'), '');
+    await f.window.getByTestId('tree-file').filter({ hasText: 'other.md' }).waitFor();
+  } finally { await f.close(); }
+});
+
+test('local document links open beside the source and navigate to heading fragments', async () => {
+  const f = await launchFence({ files: {
+    'note.md': '[Other](docs/other%20note.md#target)\n',
+    'docs/other note.md': '# Other\n\n' + 'Paragraph\n\n'.repeat(80) + '## Target\n',
+  } });
+  try {
+    await f.window.getByTestId('preview-content').locator('a').click();
+    await f.window.waitForFunction(() => document.querySelector('#veditor-input').dataset.path.endsWith('/docs/other note.md'));
+    await f.window.waitForFunction(() => document.querySelector('#preview-container').scrollTop > 100);
+    assert.equal(await f.window.getByTestId('preview-content').locator('#target').textContent(), 'Target');
+  } finally { await f.close(); }
+});
+
+test('restart restores the last document, caret, and viewport', async () => {
+  const content = Array.from({ length: 500 }, (_, i) => `Line ${i}`).join('\n');
+  const first = await launchFence({ files: { 'note.md': content }, state: { softWrap: false } });
+  let second;
+  try {
+    await first.window.locator('.veditor-spacer').click({ position: { x: 20, y: 5 } });
+    await first.window.keyboard.press(`${MOD}+End`);
+    // Direct scrolling is part of normal editor state, including when the caret is offscreen.
+    await first.window.getByTestId('veditor').evaluate(e => { e.scrollTop = 2000; e.dispatchEvent(new Event('scroll')); });
+    await first.window.waitForTimeout(200);
+    const session = JSON.parse(await fs.readFile(require('node:path').join(first.userDataDir, 'state.json'), 'utf8')).lastDocument;
+    assert.ok(session.top > 1000);
+    await first.close({ keepUserData: true, keepWorkspace: true });
+    second = await launchFence({ restoreSession: true, userDataDir: first.userDataDir });
+    await second.window.waitForFunction(path => document.querySelector('#veditor-input').dataset.path === path, first.file('note.md'));
+    await second.window.waitForFunction(top => Math.abs(document.querySelector('.veditor').scrollTop - top) < 30, session.top);
+    await second.window.waitForTimeout(200);
+    const restored = JSON.parse(await fs.readFile(require('node:path').join(first.userDataDir, 'state.json'), 'utf8')).lastDocument;
+    assert.equal(restored.line, session.line);
+    assert.equal(restored.col, session.col);
+  } finally {
+    if (second) await second.close();
+    else await first.close();
+    await fs.rm(first.workspace, { recursive: true, force: true });
+  }
+});
+
+test('settings remains scrollable and inside a short viewport', async () => {
+  const f = await launchFence({ state: { uiFontSize: 16 } });
+  try {
+    await f.window.setViewportSize({ width: 1100, height: 700 });
+    await f.window.getByTestId('settings-button').click();
+    const menu = f.window.getByTestId('settings-dropdown');
+    const bounds = await menu.boundingBox();
+    assert.ok(bounds.y + bounds.height <= 700);
+    assert.equal(await menu.evaluate(e => e.scrollHeight > e.clientHeight), true);
+    await menu.locator('.rebind-btn').last().scrollIntoViewIfNeeded();
+    const last = await menu.locator('.rebind-btn').last().boundingBox();
+    assert.ok(last.y + last.height < 700);
+  } finally { await f.close(); }
+});
+
+test('cancelling Save As keeps an untitled document open, then Save on close writes it', async () => {
+  const f = await launchFence({ open: null });
+  try {
+    await f.window.getByTestId('tree-file').waitFor();
+    await setEditorContent(f.window, '# Keep me\n');
+    await f.app.evaluate(({ dialog, BrowserWindow }) => {
+      dialog.showMessageBox = async () => ({ response: 0 });
+      dialog.showSaveDialog = async () => ({ canceled: true });
+      BrowserWindow.getAllWindows()[0].close();
+    });
+    await f.window.waitForTimeout(150);
+    assert.equal(await editorText(f.window), '# Keep me\n');
+    await f.app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, f.file('kept.md'));
+    const closed = f.window.waitForEvent('close');
+    await f.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+    await closed;
+    assert.equal(await fs.readFile(f.file('kept.md'), 'utf8'), '# Keep me\n');
+  } finally { await f.close(); }
+});
+
+test('Save As writes a new file without changing the original', async () => {
+  const f = await launchFence({ files: { 'note.md': '# Original\n' } });
+  try {
+    await f.app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, f.file('copy.md'));
+    await setEditorContent(f.window, '# Copy\n');
+    await f.window.keyboard.press(`${MOD}+Shift+s`);
+    await f.window.waitForFunction(() => document.querySelector('#veditor-input').dataset.path.endsWith('/copy.md'));
+    assert.equal(await fs.readFile(f.file('copy.md'), 'utf8'), '# Copy\n');
+    assert.equal(await fs.readFile(f.file('note.md'), 'utf8'), '# Original\n');
+  } finally { await f.close(); }
+});
+
+test('a clicked link can open a document above the current workspace', async () => {
+  const f = await launchFence({ open: 'docs/note.md', files: { 'docs/note.md': '[Parent](../parent.md)\n', 'parent.md': '# Parent\n' } });
+  try {
+    await f.window.getByTestId('preview-content').locator('a').click();
+    await waitForEditorValue(f.window, '# Parent\n');
+    assert.equal(await f.window.locator('#veditor-input').getAttribute('data-path'), f.file('parent.md'));
+  } finally { await f.close(); }
+});

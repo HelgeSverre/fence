@@ -326,6 +326,9 @@ handleRenamed from to model =
             if path == from then
                 to
 
+            else if String.startsWith (from ++ "/") path || String.startsWith (from ++ "\\") path then
+                to ++ String.dropLeft (String.length from) path
+
             else
                 path
     in

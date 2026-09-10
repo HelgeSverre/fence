@@ -2,8 +2,9 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard } = require(
 const path = require("path");
 const fs = require("fs");
 const crypto = require("node:crypto");
-const { pathToFileURL } = require("node:url");
+const { pathToFileURL, fileURLToPath } = require("node:url");
 const fsOps = require("./fs-ops");
+const { parseCliArgs, help: cliHelp } = require("./cli");
 const { autoUpdater } = require("electron-updater");
 
 // Tests point this at a temp dir so they never touch the real state.json,
@@ -53,6 +54,8 @@ function updateState(updater) {
   saveState({ ...state, ...updates });
 }
 
+let recoveryWrites = Promise.resolve();
+
 function recoveryPathFor(filePath) {
   const key = crypto.createHash("sha256").update(filePath).digest("hex");
   return path.join(app.getPath("userData"), "recovery", `${key}.json`);
@@ -80,6 +83,7 @@ async function saveRecoveryDraft(payload) {
 }
 
 async function clearRecoveryDraft(filePath) {
+  await recoveryWrites.catch(() => {});
   await fs.promises.unlink(recoveryPathFor(filePath)).catch((error) => {
     if (error.code !== "ENOENT") throw error;
   });
@@ -98,6 +102,90 @@ async function loadRecoveryDraft(filePath) {
 let mainWindow;
 let pendingOpenPath = null; // open-file path received before the renderer loaded
 let rendererReady = false;
+
+let navigationQueue = Promise.resolve();
+let saveQueue = Promise.resolve();
+
+function queuedSave(payload) {
+  const task = saveQueue.then(() => saveDocument(payload));
+  saveQueue = task.catch(() => {});
+  return task;
+}
+let snapshotId = 0;
+const snapshots = new Map();
+let currentSession = null;
+let sessionTimer;
+
+function requestDocumentState() {
+  if (!liveWindow() || !rendererReady) return Promise.resolve({ path: null, content: "", dirty: false });
+  return new Promise((resolve, reject) => {
+    const id = ++snapshotId;
+    const timer = setTimeout(() => { snapshots.delete(id); reject(new Error("Editor did not respond; navigation cancelled.")); }, 5000);
+    snapshots.set(id, (data) => { clearTimeout(timer); resolve(data); });
+    sendToRenderer({ tag: "requestDocumentState", id });
+  });
+}
+
+function flushSession() {
+  clearTimeout(sessionTimer);
+  if (currentSession !== null) updateState(() => ({ lastDocument: currentSession }));
+}
+
+function rememberSession(data) {
+  currentSession = {
+    path: typeof data.path === "string" ? data.path : null,
+    ...Object.fromEntries(["line", "col", "top", "left"].map(key => [key, Number.isFinite(data[key]) ? Math.max(0, data[key]) : 0])),
+  };
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(flushSession, 150);
+}
+
+async function confirmNavigation() {
+  for (;;) {
+    await saveQueue;
+    const snapshot = await requestDocumentState();
+    rememberSession(snapshot);
+    flushSession();
+    if (!snapshot.dirty) return snapshot;
+    const { response } = await dialog.showMessageBox(liveWindow(), {
+      type: "warning", buttons: ["Save", "Discard", "Cancel"], defaultId: 0, cancelId: 2,
+      title: "Unsaved Changes", message: "Save changes before opening another document or workspace?",
+    });
+    if (response === 2) return false;
+    const latest = await requestDocumentState();
+    if (latest.path !== snapshot.path || latest.content !== snapshot.content) continue;
+    if (response === 1) {
+      if (snapshot.path) await clearRecoveryDraft(snapshot.path);
+      return latest;
+    }
+    if (!(await queuedSave(snapshot))) return false;
+    // The save acknowledgement precedes this next snapshot, so edits made
+    // during the write are checked again rather than discarded.
+  }
+}
+
+function navigate(action) {
+  const task = navigationQueue.then(async () => {
+    for (;;) {
+      const approved = await confirmNavigation();
+      if (!approved) { sendToRenderer({ tag: "navigationCancelled" }); return; }
+      await saveQueue;
+      sendToRenderer({ tag: "navigationBusy", busy: true });
+      try {
+        const locked = await requestDocumentState();
+        if (locked.path !== approved.path || locked.content !== approved.content) continue;
+        await action();
+        return;
+      } finally { sendToRenderer({ tag: "navigationBusy", busy: false }); }
+    }
+  });
+  navigationQueue = task.catch(error => sendToRenderer({ tag: "error", message: error.message }));
+  return navigationQueue;
+}
+
+async function switchWorkspace(folderPath) {
+  if (await openWorkspace(folderPath)) sendToRenderer({ tag: "documentClosed" });
+}
 
 // Open a folder as the active workspace: point fs-ops at it, push the
 // listing to the renderer, and record it in the recents list.
@@ -120,8 +208,10 @@ async function openWorkspace(folderPath) {
       };
     });
     buildMenu();
+    return true;
   } catch (err) {
     sendToRenderer({ tag: "error", message: err.message });
+    return false;
   }
 }
 
@@ -173,13 +263,15 @@ function buildMenu() {
           click: () => sendToRenderer({ tag: "treeCommand", command: "newFolder", path: null }),
         },
         { type: "separator" },
+        { label: "Save", accelerator: "CmdOrCtrl+S", click: () => sendToRenderer({ tag: "saveRequested" }) },
+        { label: "Save As...", accelerator: "CmdOrCtrl+Shift+S", click: () => sendToRenderer({ tag: "saveAsRequested" }) },
         {
           label: "Open Recent",
           submenu:
             recents.length > 0
               ? recents.map((p) => ({
                   label: p,
-                  click: () => openWorkspace(p),
+                  click: () => navigate(() => switchWorkspace(p)),
                 }))
               : [{ label: "No Recent Workspaces", enabled: false }],
         },
@@ -243,22 +335,17 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// First existing path in a CLI argv (e.g. `fence README.md`, `fence ~/notes`),
-// resolved against the invoking shell's working directory. Null if none.
+// Validate the optional CLI path relative to the invoking shell's directory.
 function cliPathFrom(argv, cwd) {
-  for (const arg of argv.slice(app.isPackaged ? 1 : 2)) {
-    if (arg.startsWith("-")) continue;
-    const resolved = path.resolve(cwd, arg);
-    if (fs.existsSync(resolved)) return resolved;
-  }
-  return null;
+  return parseCliArgs(argv.slice(app.isPackaged ? 1 : 2), cwd).path;
 }
 
 // Open a CLI path: a folder becomes the workspace; a file opens its parent
 // folder as the workspace and loads the file into the editor.
 async function openCliPath(cliPath) {
   const isDir = fs.statSync(cliPath).isDirectory();
-  await openWorkspace(isDir ? cliPath : path.dirname(cliPath));
+  if (!(await openWorkspace(isDir ? cliPath : path.dirname(cliPath)))) return;
+  if (isDir) sendToRenderer({ tag: "documentClosed" });
   if (!isDir) {
     try {
       await sendFileContent(cliPath);
@@ -321,6 +408,12 @@ function createWindow() {
           path: state.lastWorkspace,
           entries,
         });
+        if (state.lastDocument?.path) {
+          try {
+            await sendFileContent(state.lastDocument.path);
+            sendToRenderer({ tag: "restoreSession", ...state.lastDocument });
+          } catch { /* A removed or moved document leaves the workspace open. */ }
+        }
       } catch {
         // Workspace vanished — forget it, but keep every other setting.
         await fsOps.setWorkspace(null);
@@ -331,6 +424,7 @@ function createWindow() {
 
   // Prevent close if dirty — Elm sends setDirty state
   mainWindow.on("close", (e) => {
+    flushSession();
     if (mainWindow._isDirty) {
       e.preventDefault();
       dialog
@@ -465,45 +559,60 @@ async function sendFileContent(filePath, offerRecovery = true, line = null) {
     await clearRecoveryDraft(file.path);
   }
 
+  await watchDirectory(path.dirname(file.path));
   sendToRenderer({ tag: "fileContent", ...file, content, dirty, line });
 }
 
 async function saveDocument(payload) {
-  const filePath = requireString(payload, "path", 32768);
+  const originalPath = typeof payload.path === "string" ? payload.path : null;
+  let filePath = originalPath;
   const content = requireString(payload, "content");
-  const expectedRevision =
-    typeof payload.expectedRevision === "string"
-      ? payload.expectedRevision
-      : null;
-
+  const saveAs = !filePath || payload.saveAs === true;
+  let expectedRevision = typeof payload.expectedRevision === "string" ? payload.expectedRevision : (typeof payload.revision === "string" ? payload.revision : null);
+  if (saveAs) {
+    const result = await dialog.showSaveDialog(liveWindow(), {
+      defaultPath: originalPath || path.join(loadState().lastWorkspace || app.getPath("documents"), "Untitled.md"),
+      filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
+    });
+    if (result.canceled || !result.filePath) { sendToRenderer({ tag: "saveCancelled" }); return false; }
+    filePath = result.filePath;
+    expectedRevision = null;
+  }
   try {
-    const saved = await fsOps.writeFile(filePath, content, expectedRevision);
-    await clearRecoveryDraft(saved.path);
-    sendToRenderer({ tag: "fileSaved", ...saved });
+    const saved = await fsOps.writeFile(filePath, content, expectedRevision, saveAs);
+    if (originalPath) await clearRecoveryDraft(originalPath);
+    if (saveAs) {
+      try { await fsOps.resolvePath(saved.path); }
+      catch { await openWorkspace(path.dirname(saved.path)); }
+    }
+    sendToRenderer({ tag: saveAs ? "fileSavedAs" : "fileSaved", ...saved, content, dirty: false, originalPath });
+    return true;
   } catch (error) {
     if (!(error instanceof fsOps.FileConflictError)) throw error;
-    const { response } = await dialog.showMessageBox(mainWindow, {
-      type: "warning",
-      buttons: ["Overwrite", "Reload from Disk", "Cancel"],
-      defaultId: 2,
-      cancelId: 2,
-      title: "File Changed on Disk",
-      message: `${path.basename(filePath)} changed outside Fence.`,
-      detail:
-        "Overwrite the external changes, reload the disk version, or cancel and keep editing your draft.",
+    const { response } = await dialog.showMessageBox(liveWindow(), {
+      type: "warning", buttons: ["Overwrite", "Reload from Disk", "Cancel"], defaultId: 2, cancelId: 2,
+      title: "File Changed on Disk", message: `${path.basename(filePath)} changed outside Fence.`,
+      detail: "Overwrite the external changes, reload the disk version, or cancel and keep editing your draft.",
     });
     if (response === 0) {
       const saved = await fsOps.writeFile(filePath, content, null);
       await clearRecoveryDraft(saved.path);
-      sendToRenderer({ tag: "fileSaved", ...saved });
-    } else if (response === 1) {
+      sendToRenderer({ tag: "fileSaved", ...saved, content });
+      return true;
+    }
+    if (response === 1) {
       await clearRecoveryDraft(filePath);
       await sendFileContent(filePath, false);
-    } else {
-      sendToRenderer({ tag: "saveCancelled" });
-    }
+    } else sendToRenderer({ tag: "saveCancelled" });
+    return false;
   }
 }
+
+registerIpc("fence:document-state", data => {
+  const resolve = snapshots.get(data.id);
+  if (resolve) { snapshots.delete(data.id); resolve(data); }
+});
+registerIpc("fence:save-session", data => { if (rendererReady) rememberSession(data); });
 
 ipcMain.on("fence:get-initial-state", (event) => {
   event.returnValue = isTrustedIpcEvent(event) ? loadState() : {};
@@ -514,7 +623,7 @@ registerIpc("fence:open-folder", async () => {
     properties: ["openDirectory"],
   });
   if (!result.canceled && result.filePaths.length > 0) {
-    await openWorkspace(result.filePaths[0]);
+    await navigate(() => switchWorkspace(result.filePaths[0]));
   }
 });
 
@@ -522,6 +631,28 @@ registerIpc("fence:read-dir", async (data) => {
   const dirPath = requireString(data, "path", 32768);
   const entries = await fsOps.readDir(dirPath);
   sendToRenderer({ tag: "dirContents", path: dirPath, entries });
+});
+
+registerIpc("fence:open-link", async data => {
+  const documentPath = await fsOps.resolvePath(requireString(data, "documentPath", 32768));
+  const url = new URL(requireString(data, "href", 32768), pathToFileURL(documentPath));
+  if (url.protocol !== "file:") return;
+  const target = await fs.promises.realpath(fileURLToPath(url));
+  if (!fsOps.isMarkdownFile(target)) return;
+  const fragment = decodeURIComponent(url.hash.slice(1));
+  if (target === documentPath) {
+    sendToRenderer({ tag: "navigateHeading", path: target, fragment });
+  } else {
+    await navigate(async () => {
+      // Following a clicked local link can open a neighboring workspace, just
+      // like opening that same file through Finder or the CLI.
+      let inside = true;
+      try { await fsOps.resolvePath(target); } catch { inside = false; }
+      if (inside) await sendFileContent(target);
+      else await openCliPath(target);
+      sendToRenderer({ tag: "navigateHeading", path: target, fragment });
+    });
+  }
 });
 
 registerIpc("fence:read-file", async (data) => {
@@ -533,45 +664,56 @@ registerIpc("fence:read-file", async (data) => {
     return;
   }
   const line = Number.isInteger(data.line) ? data.line : null;
-  await sendFileContent(filePath, true, line);
+  await navigate(() => sendFileContent(filePath, true, line));
 });
 
-registerIpc("fence:write-file", saveDocument);
+registerIpc("fence:write-file", queuedSave);
 
-registerIpc("fence:watch-dir", async (data) => {
-  await fsOps.watchDir(requireString(data, "path", 32768), async (event, filePath) => {
-    // Mirror readDir's filtering: a new directory only appears once it
-    // holds a markdown file (re-expand the parent to refresh), and
-    // non-markdown files never appear.
+async function watchDirectory(dirPath) {
+  await fsOps.watchDir(dirPath, async (event, filePath) => {
     if (event === "addDir" && !(await fsOps.containsMarkdown(filePath))) return;
     if ((event === "add" || event === "change") && !fsOps.isMarkdownFile(filePath)) return;
     sendToRenderer({ tag: "fsEvent", event, path: filePath });
   });
-});
+}
+registerIpc("fence:watch-dir", data => watchDirectory(requireString(data, "path", 32768)));
 
 registerIpc("fence:unwatch-dir", async (data) => {
   await fsOps.unwatchDir(requireString(data, "path", 32768));
 });
 
-registerIpc("fence:create-file", async (data) => {
-  const created = await fsOps.createFile(
-    requireString(data, "dir", 32768),
-    requireString(data, "name", 255),
-  );
-  // chokidar's "add" refreshes the tree; opening it is what the user asked for.
+registerIpc("fence:create-file", data => navigate(async () => {
+  const created = await fsOps.createFile(requireString(data, "dir", 32768), requireString(data, "name", 255));
   await sendFileContent(created.path, false);
-});
+}));
 
 registerIpc("fence:create-dir", async (data) => {
   await fsOps.createDir(requireString(data, "dir", 32768), requireString(data, "name", 255));
 });
 
-registerIpc("fence:rename-path", async (data) => {
-  const renamed = await fsOps.renamePath(
-    requireString(data, "path", 32768),
-    requireString(data, "name", 255),
-  );
+registerIpc("fence:rename-path", async data => {
+  await recoveryWrites.catch(() => {});
+  const snapshot = await requestDocumentState();
+  const renamed = await fsOps.renamePath(requireString(data, "path", 32768), requireString(data, "name", 255));
   sendToRenderer({ tag: "renamed", from: renamed.from, path: renamed.path });
+  const follow = candidate => candidate === renamed.from ? renamed.path :
+    candidate?.startsWith(renamed.from + path.sep) ? renamed.path + candidate.slice(renamed.from.length) : candidate;
+  const directory = path.join(app.getPath("userData"), "recovery");
+  for (const name of await fs.promises.readdir(directory).catch(() => [])) {
+    if (!name.endsWith(".json")) continue;
+    const file = path.join(directory, name);
+    const draft = await fs.promises.readFile(file, "utf8").then(JSON.parse).catch(() => null);
+    if (draft?.path && follow(draft.path) !== draft.path) {
+      const target = follow(draft.path);
+      await saveRecoveryDraft({ ...draft, path: target });
+      await fs.promises.unlink(file);
+    }
+  }
+  if (snapshot.path && follow(snapshot.path) !== snapshot.path) {
+    const target = follow(snapshot.path);
+    if (snapshot.dirty) await saveRecoveryDraft({ ...snapshot, path: target });
+    await watchDirectory(path.dirname(target));
+  }
 });
 
 registerIpc("fence:trash-path", async (data) => {
@@ -680,7 +822,7 @@ registerIpc("fence:save-attachment", async (data) => {
 registerIpc("fence:open-path", async (data) => {
   const target = requireString(data, "path", 32768);
   if (!fs.existsSync(target)) throw new Error(`No such path: ${target}`);
-  await openCliPath(target);
+  await navigate(() => openCliPath(target));
 });
 
 registerIpc("fence:tree-context-menu", async (data) => {
@@ -780,8 +922,16 @@ registerIpc("fence:set-font-size", (data) => {
   });
 });
 
-registerIpc("fence:save-recovery-draft", saveRecoveryDraft);
+registerIpc("fence:save-recovery-draft", data => {
+  recoveryWrites = recoveryWrites.catch(() => {}).then(() => saveRecoveryDraft(data));
+  return recoveryWrites;
+});
 
+let cliRequest;
+try { cliRequest = parseCliArgs(process.argv.slice(app.isPackaged ? 1 : 2), process.cwd()); }
+catch (error) { process.stderr.write(`fence: ${error.message}\n`); app.exit(2); }
+if (cliRequest?.help) { process.stdout.write(cliHelp); app.exit(0); }
+if (cliRequest?.version) { process.stdout.write(`${app.isPackaged ? app.getVersion() : require("../package.json").version}\n`); app.exit(0); }
 const gotLock = app.requestSingleInstanceLock();
 
 // macOS delivers Finder double-clicks and "Open With" via open-file, not
@@ -806,7 +956,7 @@ function revealPath(target) {
   if (!rendererReady) {
     pendingOpenPath = target;
   } else if (target) {
-    openCliPath(target);
+    navigate(() => openCliPath(target));
   }
 }
 

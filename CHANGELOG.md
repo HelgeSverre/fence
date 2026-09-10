@@ -6,6 +6,29 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-10
+
+### Added
+
+- Save As, including saving untitled documents and creating a copy without
+  changing the original. Use Cmd/Ctrl+Shift+S or File > Save As.
+- Local Markdown links open documents inside Fence and support heading fragments.
+- Restart restores the last document, caret, and scroll position, clamping them
+  when the file has changed on disk.
+- CLI help, version output, and errors for invalid options or missing paths.
+
+### Fixed
+
+- Opening a file or workspace checks unsaved work with Save, Discard, and Cancel.
+  Navigation waits for pending saves and preserves edits made during a write.
+- Choosing Save when closing an untitled document opens Save As; cancelling
+  keeps the document open.
+- Switching workspaces clears the old editor after resolving unsaved work.
+- Renaming a parent folder updates descendant editor paths and recovery drafts.
+- Exports wait for the current Markdown, images, and Mermaid diagrams to render.
+- Settings scrolls within the available window height so every control remains
+  accessible in short windows or at larger UI font sizes.
+
 ## [0.4.2] — 2026-09-10
 
 ### Added
@@ -249,7 +272,8 @@ First release. A split-view Markdown editor with a file browser, live
 preview, YAML frontmatter, syntax highlighting, several themes, and resizable
 panes.
 
-[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/HelgeSverre/fence/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/HelgeSverre/fence/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/HelgeSverre/fence/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/HelgeSverre/fence/compare/v0.3.0...v0.4.0

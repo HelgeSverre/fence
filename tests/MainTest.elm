@@ -259,8 +259,8 @@ fileSuite =
                     |> step (keyDown "s" True)
                     |> .savingContent
                     |> Expect.equal (Just "changed")
-        , test "Cmd+S with nothing open is a no-op" <|
-            \_ -> (step (keyDown "s" True) fresh).savingContent |> Expect.equal Nothing
+        , test "Cmd+S on an untitled document starts Save As" <|
+            \_ -> (step (keyDown "s" True) fresh).savingContent |> Expect.equal (Just "")
         , test "a second save while one is in flight is ignored" <|
             \_ ->
                 opened

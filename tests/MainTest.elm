@@ -4,7 +4,7 @@ import Editor
 import Expect
 import FileTree
 import Json.Encode as E
-import Main exposing (DragTarget(..), Msg(..))
+import Main exposing (DragTarget(..), LayoutMode(..), Msg(..))
 import Test exposing (Test, describe, test)
 import Types exposing (DirtyState(..))
 
@@ -64,7 +64,7 @@ keyDown key meta =
 suite : Test
 suite =
     describe "Main"
-        [ initSuite, bindingSuite, dragSuite, layoutSuite, previewSuite, fileSuite, progressiveSuite ]
+        [ layoutModeSuite, initSuite, bindingSuite, dragSuite, layoutSuite, previewSuite, fileSuite, progressiveSuite ]
 
 
 initSuite : Test
@@ -342,7 +342,6 @@ fileSuite =
         ]
 
 
-
 progressiveSuite : Test
 progressiveSuite =
     let
@@ -376,4 +375,35 @@ progressiveSuite =
                     |> steps (List.repeat 60 Frame)
                     |> headings
                     |> Expect.equal 41
+        ]
+
+
+layoutModeSuite : Test
+layoutModeSuite =
+    describe "document layout"
+        [ test "defaults and invalid persisted modes fall back to Split" <|
+            \_ ->
+                Expect.equal ( Split, Split ) ( fresh.layoutMode, (withFlags [ ( "layoutMode", E.string "invalid" ) ]).layoutMode )
+        , test "cycle visits all modes without changing split ratio or sidebars" <|
+            \_ ->
+                let
+                    original =
+                        withFlags [ ( "editorFraction", E.float 0.65 ), ( "rightSidebarVisible", E.bool True ) ]
+
+                    cycled =
+                        steps [ CycleLayout, CycleLayout, CycleLayout ] original
+                in
+                Expect.equal
+                    ( [ PreviewOnly, EditorOnly, Split ], ( original.editorFraction, original.leftSidebarVisible, original.rightSidebarVisible ) )
+                    ( List.map (\n -> (steps (List.repeat n CycleLayout) original).layoutMode) [ 1, 2, 3 ], ( cycled.editorFraction, cycled.leftSidebarVisible, cycled.rightSidebarVisible ) )
+        , test "the center shortcut cycles the mode" <|
+            \_ ->
+                fresh |> step (keyDown "2" True) |> .layoutMode |> Expect.equal PreviewOnly
+        , test "preview Find stays in preview; Replace reveals Split" <|
+            \_ ->
+                let
+                    preview =
+                        fresh |> step (SetLayoutMode PreviewOnly) |> step (OpenFind False)
+                in
+                Expect.equal ( PreviewOnly, Split ) ( preview.layoutMode, (step (OpenFind True) preview).layoutMode )
         ]

@@ -5,6 +5,9 @@ module Icon exposing
     , fileText
     , folder
     , folderPlus
+    , editorLayout
+    , splitLayout
+    , previewLayout
     , settings
     )
 
@@ -75,4 +78,29 @@ checkmark : Int -> Html msg
 checkmark size =
     icon size
         [ path [ SA.d "M9.86 18a1 1 0 0 1-.73-.32l-4.86-5.17a1 1 0 1 1 1.46-1.37l4.12 4.39 8.41-9.2a1 1 0 1 1 1.48 1.34l-9.14 10a1 1 0 0 1-.73.33z" ] []
+        ]
+
+
+editorLayout : Int -> Html msg
+editorLayout size =
+    layoutIcon size "M6 8h8M6 12h12M6 16h8"
+
+
+splitLayout : Int -> Html msg
+splitLayout size =
+    layoutIcon size "M12 4v16M6 8h3M6 12h3M15 8h3M15 12h3"
+
+
+previewLayout : Int -> Html msg
+previewLayout size =
+    layoutIcon size "M6 8h12M6 12h12M6 16h12"
+
+
+layoutIcon : Int -> String -> Html msg
+layoutIcon size lines =
+    icon size
+        [ g [ SA.fill "none", SA.stroke "currentColor", SA.strokeWidth "1.6", SA.strokeLinecap "round" ]
+            [ rect [ SA.x "3", SA.y "4", SA.width "18", SA.height "16", SA.rx "2" ] []
+            , path [ SA.d lines ] []
+            ]
         ]

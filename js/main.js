@@ -27,6 +27,8 @@ const app = Elm.Main.init({
     leftSidebarVisible: initialState.leftSidebarVisible ?? null,
     rightSidebarVisible: initialState.rightSidebarVisible ?? null,
     outlineMaxLevel: initialState.outlineMaxLevel ?? null,
+    layoutMode: initialState.layoutMode ?? "split",
+    layoutCycleKey: initialState.layoutCycleKey ?? null,
     leftToggleKey: initialState.leftToggleKey ?? null,
     rightToggleKey: initialState.rightToggleKey ?? null,
   },
@@ -36,5 +38,5 @@ applyFontFamily(initialState.font);
 applyFontSizesFromState(initialState);
 preloadBundledFonts();
 
-wirePorts(app);
+wirePorts(app, initialState);
 initMermaid();

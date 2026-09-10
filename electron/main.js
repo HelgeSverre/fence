@@ -701,6 +701,9 @@ registerIpc("fence:close-window", () => {
 
 registerIpc("fence:save-splits", (data) => {
   const updates = {};
+  if (["editor", "split", "preview"].includes(data.layoutMode)) {
+    updates.layoutMode = data.layoutMode;
+  }
   for (const key of [
     "sidebarFraction",
     "editorFraction",
@@ -720,7 +723,7 @@ registerIpc("fence:save-splits", (data) => {
   ) {
     updates.outlineMaxLevel = data.outlineMaxLevel;
   }
-  for (const key of ["leftToggleKey", "rightToggleKey"]) {
+  for (const key of ["leftToggleKey", "rightToggleKey", "layoutCycleKey"]) {
     const binding = data[key];
     if (
       binding &&

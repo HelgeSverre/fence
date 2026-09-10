@@ -35,6 +35,10 @@ function measure() {
     observed = container;
   }
 
+  // A hidden editor retains its last usable layout. ResizeObserver schedules
+  // a fresh measurement when it becomes visible; do not poll hidden panes.
+  if (!container || container.getClientRects().length === 0) return;
+
   const rect = metricsProbe().getBoundingClientRect();
   // The scroller carries the padding, so the document's origin is its
   // content-box corner; a pointer anywhere in the window is measured from it.

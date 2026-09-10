@@ -1,6 +1,7 @@
 module Main exposing
     ( DragTarget(..)
     , KeyBinding
+    , LayoutMode(..)
     , Model
     , Msg(..)
     , init
@@ -22,6 +23,7 @@ import Find
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
+import Html.Keyed
 import Html.Lazy
 import Icon
 import Json.Decode as D
@@ -36,6 +38,51 @@ import TextBuffer exposing (Cursor)
 import Types exposing (..)
 import VirtualEditor
 import Yaml
+
+
+type LayoutMode
+    = EditorOnly
+    | Split
+    | PreviewOnly
+
+
+layoutName : LayoutMode -> String
+layoutName mode =
+    case mode of
+        EditorOnly ->
+            "editor"
+
+        Split ->
+            "split"
+
+        PreviewOnly ->
+            "preview"
+
+
+layoutFromString : String -> LayoutMode
+layoutFromString name =
+    case name of
+        "editor" ->
+            EditorOnly
+
+        "preview" ->
+            PreviewOnly
+
+        _ ->
+            Split
+
+
+nextLayout : LayoutMode -> LayoutMode
+nextLayout mode =
+    case mode of
+        EditorOnly ->
+            Split
+
+        Split ->
+            PreviewOnly
+
+        PreviewOnly ->
+            EditorOnly
 
 
 type DragTarget
@@ -68,6 +115,7 @@ type alias KeyBinding =
 type RebindTarget
     = RebindLeft
     | RebindRight
+    | RebindLayout
 
 
 type alias Model =
@@ -86,6 +134,9 @@ type alias Model =
     , editorFontSize : Float
     , previewFontSize : Float
     , uiFontSize : Float
+    , layoutMode : LayoutMode
+    , layoutCycleKey : KeyBinding
+    , previewFindCount : ( Int, Int )
     , settingsOpen : Bool
     , settingsFocus : Int
     , sidebarFraction : Float
@@ -134,6 +185,8 @@ type Msg
     | Frame
     | RecoveryDraftDue Int
     | ToggleSettings
+    | SetLayoutMode LayoutMode
+    | CycleLayout
     | SetTheme String
     | SetFont String
     | SetSoftWrap Bool
@@ -342,6 +395,9 @@ init flagsValue =
       , editorFontSize = flag "editorFontSize" D.float defaultEditorFontSize
       , previewFontSize = flag "previewFontSize" D.float defaultPreviewFontSize
       , uiFontSize = flag "uiFontSize" D.float defaultUIFontSize
+      , layoutMode = layoutFromString (flag "layoutMode" D.string "split")
+      , layoutCycleKey = flag "layoutCycleKey" keyBindingDecoder { key = "2", meta = True, ctrl = False, shift = False, alt = False }
+      , previewFindCount = ( 0, 0 )
       , settingsOpen = False
       , settingsFocus = 0
       , sidebarFraction = flag "sidebarFraction" D.float defaultSidebarFraction
@@ -379,6 +435,41 @@ update msg model =
     case msg of
         NoOp ->
             ( model, Cmd.none )
+
+        CycleLayout ->
+            update (SetLayoutMode (nextLayout model.layoutMode)) model
+
+        SetLayoutMode mode ->
+            if mode == model.layoutMode then
+                ( model, Cmd.none )
+
+            else
+                let
+                    newModel =
+                        { model
+                            | layoutMode = mode
+                            , drag = Nothing
+                            , settingsOpen = False
+                            , syncPoints = []
+                            , previewFindCount = ( 0, 0 )
+                            , find =
+                                if mode == PreviewOnly then
+                                    Find.showReplace False model.find
+
+                                else
+                                    Find.refresh model.editor.lines model.find
+                        }
+                in
+                ( newModel
+                , Cmd.batch
+                    [ saveSplitsCmd newModel
+                    , command "layoutChanged"
+                        [ ( "mode", E.string (layoutName mode) )
+                        ]
+                    , previewFindCmd 0 newModel
+                    , measureSyncPoints newModel
+                    ]
+                )
 
         ToggleSettings ->
             let
@@ -585,32 +676,76 @@ update msg model =
 
         OpenFind withReplace ->
             let
-                -- a search almost always starts from the selected words
+                ( visibleModel, layoutCmd ) =
+                    if withReplace && model.layoutMode == PreviewOnly then
+                        update (SetLayoutMode Split) model
+
+                    else
+                        ( model, Cmd.none )
+
                 seed =
-                    if String.contains "\n" (Editor.selectedText model.editor) then
+                    if model.layoutMode == PreviewOnly || String.contains "\n" (Editor.selectedText model.editor) then
                         ""
 
                     else
                         Editor.selectedText model.editor
+
+                newModel =
+                    { visibleModel | find = Find.open withReplace seed model.editor.lines visibleModel.find }
             in
-            ( { model | find = Find.open withReplace seed model.editor.lines model.find }
-            , focusSilently findInputId
+            ( newModel
+            , Cmd.batch [ layoutCmd, focusSilently findInputId, previewFindCmd 0 newModel ]
             )
 
         CloseFind ->
-            ( { model | find = Find.close model.find }, focusSilently "veditor-input" )
+            let
+                newModel =
+                    { model | find = Find.close model.find }
+            in
+            ( newModel
+            , Cmd.batch
+                [ focusSilently
+                    (if model.layoutMode == PreviewOnly then
+                        "preview-container"
+
+                     else
+                        "veditor-input"
+                    )
+                , previewFindCmd 0 newModel
+                ]
+            )
 
         FindQueryChanged query ->
-            goToActive { model | find = Find.setQuery query model.editor.lines model.find }
+            let
+                newModel =
+                    { model | find = Find.setQuery query model.editor.lines model.find }
+            in
+            if model.layoutMode == PreviewOnly then
+                ( newModel, previewFindCmd 0 newModel )
+
+            else
+                goToActive newModel
 
         FindReplacementChanged replacement ->
             ( { model | find = Find.setReplacement replacement model.find }, Cmd.none )
 
         FindStep delta ->
-            goToActive { model | find = Find.step delta model.find }
+            if model.layoutMode == PreviewOnly then
+                ( model, previewFindCmd delta model )
+
+            else
+                goToActive { model | find = Find.step delta model.find }
 
         FindToggleCase ->
-            goToActive { model | find = Find.setCaseSensitive (not model.find.caseSensitive) model.editor.lines model.find }
+            let
+                newModel =
+                    { model | find = Find.setCaseSensitive (not model.find.caseSensitive) model.editor.lines model.find }
+            in
+            if model.layoutMode == PreviewOnly then
+                ( newModel, previewFindCmd 0 newModel )
+
+            else
+                goToActive newModel
 
         ReplaceActive ->
             case Find.activeMatch model.find of
@@ -638,7 +773,15 @@ update msg model =
             )
 
         ClosePalette ->
-            ( { model | palette = Palette.close model.palette }, focusSilently "veditor-input" )
+            ( { model | palette = Palette.close model.palette }
+            , focusSilently
+                (if model.layoutMode == PreviewOnly then
+                    "preview-container"
+
+                 else
+                    "veditor-input"
+                )
+            )
 
         PaletteQueryChanged text ->
             let
@@ -895,6 +1038,9 @@ update msg model =
 
                                     RebindRight ->
                                         { model | rightToggleKey = binding, rebinding = Nothing }
+
+                                    RebindLayout ->
+                                        { model | layoutCycleKey = binding, rebinding = Nothing }
                         in
                         ( newModel, saveSplitsCmd newModel )
 
@@ -940,6 +1086,9 @@ update msg model =
 
                     else if matchesBinding model.leftToggleKey key metaKey ctrlKey shiftKey altKey then
                         update ToggleLeftSidebar model
+
+                    else if matchesBinding model.layoutCycleKey key metaKey ctrlKey shiftKey altKey then
+                        update CycleLayout model
 
                     else if matchesBinding model.rightToggleKey key metaKey ctrlKey shiftKey altKey then
                         update ToggleRightSidebar model
@@ -1403,6 +1552,18 @@ handlePortMessage tag value model =
             , Cmd.none
             )
 
+        "previewFindResult" ->
+            if model.layoutMode == PreviewOnly && Find.isOpen model.find && (D.decodeValue (D.field "query" D.string) value == Ok model.find.query) && (D.decodeValue (D.field "caseSensitive" D.bool) value == Ok model.find.caseSensitive) then
+                case D.decodeValue (D.map2 Tuple.pair (D.field "current" D.int) (D.field "total" D.int)) value of
+                    Ok counts ->
+                        ( { model | previewFindCount = counts }, Cmd.none )
+
+                    Err _ ->
+                        ( model, Cmd.none )
+
+            else
+                ( model, Cmd.none )
+
         "toggleSettings" ->
             update ToggleSettings model
 
@@ -1556,6 +1717,8 @@ saveSplitsCmd model =
         , ( "outlineMaxLevel", E.int model.outlineMaxLevel )
         , ( "leftToggleKey", encodeKeyBinding model.leftToggleKey )
         , ( "rightToggleKey", encodeKeyBinding model.rightToggleKey )
+        , ( "layoutMode", E.string (layoutName model.layoutMode) )
+        , ( "layoutCycleKey", encodeKeyBinding model.layoutCycleKey )
         ]
 
 
@@ -1592,7 +1755,7 @@ syncPreview editor model =
             else
                 editor.scrollTop / Basics.max 1 editor.metrics.lineHeight
     in
-    if Editor.dragging editor then
+    if model.layoutMode /= Split || Editor.dragging editor then
         Cmd.none
 
     else
@@ -1650,7 +1813,7 @@ without the headings in it.
 -}
 measureSyncPoints : Model -> Cmd Msg
 measureSyncPoints model =
-    if List.isEmpty model.headingAnchors then
+    if model.layoutMode /= Split || List.isEmpty model.headingAnchors then
         Task.perform SyncPointsMeasured (Task.succeed [])
 
     else
@@ -1726,16 +1889,20 @@ back to scrolling the preview on its own.
 -}
 scrollToHeadingCmd : String -> Model -> Cmd Msg
 scrollToHeadingCmd anchorId model =
-    case model.headingAnchors |> List.filter (\( _, id ) -> id == anchorId) |> List.head of
-        Just ( line, _ ) ->
-            ignoreResult
-                (Browser.Dom.setViewportOf "veditor"
-                    0
-                    (toFloat (EditorLayout.lineStartRow line model.editor.layout) * model.editor.metrics.lineHeight)
-                )
+    if model.layoutMode == PreviewOnly then
+        scrollPreviewToHeadingCmd anchorId
 
-        Nothing ->
-            scrollPreviewToHeadingCmd anchorId
+    else
+        case model.headingAnchors |> List.filter (\( _, id ) -> id == anchorId) |> List.head of
+            Just ( line, _ ) ->
+                ignoreResult
+                    (Browser.Dom.setViewportOf "veditor"
+                        0
+                        (toFloat (EditorLayout.lineStartRow line model.editor.layout) * model.editor.metrics.lineHeight)
+                    )
+
+            Nothing ->
+                scrollPreviewToHeadingCmd anchorId
 
 
 {-| Scroll the preview pane so the heading with `anchorId` is at the top.
@@ -1807,6 +1974,7 @@ outCmdToCommand cmd =
 
         FileTree.CmdFocusEditInput ->
             focusSilently treeEditInputId
+
 
 
 -- DECODERS
@@ -2043,29 +2211,60 @@ view model =
         editorTrack =
             model.editorFraction * middleRegion
 
-        -- Each section is a (grid-track-size, element) pair so the
-        -- template columns always match the rendered children exactly.
+        -- Keyed cells preserve pane DOM when sidebars or modes change. Even
+        -- a hidden pane keeps its cell, so grid columns match the children.
         -- lazy: keeps typing from rebuilding the tree/preview virtual DOM
         -- when their inputs haven't changed.
         leftSection =
             if model.leftSidebarVisible then
-                [ ( pct model.sidebarFraction, Html.map FileTreeMsg (Html.Lazy.lazy FileTree.view model.fileTree) )
-                , ( "2px", viewDivider DraggingSidebar )
+                [ ( "sidebar", ( pct model.sidebarFraction, Html.map FileTreeMsg (Html.Lazy.lazy FileTree.view model.fileTree) ) )
+                , ( "sidebar-divider", ( "2px", viewDivider DraggingSidebar ) )
                 ]
 
             else
                 []
 
         middleSection =
-            [ ( pct editorTrack, viewEditorPane model )
-            , ( "2px", viewDivider DraggingEditor )
-            , ( "1fr", Html.Lazy.lazy2 Preview.view model.frontmatter model.previewHtml )
+            [ ( "editor"
+              , ( if model.layoutMode == Split then
+                    pct editorTrack
+
+                  else if model.layoutMode == EditorOnly then
+                    "1fr"
+
+                  else
+                    "0px"
+                , viewEditorPane model
+                )
+              )
+            , ( "editor-divider"
+              , ( if model.layoutMode == Split then
+                    "2px"
+
+                  else
+                    "0px"
+                , if model.layoutMode == Split then
+                    viewDivider DraggingEditor
+
+                  else
+                    text ""
+                )
+              )
+            , ( "preview"
+              , ( if model.layoutMode == EditorOnly then
+                    "0px"
+
+                  else
+                    "1fr"
+                , viewPreviewPane model
+                )
+              )
             ]
 
         rightSection =
             if model.rightSidebarVisible then
-                [ ( "2px", viewDivider DraggingRightSidebar )
-                , ( pct model.rightSidebarFraction, viewOutline model )
+                [ ( "outline-divider", ( "2px", viewDivider DraggingRightSidebar ) )
+                , ( "outline", ( pct model.rightSidebarFraction, viewOutline model ) )
                 ]
 
             else
@@ -2075,17 +2274,18 @@ view model =
             leftSection ++ middleSection ++ rightSection
 
         gridColumns =
-            String.join " " (List.map Tuple.first sections)
+            String.join " " (List.map (Tuple.second >> Tuple.first) sections)
     in
     div []
         [ div [ class "app-shell" ]
             [ viewTitleBar model
-            , div
+            , Html.Keyed.node "div"
                 [ class "app-layout"
+                , attribute "data-layout" (layoutName model.layoutMode)
                 , classList [ ( "dragging", model.drag /= Nothing ) ]
                 , style "grid-template-columns" gridColumns
                 ]
-                (List.map Tuple.second sections)
+                (List.map (Tuple.mapSecond (\( _, pane ) -> div [ class "layout-cell" ] [ pane ])) sections)
             ]
         , if Palette.isOpen model.palette then
             viewPalette model.palette
@@ -2105,7 +2305,16 @@ view model =
 {-| The editor, with the find bar layered over it when it is open. -}
 viewEditorPane : Model -> Html Msg
 viewEditorPane model =
-    div [ class "editor-pane-wrap" ]
+    div
+        [ class "editor-pane-wrap"
+        , style "display"
+            (if model.layoutMode == PreviewOnly then
+                "none"
+
+             else
+                "flex"
+            )
+        ]
         [ Html.map EditorMsg
             (Editor.view
                 { highlights =
@@ -2124,11 +2333,101 @@ viewEditorPane model =
                 }
                 model.editor
             )
-        , if Find.isOpen model.find then
-            viewFindBar model.find
+        , if Find.isOpen model.find && model.layoutMode /= PreviewOnly then
+            viewFindBar (Find.count model.find) model.find
 
           else
             text ""
+        ]
+
+
+previewFindCmd : Int -> Model -> Cmd Msg
+previewFindCmd delta model =
+    command "previewFind"
+        [ ( "opened", E.bool (model.layoutMode == PreviewOnly && Find.isOpen model.find) )
+        , ( "query", E.string model.find.query )
+        , ( "caseSensitive", E.bool model.find.caseSensitive )
+        , ( "delta", E.int delta )
+        , ( "limit", E.int Find.matchLimit )
+        ]
+
+
+viewPreviewPane : Model -> Html Msg
+viewPreviewPane model =
+    div
+        ([ class "preview-pane-wrap"
+         , classList [ ( "pane-offscreen", model.layoutMode == EditorOnly ) ]
+         ]
+            ++ (if model.layoutMode == EditorOnly then
+                    [ attribute "inert" "", attribute "aria-hidden" "true", style "width" (String.fromFloat (model.windowWidth * model.editorFraction) ++ "px") ]
+
+                else
+                    []
+               )
+        )
+        [ Html.Lazy.lazy2 Preview.view model.frontmatter model.previewHtml
+        , if model.layoutMode == PreviewOnly && Find.isOpen model.find then
+            viewFindBar model.previewFindCount model.find
+
+          else
+            text ""
+        ]
+
+
+viewLayoutSelector : Model -> Html Msg
+viewLayoutSelector model =
+    let
+        segment mode label icon =
+            button
+                [ class "icon-button layout-segment"
+                , id ("layout-" ++ layoutName mode)
+                , attribute "data-testid" ("layout-" ++ layoutName mode)
+                , attribute "role" "radio"
+                , attribute "aria-label" label
+                , attribute "aria-checked"
+                    (if model.layoutMode == mode then
+                        "true"
+
+                     else
+                        "false"
+                    )
+                , tabindex
+                    (if model.layoutMode == mode then
+                        0
+
+                     else
+                        -1
+                    )
+                , title (label ++ " · Cycle layout " ++ keyBindingLabel model.layoutCycleKey)
+                , onClick (SetLayoutMode mode)
+                , preventDefaultOn "keydown"
+                    (D.field "key" D.string
+                        |> D.map
+                            (\key ->
+                                case key of
+                                    "ArrowRight" ->
+                                        ( SetLayoutMode (nextLayout mode), True )
+
+                                    "ArrowLeft" ->
+                                        ( SetLayoutMode (nextLayout (nextLayout mode)), True )
+
+                                    "Home" ->
+                                        ( SetLayoutMode EditorOnly, True )
+
+                                    "End" ->
+                                        ( SetLayoutMode PreviewOnly, True )
+
+                                    _ ->
+                                        ( NoOp, False )
+                            )
+                    )
+                ]
+                [ icon 16 ]
+    in
+    div [ class "layout-selector", attribute "role" "radiogroup", attribute "aria-label" "Document layout" ]
+        [ segment EditorOnly "Editor only" Icon.editorLayout
+        , segment Split "Editor and preview" Icon.splitLayout
+        , segment PreviewOnly "Preview only" Icon.previewLayout
         ]
 
 
@@ -2216,11 +2515,11 @@ findInputId =
     "find-input"
 
 
-viewFindBar : Find.Model -> Html Msg
-viewFindBar find =
+viewFindBar : ( Int, Int ) -> Find.Model -> Html Msg
+viewFindBar counts find =
     let
         ( current, total ) =
-            Find.count find
+            counts
 
         countLabel =
             if find.query == "" then
@@ -2250,10 +2549,10 @@ viewFindBar find =
                 ]
                 [ text
                     (if delta < 0 then
-                        "\u{2191}"
+                        "↑"
 
                      else
-                        "\u{2193}"
+                        "↓"
                     )
                 ]
     in
@@ -2289,7 +2588,7 @@ viewFindBar find =
                 [ text "Aa" ]
             , stepButton "Previous match" -1
             , stepButton "Next match" 1
-            , button [ class "find-button", attribute "aria-label" "Close find", title "Close", onClick CloseFind ] [ text "\u{00D7}" ]
+            , button [ class "find-button", attribute "aria-label" "Close find", title "Close", onClick CloseFind ] [ text "×" ]
             ]
         , if find.replaceShown then
             div [ class "find-row" ]
@@ -2395,7 +2694,7 @@ countsLabel counts =
                         "s"
                    )
     in
-    String.join " \u{00B7} " [ plural counts.words "word", plural counts.lines "line", plural counts.characters "character" ]
+    String.join " · " [ plural counts.words "word", plural counts.lines "line", plural counts.characters "character" ]
 
 
 viewOutlineEntry : Markdown.OutlineEntry -> Html Msg
@@ -2437,7 +2736,8 @@ viewTitleBar model =
                     text ""
             ]
         , div [ class "titlebar-actions" ]
-            [ button [ class "icon-button settings-btn", attribute "data-testid" "settings-button", onClick ToggleSettings ] [ Icon.settings 16 ]
+            [ viewLayoutSelector model
+            , button [ class "icon-button settings-btn", attribute "data-testid" "settings-button", onClick ToggleSettings ] [ Icon.settings 16 ]
             , if model.settingsOpen then
                 viewSettingsDropdown model
 
@@ -2540,6 +2840,7 @@ viewSettingsDropdown model =
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Shortcuts" ]
             , viewRebindRow "Toggle left sidebar" model.leftToggleKey RebindLeft model.rebinding
+            , viewRebindRow "Cycle layout" model.layoutCycleKey RebindLayout model.rebinding
             , viewRebindRow "Toggle right sidebar" model.rightToggleKey RebindRight model.rebinding
             ]
         ]

@@ -1,16 +1,29 @@
+import { setupPreviewFind } from "./preview-find.js";
+import { setupLayout } from "./layout.js";
 import { reRenderMermaid } from "./mermaid-init.js";
 import { applyFontFamily, applyFontSizesFromState } from "./font-settings.js";
 import { setupEditorMetrics, remeasureEditorMetrics } from "./editor-metrics.js";
 import { setupVirtualInput } from "./virtual-input.js";
 
-export function wirePorts(app) {
+export function wirePorts(app, initialState = {}) {
   if (!app.ports) return;
+  const previewFind = setupPreviewFind(app);
+  const layout = setupLayout(initialState);
 
   // Elm → Electron
   if (app.ports.toElectron) {
     app.ports.toElectron.subscribe((data) => {
       // Theme/font changes apply locally, then fall through to IPC so the
       // main process persists them to state.json.
+      if (data.tag === "previewFind") {
+        previewFind(data);
+        return;
+      } else if (data.tag === "layoutChanged") {
+        layout.changed(data);
+        return;
+      } else if (data.tag === "saveSplits" && data.layoutCycleKey) {
+        layout.setBinding(data.layoutCycleKey);
+      }
       if (data.tag === "setTheme") {
         if (data.theme) {
           document.documentElement.setAttribute("data-theme", data.theme);

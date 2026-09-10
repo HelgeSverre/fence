@@ -32,7 +32,7 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "true", FENCE_USER_DATA: stateDir, FENCE_QUIET_WINDOW: "1" },
   });
   const window = await app.firstWindow();
-  await window.getByTestId("veditor").waitFor();
+  await window.getByTestId("veditor").waitFor({ state: "attached" });
   try {
     if (open) await waitForEditorValue(window, files[open]);
   } catch (error) {

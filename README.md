@@ -23,7 +23,7 @@ Fence provides a clean, focused environment for writing markdown with a live pre
 
 ## Features
 
-- **Split-View Editor** — Real-time markdown preview that follows your scrolling
+- **Flexible Layout** — Editor, preview, or split view with synchronized scrolling
 - **Find & Replace** — Cmd+F, with match highlighting and a single-undo Replace All
 - **Quick-Open & Search** — Cmd+P by file name, Cmd+Shift+F across the workspace
 - **Markdown Editing** — List continuation, bold/italic/link shortcuts, line operations
@@ -145,6 +145,9 @@ On Windows and Linux, use Ctrl where this says Cmd.
 | Cmd+Shift+K             | Delete the line                         |
 | Cmd+Enter / +Shift      | Open a line below / above               |
 | Cmd+1 / Cmd+3           | Toggle the sidebar / outline            |
+| Cmd+2                   | Cycle Editor / Split / Preview          |
+
+Use the three layout buttons beside Settings to select a mode directly. Fence remembers the mode and split width. Rebind the layout shortcut under Settings → Shortcuts. In preview-only mode, Find searches rendered text; Find and Replace opens Split to edit the source.
 
 ## Tech Stack
 

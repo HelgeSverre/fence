@@ -308,6 +308,11 @@ body {
   height: 6px;
 }
 
+/* The intersection of two scrollbars otherwise keeps Chromium's white fill. */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }

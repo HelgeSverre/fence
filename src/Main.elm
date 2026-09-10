@@ -2875,7 +2875,7 @@ viewSettingsDropdown model =
             else
                 offset + (indexOfValue activeValue items |> Maybe.withDefault 0)
     in
-    div []
+    div [ class "settings-layer" ]
         [ div [ class "settings-backdrop", onClick CloseSettings ] []
         , div
             [ class "settings-dropdown"

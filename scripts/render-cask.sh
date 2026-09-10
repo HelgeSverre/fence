@@ -32,6 +32,7 @@ cask "fence" do
   depends_on macos: :ventura
 
   app "Fence.app"
+  command_wrapper "fence", executable: "#{appdir}/Fence.app/Contents/MacOS/Fence"
 
   zap trash: [
     "~/Library/Application Support/Fence",

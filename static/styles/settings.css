@@ -4,6 +4,11 @@
   font-family: var(--font-sans);
 }
 
+/* The fixed overlays must not add an empty flex item and toolbar gap. */
+.settings-layer {
+  display: contents;
+}
+
 /* Settings dropdown */
 .settings-backdrop {
   position: fixed;

@@ -46,6 +46,21 @@ brew install --cask helgesverre/tap/fence
 Or grab a DMG from the [releases page](https://github.com/HelgeSverre/fence/releases).
 See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
+### Command line
+
+The Homebrew cask installs a `fence` launcher in Homebrew's `bin` directory.
+Open a file or folder from any working directory:
+
+```bash
+fence README.md
+fence .
+fence ~/notes
+```
+
+With Fence already running, the command opens the requested path in that
+instance. When launching it for the first time, the process stays attached to
+the terminal; use `fence README.md &` to run it in the background.
+
 ## Getting Started
 
 ### Prerequisites

@@ -6,6 +6,18 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-09-10
+
+### Added
+
+- Homebrew installs a global `fence` command for opening files and folders.
+
+### Fixed
+
+- The editor scrollbar corner now matches the theme instead of showing a white
+  square when both scrollbars are visible.
+- Opening settings no longer shifts the toolbar button and dropdown sideways.
+
 ## [0.4.1] — 2026-09-10
 
 ### Fixed
@@ -237,7 +249,8 @@ First release. A split-view Markdown editor with a file browser, live
 preview, YAML frontmatter, syntax highlighting, several themes, and resizable
 panes.
 
-[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/HelgeSverre/fence/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/HelgeSverre/fence/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/HelgeSverre/fence/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/HelgeSverre/fence/compare/v0.2.0...v0.3.0

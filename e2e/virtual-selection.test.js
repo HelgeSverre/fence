@@ -97,7 +97,9 @@ describe("virtual editor: selection and clipboard", () => {
       // whole lines in between, ending part-way into the line under the pointer
       assert.match(lines[5], /^line \d+$/);
 
-      // and it stops once the button is released
+      // Let the final queued animation/DOM frame settle after mouseup, then
+      // verify that auto-scroll does not continue while the button is up.
+      await window.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const settled = await scrollTop();
       await window.waitForTimeout(300);
       assert.equal(await scrollTop(), settled);

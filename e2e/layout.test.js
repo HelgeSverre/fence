@@ -165,11 +165,14 @@ describe("document layouts", () => {
       await window.locator(".mermaid svg").waitFor({ state: "attached" });
       await choose(window, "preview");
       await window.locator(".mermaid svg").waitFor();
+      const previousId = await window.locator(".mermaid svg").getAttribute("id");
       await window.getByTestId("settings-button").click();
       await window.getByTestId("settings-item-light").click();
       await window.keyboard.press("Escape");
-      await window.locator(".mermaid svg").waitFor();
-      assert.ok((await window.locator(".mermaid svg").boundingBox()).width > 0);
+      await window.waitForFunction(id => {
+        const svg = document.querySelector('.mermaid[data-state="rendered"] svg');
+        return svg && svg.id !== id && svg.querySelectorAll(".node").length === 2 && svg.getBoundingClientRect().width > 0;
+      }, previousId);
     } finally { await fence.close(); }
   });
 

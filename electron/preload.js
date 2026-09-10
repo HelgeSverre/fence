@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openFolder: send("fence:open-folder"),
   readDir: send("fence:read-dir"),
   readFile: send("fence:read-file"),
+  readImage: (payload) => ipcRenderer.invoke("fence:read-image", payload),
   writeFile: send("fence:write-file"),
   watchDir: send("fence:watch-dir"),
   unwatchDir: send("fence:unwatch-dir"),

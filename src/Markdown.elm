@@ -783,7 +783,7 @@ customRenderer =
                 (\srcAttr altAttr widthAttr heightAttr _ ->
                     img
                         (List.filterMap identity
-                            [ Maybe.map src srcAttr
+                            [ Just (attribute "data-image-source" (Maybe.withDefault "" srcAttr))
                             , Maybe.map alt altAttr
                             , Maybe.map (\w -> attribute "width" w) widthAttr
                             , Maybe.map (\h -> attribute "height" h) heightAttr
@@ -943,10 +943,10 @@ renderImage : { alt : String, src : String, title : Maybe String } -> Html msg
 renderImage imageInfo =
     case imageInfo.title of
         Just title_ ->
-            img [ src imageInfo.src, alt imageInfo.alt, title title_ ] []
+            img [ attribute "data-image-source" imageInfo.src, alt imageInfo.alt, title title_ ] []
 
         Nothing ->
-            img [ src imageInfo.src, alt imageInfo.alt ] []
+            img [ attribute "data-image-source" imageInfo.src, alt imageInfo.alt ] []
 
 
 renderUnorderedList : List (Block.ListItem (Html msg)) -> Html msg

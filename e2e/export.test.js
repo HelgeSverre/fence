@@ -45,8 +45,17 @@ describe("export", () => {
       await stubSaveDialog(fence.app, target);
       await menuCommand(fence.app, { tag: "exportRequested", format: "pdf" });
 
-      await waitForPath(target);
-      const bytes = await fs.promises.readFile(target);
+      // Creation precedes completion of writeFile: wait for the PDF trailer,
+      // otherwise a fast poll can read the newly created, still-empty file.
+      const bytes = await waitFor(async () => {
+        try {
+          const content = await fs.promises.readFile(target);
+          return content.subarray(-16).includes(Buffer.from("%%EOF")) ? content : null;
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+          return null;
+        }
+      });
       assert.equal(bytes.subarray(0, 4).toString("latin1"), "%PDF");
       assert.ok(bytes.length > 1000, `PDF was only ${bytes.length} bytes`);
     } finally {

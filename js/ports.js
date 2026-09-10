@@ -1,3 +1,4 @@
+import { resolvePreviewImages } from "./preview-images.js";
 import { setupPreviewFind } from "./preview-find.js";
 import { setupLayout } from "./layout.js";
 import { reRenderMermaid } from "./mermaid-init.js";
@@ -109,10 +110,13 @@ export function wirePorts(app, initialState = {}) {
 // Export takes the preview exactly as rendered - mermaid diagrams included -
 // plus the stylesheet text behind it, and lets the main process turn that into
 // a PDF, an HTML file or rich text on the clipboard.
-function exportPreview(data) {
+async function exportPreview(data) {
   // the rendered document itself, without the pane's own header
   const pane = document.querySelector(".preview-content");
   if (!pane || !window.electronAPI) return;
+  const documentPath = pane.dataset.documentPath;
+  await resolvePreviewImages();
+  if (!pane.isConnected || pane.dataset.documentPath !== documentPath) return;
   window.electronAPI.exportDocument({
     format: data.format,
     title: data.title || "document",

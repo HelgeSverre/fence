@@ -419,6 +419,16 @@ function requireString(payload, key, maxLength = 100 * 1024 * 1024) {
   return value;
 }
 
+ipcMain.handle("fence:read-image", async (event, payload) => {
+  if (!isTrustedIpcEvent(event)) return null;
+  try {
+    return await fsOps.readImage(requireString(payload, "documentPath", 32768), requireString(payload, "source", 32768));
+  } catch {
+    // A missing/unsupported image should not interrupt editing with a banner.
+    return null;
+  }
+});
+
 function registerIpc(channel, handler) {
   ipcMain.on(channel, (event, payload = {}) => {
     if (!isTrustedIpcEvent(event)) return;

@@ -2430,7 +2430,7 @@ viewPreviewPane model =
                     []
                )
         )
-        [ Html.Lazy.lazy2 Preview.view model.frontmatter model.previewHtml
+        [ Html.Lazy.lazy3 Preview.view model.editor.filePath model.frontmatter model.previewHtml
         , if model.layoutMode == PreviewOnly && Find.isOpen model.find then
             viewFindBar model.previewFindCount model.find
 

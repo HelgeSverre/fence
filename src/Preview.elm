@@ -6,13 +6,13 @@ import Html.Lazy
 import Yaml
 
 
-view : Maybe Yaml.Value -> List (List (Html msg)) -> Html msg
-view frontmatter chunks =
+view : Maybe String -> Maybe Yaml.Value -> List (List (Html msg)) -> Html msg
+view filePath frontmatter chunks =
     div [ class "preview-pane", attribute "data-testid" "preview-pane" ]
         [ div [ class "pane-header" ]
             [ span [] [ text "Preview" ] ]
         , div [ id "preview-container", tabindex 0, attribute "aria-label" "Document preview", class "preview-container", attribute "data-testid" "preview-container" ]
-            [ div [ class "preview-content", attribute "data-testid" "preview-content" ]
+            [ div [ class "preview-content", attribute "data-testid" "preview-content", attribute "data-document-path" (Maybe.withDefault "" filePath) ]
                 (if List.all List.isEmpty chunks then
                     [ welcomeView ]
 

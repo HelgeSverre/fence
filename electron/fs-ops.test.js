@@ -23,6 +23,27 @@ describe("workspace filesystem operations", () => {
     await fs.promises.rm(outside, { recursive: true, force: true });
   });
 
+  test("resolves encoded image URLs beside the document, with parent paths and fragments", async () => {
+    await fs.promises.mkdir(path.join(workspace, "docs"));
+    await fs.promises.writeFile(path.join(workspace, "docs", "note.md"), "");
+    await fs.promises.writeFile(path.join(workspace, "a b.svg"), "<svg/>");
+    assert.equal(await fsOps.readImage(path.join(workspace, "docs", "note.md"), "../a%20b.svg?raw=1#icon"),
+      `data:image/svg+xml;base64,${Buffer.from("<svg/>").toString("base64")}#icon`);
+  });
+
+  test("local image reads stay in the workspace and only accept bounded image files", async () => {
+    const doc = path.join(workspace, "note.md");
+    await fs.promises.writeFile(doc, "");
+    await fs.promises.writeFile(path.join(outside, "private.svg"), "<svg/>");
+    await fs.promises.symlink(outside, path.join(workspace, "linked"), "dir");
+    await assert.rejects(fsOps.readImage(doc, "linked/private.svg"), /outside workspace/);
+    await assert.rejects(fsOps.readImage(doc, "note.md"), /Unsupported image type/);
+    await assert.rejects(fsOps.readImage(doc, "https://example.com/image.png"), /Not a local image/);
+    await fs.promises.writeFile(path.join(workspace, "large.png"), "");
+    await fs.promises.truncate(path.join(workspace, "large.png"), 33 * 1024 * 1024);
+    await assert.rejects(fsOps.readImage(doc, "large.png"), /32 MiB/);
+  });
+
   test("lists only markdown files and directories that lead to some", async () => {
     const mk = (rel) => fs.promises.mkdir(path.join(workspace, rel), { recursive: true });
     const touch = (rel) => fs.promises.writeFile(path.join(workspace, rel), "", "utf-8");

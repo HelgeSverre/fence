@@ -1,5 +1,6 @@
 import { Elm } from "../src/Main.elm";
 import { wirePorts } from "./ports.js";
+import { initPreviewImages } from "./preview-images.js";
 import { initMermaid } from "./mermaid-init.js";
 import { applyFontFamily, applyFontSizesFromState, preloadBundledFonts } from "./font-settings.js";
 
@@ -40,3 +41,4 @@ preloadBundledFonts();
 
 wirePorts(app, initialState);
 initMermaid();
+initPreviewImages();

@@ -3,6 +3,8 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const chokidar = require("chokidar");
 
+const { pathToFileURL, fileURLToPath } = require("node:url");
+
 const watchers = new Map();
 let currentWorkspace = null;
 
@@ -337,6 +339,30 @@ async function unwatchDir(dirPath) {
   }
 }
 
+// Local preview images use data URLs so the same document works in both the
+// packaged file:// renderer and the development HTTP renderer.
+async function readImage(documentPath, source) {
+  const document = await pathWithinWorkspace(documentPath);
+  const url = new URL(source, pathToFileURL(document));
+  if (url.protocol !== "file:") throw new Error("Not a local image");
+  const imagePath = await pathWithinWorkspace(fileURLToPath(url));
+  const mime = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+    ".avif": "image/avif", ".bmp": "image/bmp", ".ico": "image/x-icon",
+  }[path.extname(imagePath).toLowerCase()];
+  if (!mime) throw new Error("Unsupported image type");
+  const handle = await fs.promises.open(imagePath, "r");
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > 32 * 1024 * 1024) throw new Error("Image exceeds 32 MiB or is not a file");
+    const bytes = await handle.readFile();
+    return `data:${mime};base64,${bytes.toString("base64")}${url.hash}`;
+  } finally {
+    await handle.close();
+  }
+}
+
 module.exports = {
   FileConflictError,
   containsMarkdown,
@@ -349,6 +375,7 @@ module.exports = {
   isMarkdownFile,
   readDir,
   readFile,
+  readImage,
   resolvePath,
   revisionForContent,
   setWorkspace,

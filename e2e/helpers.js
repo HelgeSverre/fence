@@ -47,8 +47,10 @@ async function launchFence({ files = { "note.md": "# Original\n" }, open = "note
     userDataDir: stateDir,
     file: (rel) => path.join(workspace, rel),
     async close({ keepUserData = false, keepWorkspace = false } = {}) {
-      // Unsaved edits would pop a native "save changes?" dialog on close.
-      await window.evaluate(() => window.electronAPI?.setDirty({ dirty: false })).catch(() => {});
+      // Test teardown bypasses the document guard; close behavior is tested separately.
+      await app.evaluate(({ BrowserWindow }) => {
+        for (const window of BrowserWindow.getAllWindows()) window._closeApproved = true;
+      }).catch(() => {});
       await app.close();
       if (!keepWorkspace) await fs.promises.rm(workspace, { recursive: true, force: true });
       if (!keepUserData) await fs.promises.rm(stateDir, { recursive: true, force: true });

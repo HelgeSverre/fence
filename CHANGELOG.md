@@ -21,6 +21,8 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 - Opening a file or workspace checks unsaved work with Save, Discard, and Cancel.
   Navigation waits for pending saves and preserves edits made during a write.
+- Closing checks the current editor state even when the last edit's dirty-state
+  notification has not arrived yet.
 - Choosing Save when closing an untitled document opens Save As; cancelling
   keeps the document open.
 - Switching workspaces clears the old editor after resolving unsaved work.

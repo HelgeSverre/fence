@@ -140,7 +140,7 @@ function rememberSession(data) {
   sessionTimer = setTimeout(flushSession, 150);
 }
 
-async function confirmNavigation() {
+async function confirmNavigation(closing = false) {
   for (;;) {
     await saveQueue;
     const snapshot = await requestDocumentState();
@@ -149,7 +149,7 @@ async function confirmNavigation() {
     if (!snapshot.dirty) return snapshot;
     const { response } = await dialog.showMessageBox(liveWindow(), {
       type: "warning", buttons: ["Save", "Discard", "Cancel"], defaultId: 0, cancelId: 2,
-      title: "Unsaved Changes", message: "Save changes before opening another document or workspace?",
+      title: "Unsaved Changes", message: closing ? "Save changes before closing?" : "Save changes before opening another document or workspace?",
     });
     if (response === 2) return false;
     const latest = await requestDocumentState();
@@ -164,10 +164,10 @@ async function confirmNavigation() {
   }
 }
 
-function navigate(action) {
+function navigate(action, closing = false) {
   const task = navigationQueue.then(async () => {
     for (;;) {
-      const approved = await confirmNavigation();
+      const approved = await confirmNavigation(closing);
       if (!approved) { sendToRenderer({ tag: "navigationCancelled" }); return; }
       await saveQueue;
       sendToRenderer({ tag: "navigationBusy", busy: true });
@@ -422,35 +422,20 @@ function createWindow() {
     }
   });
 
-  // Prevent close if dirty — Elm sends setDirty state
-  mainWindow.on("close", (e) => {
+  // Read the renderer's current document before closing: the cached dirty IPC
+  // can lag behind the last keystroke, particularly on Linux.
+  const window = mainWindow;
+  let checkingClose = false;
+  window.on("close", (event) => {
     flushSession();
-    if (mainWindow._isDirty) {
-      e.preventDefault();
-      dialog
-        .showMessageBox(mainWindow, {
-          type: "warning",
-          buttons: ["Save", "Don't Save", "Cancel"],
-          defaultId: 0,
-          cancelId: 2,
-          title: "Unsaved Changes",
-          message: "You have unsaved changes. What would you like to do?",
-        })
-        .then(({ response }) => {
-          if (response === 0) {
-            // Save — tell Elm to save, then close
-            sendToRenderer({ tag: "saveAndClose" });
-          } else if (response === 1) {
-            // Don't save — force close
-            const win = liveWindow();
-            if (win) {
-              win._isDirty = false;
-              win.close();
-            }
-          }
-          // Cancel — do nothing
-        });
-    }
+    if (window._closeApproved || !rendererReady) return;
+    event.preventDefault();
+    if (checkingClose) return;
+    checkingClose = true;
+    navigate(async () => {
+      window._closeApproved = true;
+      window.close();
+    }, true).finally(() => { checkingClose = false; });
   });
 
   // Open external links in system browser

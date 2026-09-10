@@ -137,6 +137,8 @@ test('cancelling Save As keeps an untitled document open, then Save on close wri
     await f.app.evaluate(({ dialog, BrowserWindow }) => {
       dialog.showMessageBox = async () => ({ response: 0 });
       dialog.showSaveDialog = async () => ({ canceled: true });
+      // Reproduce a close arriving before the renderer dirty-state IPC.
+      BrowserWindow.getAllWindows()[0]._isDirty = false;
       BrowserWindow.getAllWindows()[0].close();
     });
     await f.window.waitForTimeout(150);

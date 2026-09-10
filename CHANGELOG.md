@@ -6,6 +6,34 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-10
+
+### Added
+
+- Editor-only, split, and preview-only layouts, with toolbar controls and a
+  configurable keyboard shortcut. Switching layouts preserves your work and
+  scroll positions.
+- Find in the rendered preview, including match navigation and case-sensitive
+  search. Replace brings the editor back into view.
+- Invalid Mermaid diagrams show a readable error with expandable source;
+  other diagrams continue rendering, and correcting the source clears the error.
+
+### Fixed
+
+- Saving a scrolled document no longer blanks the editor or clears the caret,
+  selection, and undo history when its own filesystem notification arrives.
+- External reloads preserve the viewport and reject stale responses after
+  edits or file switches. Opening another file synchronizes the editor's
+  virtual rows with the browser's scroll position.
+- When external edits remove the caret's line, it moves to the new end of
+  the document. Selections and scroll positions clamp safely, including empty
+  files and long final lines with wrapping disabled.
+- Rapid external edits immediately after saving are no longer lost in the
+  filesystem watcher's notification throttle.
+- HTML compatibility preprocessing leaves fenced code intact, preserving
+  Mermaid ampersand operators and literal HTML examples.
+- Mermaid diagrams update correctly after source edits and theme changes.
+
 ## [0.3.0] — 2026-09-06
 
 ### Added
@@ -195,7 +223,8 @@ First release. A split-view Markdown editor with a file browser, live
 preview, YAML frontmatter, syntax highlighting, several themes, and resizable
 panes.
 
-[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/HelgeSverre/fence/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/HelgeSverre/fence/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/HelgeSverre/fence/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/HelgeSverre/fence/compare/v0.1.5...v0.1.6

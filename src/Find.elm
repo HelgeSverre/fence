@@ -1,9 +1,12 @@
 module Find exposing
     ( Model
+    , Msg(..)
+    , OutCmd(..)
     , activeMatch
     , close
     , count
     , init
+    , inputId
     , isOpen
     , matchLimit
     , matches
@@ -15,6 +18,8 @@ module Find exposing
     , setReplacement
     , showReplace
     , step
+    , update
+    , view
     )
 
 {-| Literal search over the open document. Matching is a plain substring scan
@@ -27,6 +32,10 @@ and every render would pay for it.
 -}
 
 import Array exposing (Array)
+import Html exposing (Html, button, div, input, span, text)
+import Html.Attributes exposing (attribute, class, classList, disabled, id, placeholder, spellcheck, title, value)
+import Html.Events exposing (onClick, onInput, preventDefaultOn)
+import Json.Decode as D
 import TextBuffer exposing (Cursor)
 
 
@@ -228,3 +237,223 @@ matchesIn caseSensitive query lines =
             |> List.reverse
             |> List.take matchLimit
             |> Array.fromList
+
+
+
+-- MESSAGES
+
+
+type Msg
+    = Close
+    | QueryChanged String
+    | ReplacementChanged String
+    | Step Int
+    | ToggleCase
+    | ReplaceActive
+    | ReplaceAll
+
+
+{-| What Main does on the module's behalf: it owns the editor, the preview
+port and focus.
+-}
+type OutCmd
+    = CmdFocusDocument -- give focus back to the editor or preview
+    | CmdPreviewFind Int -- tell the preview to search, stepping by the delta
+    | CmdGoToActive -- select the active match in the editor
+    | CmdReplace (List ( Cursor, Cursor ))
+
+
+{-| `previewOnly`: the editor is hidden, so the preview does the searching. -}
+update : Msg -> Bool -> Array String -> Model -> ( Model, List OutCmd )
+update msg previewOnly lines model =
+    let
+        rescanned newModel =
+            if previewOnly then
+                ( newModel, [ CmdPreviewFind 0 ] )
+
+            else
+                ( newModel, [ CmdGoToActive ] )
+    in
+    case msg of
+        Close ->
+            ( close model, [ CmdFocusDocument, CmdPreviewFind 0 ] )
+
+        QueryChanged query ->
+            rescanned (setQuery query lines model)
+
+        ReplacementChanged replacement ->
+            ( setReplacement replacement model, [] )
+
+        Step delta ->
+            if previewOnly then
+                ( model, [ CmdPreviewFind delta ] )
+
+            else
+                ( step delta model, [ CmdGoToActive ] )
+
+        ToggleCase ->
+            rescanned (setCaseSensitive (not model.caseSensitive) lines model)
+
+        ReplaceActive ->
+            case activeMatch model of
+                Just range ->
+                    ( model, [ CmdReplace [ range ] ] )
+
+                Nothing ->
+                    ( model, [] )
+
+        ReplaceAll ->
+            ( model, [ CmdReplace (Array.toList model.matches) ] )
+
+
+
+-- VIEW
+
+
+inputId : String
+inputId =
+    "find-input"
+
+
+view : ( Int, Int ) -> Model -> Html Msg
+view counts find =
+    let
+        ( current, total ) =
+            counts
+
+        countLabel =
+            if find.query == "" then
+                ""
+
+            else if total == 0 then
+                "No results"
+
+            else
+                String.fromInt current
+                    ++ " of "
+                    ++ String.fromInt total
+                    ++ (if total >= matchLimit then
+                            "+"
+
+                        else
+                            ""
+                       )
+
+        stepButton label delta =
+            button
+                [ class "find-button"
+                , attribute "aria-label" label
+                , title label
+                , disabled (total == 0)
+                , onClick (Step delta)
+                ]
+                [ text
+                    (if delta < 0 then
+                        "↑"
+
+                     else
+                        "↓"
+                    )
+                ]
+    in
+    div [ class "find-bar", attribute "data-testid" "find-bar" ]
+        [ div [ class "find-row" ]
+            [ input
+                [ class "find-input"
+                , id inputId
+                , attribute "data-testid" "find-input"
+                , attribute "aria-label" "Find"
+                , placeholder "Find"
+                , value find.query
+                , spellcheck False
+                , onInput QueryChanged
+                , preventDefaultOn "keydown" (keyDecoder False)
+                ]
+                []
+            , span [ class "find-count", attribute "data-testid" "find-count" ] [ text countLabel ]
+            , button
+                [ class "find-button"
+                , classList [ ( "on", find.caseSensitive ) ]
+                , attribute "aria-label" "Match case"
+                , attribute "aria-pressed"
+                    (if find.caseSensitive then
+                        "true"
+
+                     else
+                        "false"
+                    )
+                , title "Match case"
+                , onClick ToggleCase
+                ]
+                [ text "Aa" ]
+            , stepButton "Previous match" -1
+            , stepButton "Next match" 1
+            , button [ class "find-button", attribute "aria-label" "Close find", title "Close", onClick Close ] [ text "×" ]
+            ]
+        , if find.replaceShown then
+            div [ class "find-row" ]
+                [ input
+                    [ class "find-input"
+                    , attribute "data-testid" "replace-input"
+                    , attribute "aria-label" "Replace with"
+                    , placeholder "Replace"
+                    , value find.replacement
+                    , spellcheck False
+                    , onInput ReplacementChanged
+                    , preventDefaultOn "keydown" (keyDecoder True)
+                    ]
+                    []
+                , button
+                    [ class "find-button wide"
+                    , attribute "data-testid" "replace-one"
+                    , disabled (total == 0)
+                    , onClick ReplaceActive
+                    ]
+                    [ text "Replace" ]
+                , button
+                    [ class "find-button wide"
+                    , attribute "data-testid" "replace-all"
+                    , disabled (total == 0)
+                    , onClick ReplaceAll
+                    ]
+                    [ text "All" ]
+                ]
+
+          else
+            text ""
+        ]
+
+
+{-| Keys inside the find fields. Enter steps through matches (or replaces, in
+the replacement field) and Escape closes; everything else is ordinary typing.
+-}
+keyDecoder : Bool -> D.Decoder ( Msg, Bool )
+keyDecoder inReplacement =
+    D.map2 Tuple.pair (D.field "key" D.string) (D.field "shiftKey" D.bool)
+        |> D.andThen
+            (\( key, shift ) ->
+                case key of
+                    "Enter" ->
+                        D.succeed
+                            ( if inReplacement then
+                                ReplaceActive
+
+                              else
+                                Step
+                                    (if shift then
+                                        -1
+
+                                     else
+                                        1
+                                    )
+                            , True
+                            )
+
+                    "Escape" ->
+                        D.succeed ( Close, True )
+
+                    _ ->
+                        D.fail "not a find key"
+            )
+
+

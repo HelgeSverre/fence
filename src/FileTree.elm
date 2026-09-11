@@ -812,22 +812,6 @@ removeChild targetPath (FileEntry e) =
             FileEntry e
 
 
-dirName : String -> String
-dirName path =
-    let
-        parts =
-            String.split "/" path
-                |> List.filter (not << String.isEmpty)
-    in
-    case List.reverse parts of
-        _ :: rest ->
-            "/" ++ String.join "/" (List.reverse rest)
-
-        [] ->
-            "/"
-
-
-
 -- VIEW
 
 

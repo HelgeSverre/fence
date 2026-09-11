@@ -1,24 +1,19 @@
 module Main exposing
-    ( DragTarget(..)
-    , KeyBinding
-    , LayoutMode(..)
+    ( LayoutMode(..)
     , Model
     , Msg(..)
     , init
-    , keyBindingLabel
     , main
-    , matchesBinding
     , previewDelay
     , update
-    , visibleSettingsOptions
     )
 
 import Array
 import Browser
 import Browser.Dom
 import Browser.Events
+import Decoders exposing (..)
 import Editor
-import EditorLayout
 import FileTree
 import Find
 import Html exposing (..)
@@ -32,12 +27,15 @@ import Json.Encode as E
 import Markdown
 import Palette
 import Ports
-import Preferences exposing (Picker(..), Preferences, PreviewWidth(..))
+import Preferences exposing (Picker(..), Preferences)
 import Preview
+import PreviewSync exposing (SyncPoint, syncAnchors)
+import Settings exposing (RebindTarget(..))
+import Splits exposing (DragState, DragTarget(..))
 import Process
 import Task
 import TextBuffer exposing (Cursor)
-import Tooltip exposing (Tooltip)
+import Tooltip
 import Types exposing (..)
 import VirtualEditor
 import Yaml
@@ -87,40 +85,6 @@ nextLayout mode =
         PreviewOnly ->
             EditorOnly
 
-
-type DragTarget
-    = DraggingSidebar
-    | DraggingEditor
-    | DraggingRightSidebar
-
-
-type alias DragState =
-    { target : DragTarget
-    , startX : Float
-    , startFraction : Float
-    }
-
-
-{-| A keyboard shortcut. `key` is the `event.key` value (e.g. "1"); the
-booleans capture which modifiers must be held.
--}
-type alias KeyBinding =
-    { key : String
-    , meta : Bool
-    , ctrl : Bool
-    , shift : Bool
-    , alt : Bool
-    }
-
-
-{-| Which sidebar toggle is being rebound while in capture mode.
--}
-type RebindTarget
-    = RebindLeft
-    | RebindRight
-    | RebindLayout
-
-
 type alias Model =
     { fileTree : FileTree.Model
     , editor : Editor.Model
@@ -160,7 +124,6 @@ type alias Model =
     , closeAfterSave : Bool
     , find : Find.Model
     , palette : Palette.Model
-    , searchGeneration : Int
 
     -- recently opened files, newest first, with a cursor for back/forward
     , history : List FilePath
@@ -211,37 +174,11 @@ type Msg
     | StartRebind RebindTarget
     | DismissError
     | OpenFind Bool
-    | CloseFind
-    | FindQueryChanged String
-    | FindReplacementChanged String
-    | FindStep Int
-    | FindToggleCase
-    | ReplaceActive
-    | ReplaceAll
-    | OpenPalette Palette.Mode
-    | ClosePalette
-    | PaletteQueryChanged String
-    | PaletteStep Int
-    | PaletteChoose (Maybe Palette.Item)
-    | SearchDue Int
+    | FindMsg Find.Msg
+    | PaletteMsg Palette.Msg
     | NavigateHistory Int
     | SyncPointsMeasured (List SyncPoint)
     | NoOp
-
-
-defaultSidebarFraction : Float
-defaultSidebarFraction =
-    0.17
-
-
-defaultEditorFraction : Float
-defaultEditorFraction =
-    0.5
-
-
-defaultRightSidebarFraction : Float
-defaultRightSidebarFraction =
-    0.18
 
 
 defaultOutlineMaxLevel : Int
@@ -269,117 +206,51 @@ defaultRightToggleKey =
     { key = "3", meta = True, ctrl = False, shift = False, alt = False }
 
 
-keyBindingDecoder : D.Decoder KeyBinding
-keyBindingDecoder =
-    D.map5 KeyBinding
-        (D.field "key" D.string)
-        (D.field "meta" D.bool)
-        (D.field "ctrl" D.bool)
-        (D.field "shift" D.bool)
-        (D.field "alt" D.bool)
-
-
-encodeKeyBinding : KeyBinding -> E.Value
-encodeKeyBinding binding =
-    E.object
-        [ ( "key", E.string binding.key )
-        , ( "meta", E.bool binding.meta )
-        , ( "ctrl", E.bool binding.ctrl )
-        , ( "shift", E.bool binding.shift )
-        , ( "alt", E.bool binding.alt )
-        ]
-
-
-{-| Does an actual keydown (key + modifier flags) match a configured binding?
--}
-matchesBinding : KeyBinding -> String -> Bool -> Bool -> Bool -> Bool -> Bool
-matchesBinding binding key meta ctrl shift alt =
-    (String.toLower binding.key == String.toLower key)
-        && (binding.meta == meta)
-        && (binding.ctrl == ctrl)
-        && (binding.shift == shift)
-        && (binding.alt == alt)
-
-
-{-| Human-readable label for a binding, e.g. "⌘1" or "⇧⌥A".
--}
-keyBindingLabel : KeyBinding -> String
-keyBindingLabel binding =
-    let
-        mods =
-            [ ( binding.ctrl, "⌃" )
-            , ( binding.alt, "⌥" )
-            , ( binding.shift, "⇧" )
-            , ( binding.meta, "⌘" )
-            ]
-                |> List.filter Tuple.first
-                |> List.map Tuple.second
-                |> String.concat
-
-        keyLabel =
-            if String.length binding.key == 1 then
-                String.toUpper binding.key
-
-            else
-                binding.key
-    in
-    mods ++ keyLabel
-
-
 defaultWindowWidth : Float
 defaultWindowWidth =
     1400
 
 
-settingsItemId : Int -> String
-settingsItemId n =
-    "settings-item-" ++ String.fromInt n
-
-
-pickerSlug : Picker -> String
-pickerSlug picker =
-    case picker of
-        ThemePicker ->
-            "theme"
-
-        EditorFontPicker ->
-            "editor-font"
-
-        UIFontPicker ->
-            "ui-font"
-
-
-pickerId : Picker -> String
-pickerId picker =
-    "settings-picker-" ++ pickerSlug picker
-
-
-pickerSearchId : String
-pickerSearchId =
-    "settings-picker-search"
-
-
-{-| The options the arrow keys can reach: the expanded picker's, filtered.
--}
-visibleSettingsOptions : Model -> List ( String, String )
-visibleSettingsOptions model =
-    case model.expandedPicker of
-        Nothing ->
-            []
-
-        Just picker ->
-            let
-                needle =
-                    String.toLower (String.trim model.pickerFilter)
-            in
-            List.filter
-                (\( _, label ) -> String.contains needle (String.toLower label))
-                (Preferences.options picker)
-
-
 focusSilently : String -> Cmd Msg
 focusSilently elementId =
     ignoreResult (Browser.Dom.focus elementId)
+
+
+{-| The settings dropdown's messages are handled here, as the state they change
+is still on this model.
+-}
+settingsMsg : Settings.Msg -> Msg
+settingsMsg msg =
+    case msg of
+        Settings.SetPreference change ->
+            SetPreference change
+
+        Settings.SetSoftWrap enabled ->
+            SetSoftWrap enabled
+
+        Settings.ExpandPicker picker ->
+            ExpandPicker picker
+
+        Settings.PickerFilterChanged text ->
+            PickerFilterChanged text
+
+        Settings.CloseSettings ->
+            CloseSettings
+
+        Settings.SettingsKeyDown key ->
+            SettingsKeyDown key
+
+        Settings.SettingsFocused idx ->
+            SettingsFocused idx
+
+        Settings.SetOutlineMaxLevel level ->
+            SetOutlineMaxLevel level
+
+        Settings.StartRebind target ->
+            StartRebind target
+
+        Settings.NoOp ->
+            NoOp
 
 
 init : D.Value -> ( Model, Cmd Msg )
@@ -414,14 +285,14 @@ init flagsValue =
       , settingsFocus = 0
       , expandedPicker = Nothing
       , pickerFilter = ""
-      , sidebarFraction = flag "sidebarFraction" D.float defaultSidebarFraction
-      , editorFraction = flag "editorFraction" D.float defaultEditorFraction
+      , sidebarFraction = flag "sidebarFraction" D.float Splits.defaultSidebarFraction
+      , editorFraction = flag "editorFraction" D.float Splits.defaultEditorFraction
       , drag = Nothing
       , windowWidth = flag "windowWidth" D.float defaultWindowWidth
       , outline = []
       , leftSidebarVisible = flag "leftSidebarVisible" D.bool True
       , rightSidebarVisible = flag "rightSidebarVisible" D.bool False
-      , rightSidebarFraction = flag "rightSidebarFraction" D.float defaultRightSidebarFraction
+      , rightSidebarFraction = flag "rightSidebarFraction" D.float Splits.defaultRightSidebarFraction
       , outlineMaxLevel =
             flag "outlineMaxLevel" D.int defaultOutlineMaxLevel
                 |> clamp outlineMinLevel outlineMaxLevelLimit
@@ -432,7 +303,6 @@ init flagsValue =
       , closeAfterSave = False
       , find = Find.init
       , palette = Palette.init
-      , searchGeneration = 0
       , history = []
       , historyPos = 0
       , navigating = False
@@ -492,7 +362,7 @@ update msg model =
             in
             ( { model | settingsOpen = open, settingsFocus = 0, expandedPicker = Nothing, pickerFilter = "" }
             , if open then
-                focusSilently (pickerId ThemePicker)
+                focusSilently (Settings.pickerId ThemePicker)
 
               else
                 Cmd.none
@@ -517,7 +387,7 @@ update msg model =
             ( { model | expandedPicker = picker, pickerFilter = "", settingsFocus = 0 }
             , case picker of
                 Just _ ->
-                    focusSilently pickerSearchId
+                    focusSilently Settings.pickerSearchId
 
                 Nothing ->
                     Cmd.none
@@ -535,7 +405,7 @@ update msg model =
         SettingsKeyDown key ->
             let
                 visible =
-                    visibleSettingsOptions model
+                    Settings.visibleSettingsOptions model
 
                 itemCount =
                     List.length visible
@@ -545,7 +415,7 @@ update msg model =
 
                 moveFocus newFocus =
                     ( { model | settingsFocus = newFocus }
-                    , focusSilently (settingsItemId newFocus)
+                    , focusSilently (Settings.settingsItemId newFocus)
                     )
 
                 activateFocused =
@@ -587,58 +457,18 @@ update msg model =
                         ( model, Cmd.none )
 
         DividerMouseDown target clientX ->
-            let
-                startFraction =
-                    case target of
-                        DraggingSidebar ->
-                            model.sidebarFraction
-
-                        DraggingEditor ->
-                            model.editorFraction
-
-                        DraggingRightSidebar ->
-                            model.rightSidebarFraction
-            in
-            ( { model
-                | drag =
-                    Just
-                        { target = target
-                        , startX = clientX
-                        , startFraction = startFraction
-                        }
-              }
-            , Cmd.none
-            )
+            ( Splits.startDrag target clientX model, Cmd.none )
 
         DividerMouseMove clientX ->
-            case model.drag of
-                Just d ->
-                    let
-                        updatedModel =
-                            computeDrag d clientX model
-                    in
-                    ( updatedModel, Cmd.none )
-
-                Nothing ->
-                    ( model, Cmd.none )
+            ( Splits.drag clientX model, Cmd.none )
 
         DividerMouseUp ->
-            ( { model | drag = Nothing }
-            , saveSplitsCmd model
-            )
+            ( Splits.endDrag model, saveSplitsCmd model )
 
         DividerDoubleClick target ->
             let
                 newModel =
-                    case target of
-                        DraggingSidebar ->
-                            { model | sidebarFraction = defaultSidebarFraction }
-
-                        DraggingEditor ->
-                            { model | editorFraction = defaultEditorFraction }
-
-                        DraggingRightSidebar ->
-                            { model | rightSidebarFraction = defaultRightSidebarFraction }
+                    Splits.resetFraction target model
             in
             ( newModel, saveSplitsCmd newModel )
 
@@ -692,152 +522,24 @@ update msg model =
                     { visibleModel | find = Find.open withReplace seed model.editor.lines visibleModel.find }
             in
             ( newModel
-            , Cmd.batch [ layoutCmd, focusSilently findInputId, previewFindCmd 0 newModel ]
+            , Cmd.batch [ layoutCmd, focusSilently Find.inputId, previewFindCmd 0 newModel ]
             )
 
-        CloseFind ->
+        FindMsg subMsg ->
             let
-                newModel =
-                    { model | find = Find.close model.find }
+                ( find, outCmds ) =
+                    Find.update subMsg (model.layoutMode == PreviewOnly) model.editor.lines model.find
             in
-            ( newModel
-            , Cmd.batch
-                [ focusSilently
-                    (if model.layoutMode == PreviewOnly then
-                        "preview-container"
+            List.foldl runFindCmd ( { model | find = find }, Cmd.none ) outCmds
 
-                     else
-                        "veditor-input"
-                    )
-                , previewFindCmd 0 newModel
-                ]
+        PaletteMsg subMsg ->
+            let
+                ( palette, outCmds ) =
+                    Palette.update subMsg model.fileTree.rootPath model.palette
+            in
+            ( { model | palette = palette }
+            , Cmd.batch (List.map (runPaletteCmd model) outCmds)
             )
-
-        FindQueryChanged query ->
-            let
-                newModel =
-                    { model | find = Find.setQuery query model.editor.lines model.find }
-            in
-            if model.layoutMode == PreviewOnly then
-                ( newModel, previewFindCmd 0 newModel )
-
-            else
-                goToActive newModel
-
-        FindReplacementChanged replacement ->
-            ( { model | find = Find.setReplacement replacement model.find }, Cmd.none )
-
-        FindStep delta ->
-            if model.layoutMode == PreviewOnly then
-                ( model, previewFindCmd delta model )
-
-            else
-                goToActive { model | find = Find.step delta model.find }
-
-        FindToggleCase ->
-            let
-                newModel =
-                    { model | find = Find.setCaseSensitive (not model.find.caseSensitive) model.editor.lines model.find }
-            in
-            if model.layoutMode == PreviewOnly then
-                ( newModel, previewFindCmd 0 newModel )
-
-            else
-                goToActive newModel
-
-        ReplaceActive ->
-            case Find.activeMatch model.find of
-                Just range ->
-                    applyReplacement [ range ] model
-
-                Nothing ->
-                    ( model, Cmd.none )
-
-        ReplaceAll ->
-            applyReplacement (Array.toList (Find.matches model.find)) model
-
-        OpenPalette wanted ->
-            ( { model | palette = Palette.open wanted model.palette }
-            , Cmd.batch
-                [ focusSilently paletteInputId
-                , case ( wanted, model.fileTree.rootPath ) of
-                    -- the list is cheap to rebuild and always current this way
-                    ( Palette.Files, Just root ) ->
-                        command "listFiles" [ ( "path", E.string root ) ]
-
-                    _ ->
-                        Cmd.none
-                ]
-            )
-
-        ClosePalette ->
-            ( { model | palette = Palette.close model.palette }
-            , focusSilently
-                (if model.layoutMode == PreviewOnly then
-                    "preview-container"
-
-                 else
-                    "veditor-input"
-                )
-            )
-
-        PaletteQueryChanged text ->
-            let
-                palette =
-                    Palette.setQuery text model.palette
-
-                generation =
-                    model.searchGeneration + 1
-            in
-            case ( Palette.mode palette, model.fileTree.rootPath ) of
-                ( Just Palette.Search, Just _ ) ->
-                    ( { model | palette = palette, searchGeneration = generation }
-                    , Task.perform (\_ -> SearchDue generation) (Process.sleep searchDelay)
-                    )
-
-                _ ->
-                    ( { model | palette = palette }, Cmd.none )
-
-        SearchDue generation ->
-            if generation /= model.searchGeneration then
-                ( model, Cmd.none )
-
-            else
-                case ( model.fileTree.rootPath, String.trim (Palette.query model.palette) ) of
-                    ( Just root, text ) ->
-                        if text == "" then
-                            ( { model | palette = Palette.setResults [] model.palette }, Cmd.none )
-
-                        else
-                            ( model
-                            , command "searchWorkspace"
-                                [ ( "path", E.string root ), ( "query", E.string text ) ]
-                            )
-
-                    _ ->
-                        ( model, Cmd.none )
-
-        PaletteStep delta ->
-            ( { model | palette = Palette.step delta model.palette }, Cmd.none )
-
-        PaletteChoose item ->
-            case item of
-                Just chosen ->
-                    ( { model | palette = Palette.close model.palette }
-                    , command "readFile"
-                        (( "path", E.string chosen.path )
-                            :: (case chosen.line of
-                                    Just line ->
-                                        [ ( "line", E.int line ) ]
-
-                                    Nothing ->
-                                        []
-                               )
-                        )
-                    )
-
-                Nothing ->
-                    ( model, Cmd.none )
 
         SyncPointsMeasured points ->
             -- re-sync straight away: the editor may have been scrolled while
@@ -984,16 +686,16 @@ update msg model =
                         ( { model | settingsOpen = False }, Cmd.none )
 
                     else if key == "f" && (metaKey || ctrlKey) && shiftKey then
-                        update (OpenPalette Palette.Search) model
+                        update (PaletteMsg (Palette.Open Palette.Search)) model
 
                     else if key == "f" && (metaKey || ctrlKey) then
                         update (OpenFind altKey) model
 
                     else if key == "p" && (metaKey || ctrlKey) then
-                        update (OpenPalette Palette.Files) model
+                        update (PaletteMsg (Palette.Open Palette.Files)) model
 
                     else if key == "Escape" && Palette.isOpen model.palette then
-                        update ClosePalette model
+                        update (PaletteMsg Palette.Close) model
 
                     else if key == "[" && (metaKey || ctrlKey) then
                         update (NavigateHistory 1) model
@@ -1003,18 +705,20 @@ update msg model =
 
                     else if key == "g" && (metaKey || ctrlKey) && Find.isOpen model.find then
                         update
-                            (FindStep
-                                (if shiftKey then
-                                    -1
+                            (FindMsg
+                                (Find.Step
+                                    (if shiftKey then
+                                        -1
 
-                                 else
-                                    1
+                                     else
+                                        1
+                                    )
                                 )
                             )
                             model
 
                     else if key == "Escape" && Find.isOpen model.find then
-                        update CloseFind model
+                        update (FindMsg Find.Close) model
 
                     else if matchesBinding model.leftToggleKey key metaKey ctrlKey shiftKey altKey then
                         update ToggleLeftSidebar model
@@ -1068,27 +772,10 @@ countsFor content =
     }
 
 
-{-| The directory part of a path, for resolving a document's relative links. -}
-dirName : FilePath -> String
-dirName path =
-    String.split "/" path |> List.reverse |> List.drop 1 |> List.reverse |> String.join "/"
-
-
 {-| How many recently opened files back/forward can reach. -}
 historyLimit : Int
 historyLimit =
     50
-
-
-paletteInputId : String
-paletteInputId =
-    "palette-input"
-
-
-{-| How long to wait before searching the workspace for what has been typed. -}
-searchDelay : Float
-searchDelay =
-    200
 
 
 {-| Show the active match: select it in the editor and scroll it into view.
@@ -1175,6 +862,64 @@ updateEditor subMsg model =
             ]
         )
 
+
+
+{-| Where focus goes when an overlay closes: the visible document pane. -}
+documentFocusId : Model -> String
+documentFocusId model =
+    if model.layoutMode == PreviewOnly then
+        "preview-container"
+
+    else
+        "veditor-input"
+
+
+runPaletteCmd : Model -> Palette.OutCmd -> Cmd Msg
+runPaletteCmd model outCmd =
+    case outCmd of
+        Palette.CmdFocusInput ->
+            focusSilently Palette.inputId
+
+        Palette.CmdFocusDocument ->
+            focusSilently (documentFocusId model)
+
+        Palette.CmdListFiles root ->
+            command "listFiles" [ ( "path", E.string root ) ]
+
+        Palette.CmdDebounceSearch generation ->
+            Task.perform (\_ -> PaletteMsg (Palette.SearchDue generation)) (Process.sleep Palette.searchDelay)
+
+        Palette.CmdSearch root text ->
+            command "searchWorkspace" [ ( "path", E.string root ), ( "query", E.string text ) ]
+
+        Palette.CmdReadFile path line ->
+            command "readFile"
+                (( "path", E.string path )
+                    :: (case line of
+                            Just n ->
+                                [ ( "line", E.int n ) ]
+
+                            Nothing ->
+                                []
+                       )
+                )
+
+
+runFindCmd : Find.OutCmd -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+runFindCmd outCmd ( model, cmd ) =
+    Tuple.mapSecond (\next -> Cmd.batch [ cmd, next ]) <|
+        case outCmd of
+            Find.CmdFocusDocument ->
+                ( model, focusSilently (documentFocusId model) )
+
+            Find.CmdPreviewFind delta ->
+                ( model, previewFindCmd delta model )
+
+            Find.CmdGoToActive ->
+                goToActive model
+
+            Find.CmdReplace ranges ->
+                applyReplacement ranges model
 
 
 goToActive : Model -> ( Model, Cmd Msg )
@@ -1840,61 +1585,6 @@ saveRecoveryDraftCmd editor =
 
 
 
--- SPLIT HELPERS
-
-
-computeDrag : DragState -> Float -> Model -> Model
-computeDrag d clientX model =
-    case d.target of
-        DraggingSidebar ->
-            let
-                deltaFraction =
-                    (clientX - d.startX) / model.windowWidth
-
-                newFraction =
-                    clamp 0.08 0.4 (d.startFraction + deltaFraction)
-            in
-            { model | sidebarFraction = newFraction }
-
-        DraggingEditor ->
-            let
-                rightFraction =
-                    if model.rightSidebarVisible then
-                        model.rightSidebarFraction
-
-                    else
-                        0
-
-                -- editorFraction is a fraction of the editor/preview region,
-                -- i.e. the window minus both sidebars.
-                remainingWidth =
-                    model.windowWidth * (1 - model.sidebarFraction - rightFraction)
-
-                deltaFraction =
-                    if remainingWidth > 0 then
-                        (clientX - d.startX) / remainingWidth
-
-                    else
-                        0
-
-                newFraction =
-                    clamp 0.15 0.85 (d.startFraction + deltaFraction)
-            in
-            { model | editorFraction = newFraction }
-
-        DraggingRightSidebar ->
-            let
-                -- The handle sits on the sidebar's left edge, so dragging
-                -- left (negative delta) widens the right sidebar.
-                deltaFraction =
-                    (clientX - d.startX) / model.windowWidth
-
-                newFraction =
-                    clamp 0.08 0.4 (d.startFraction - deltaFraction)
-            in
-            { model | rightSidebarFraction = newFraction }
-
-
 {-| A message to the main process: a tag naming the command, plus its fields.
 -}
 command : String -> List ( String, E.Value ) -> Cmd Msg
@@ -1951,218 +1641,27 @@ savePreferences prefs model =
 
 saveSplitsCmd : Model -> Cmd Msg
 saveSplitsCmd model =
-    command "saveSplits"
-        [ ( "sidebarFraction", E.float model.sidebarFraction )
-        , ( "editorFraction", E.float model.editorFraction )
-        , ( "rightSidebarFraction", E.float model.rightSidebarFraction )
-        , ( "leftSidebarVisible", E.bool model.leftSidebarVisible )
-        , ( "rightSidebarVisible", E.bool model.rightSidebarVisible )
-        , ( "outlineMaxLevel", E.int model.outlineMaxLevel )
-        , ( "leftToggleKey", encodeKeyBinding model.leftToggleKey )
-        , ( "rightToggleKey", encodeKeyBinding model.rightToggleKey )
-        , ( "layoutMode", E.string (layoutName model.layoutMode) )
-        , ( "layoutCycleKey", encodeKeyBinding model.layoutCycleKey )
-        ]
+    command "saveSplits" (Splits.encode (layoutName model.layoutMode) model)
 
 
-{-| Keep the preview following the editor's scroll position.
 
-Mapping source lines to rendered pixels exactly would need a position for
-every block; headings are the anchors we already have, so the editor's top
-line is placed between the two headings that bracket it, and the preview is
-scrolled to the matching point between their rendered positions.
 
-Two things keep it smooth. The top line is fractional, so the preview moves
-with the editor rather than once per line. And every heading's pixel position
-is measured in one pass whenever the preview's layout changes, never while
-scrolling: a `getElement` between the editor's own row updates would force a
-synchronous layout of the whole page on every scroll event, which is exactly
-what this editor exists to avoid. Scrolling is then pure arithmetic and a
-single scroll write.
-
-Only the editor drives this: mapping the preview's DOM back to source would
-need the same data in reverse, for much less gain.
-
--}
-type alias SyncPoint =
-    { line : Float, y : Float }
+-- PREVIEW SYNC (see PreviewSync.elm)
 
 
 syncPreview : Editor.Model -> Model -> Cmd Msg
 syncPreview editor model =
-    let
-        topLine =
-            if editor.softWrap then
-                EditorLayout.sourceLine (editor.scrollTop / Basics.max 1 editor.metrics.lineHeight) editor.layout
-
-            else
-                editor.scrollTop / Basics.max 1 editor.metrics.lineHeight
-    in
-    if model.layoutMode /= Split || Editor.dragging editor then
-        Cmd.none
-
-    else
-        case bracketing topLine model.syncPoints of
-            Just ( from, to ) ->
-                scrollPreviewTo (interpolate from to topLine)
-
-            Nothing ->
-                Cmd.none
+    PreviewSync.syncPreview NoOp (model.layoutMode == Split) model.syncPoints editor
 
 
-{-| The measured points bracketing a line.
--}
-bracketing : Float -> List SyncPoint -> Maybe ( SyncPoint, SyncPoint )
-bracketing topLine points =
-    case points of
-        first :: second :: rest ->
-            if topLine < second.line || List.isEmpty rest then
-                Just ( first, second )
-
-            else
-                bracketing topLine (second :: rest)
-
-        _ ->
-            Nothing
-
-
-interpolate : SyncPoint -> SyncPoint -> Float -> Float
-interpolate from to topLine =
-    let
-        span =
-            to.line - from.line
-    in
-    if span <= 0 then
-        from.y
-
-    else
-        from.y + clamp 0 1 ((topLine - from.line) / span) * (to.y - from.y)
-
-
-scrollPreviewTo : Float -> Cmd Msg
-scrollPreviewTo y =
-    ignoreResult (Browser.Dom.setViewportOf "preview-container" 0 y)
-
-
-{-| Measure where every heading sits in the rendered preview, plus the two
-ends of the document. One pass, off the scrolling path: consecutive reads with
-no writes between them share a single layout.
-
-The wait is not decoration. Elm applies a view on the animation frame after
-the update that produced it, so reading the DOM in the same update would
-measure the *previous* render - and right after a parse that is a preview
-without the headings in it.
-
--}
 measureSyncPoints : Model -> Cmd Msg
 measureSyncPoints model =
-    if model.layoutMode /= Split || List.isEmpty model.headingAnchors then
-        Task.perform SyncPointsMeasured (Task.succeed [])
-
-    else
-        Process.sleep 50
-            |> Task.andThen
-                (\_ -> Task.map2 Tuple.pair (Browser.Dom.getElement "preview-container") (Browser.Dom.getViewportOf "preview-container"))
-            |> Task.andThen
-                (\( container, containerVp ) ->
-                    model.headingAnchors
-                        |> List.map
-                            (\( line, anchorId ) ->
-                                Browser.Dom.getElement anchorId
-                                    |> Task.map
-                                        (\heading ->
-                                            Just
-                                                { line = toFloat line
-                                                , y = containerVp.viewport.y + heading.element.y - container.element.y
-                                                }
-                                        )
-                                    -- a heading that is not in the DOM is skipped
-                                    -- rather than losing the whole mapping
-                                    |> Task.onError (\_ -> Task.succeed Nothing)
-                            )
-                        |> Task.sequence
-                        |> Task.map
-                            (\measured ->
-                                -- the document's own top always maps to the top
-                                -- of the preview, so a heading on line 0 (which
-                                -- measures at the preview's padding) is dropped
-                                { line = 0, y = 0 }
-                                    :: List.filter (\point -> point.line > 0) (List.filterMap identity measured)
-                                    ++ [ { line = toFloat (Basics.max 1 (Array.length model.editor.lines - 1))
-                                         , y = Basics.max 0 (containerVp.scene.height - containerVp.viewport.height)
-                                         }
-                                       ]
-                            )
-                )
-            |> Task.attempt (Result.withDefault [] >> SyncPointsMeasured)
+    PreviewSync.measureSyncPoints SyncPointsMeasured (model.layoutMode == Split) model.headingAnchors model.editor
 
 
-{-| The headings, as (source line, anchor id) pairs. Recomputed once per
-completed parse, never per scroll event: it rescans the whole document.
-
-The two lists come from the same document in the same order; if they disagree
-in length the mapping would be wrong for every heading (a setext heading, say),
-so sync is skipped entirely instead.
-
--}
-syncAnchors : String -> List Markdown.OutlineEntry -> List ( Int, String )
-syncAnchors content entries =
-    let
-        lines =
-            Markdown.headingLines content
-    in
-    if List.length lines == List.length entries then
-        List.map2 (\line entry -> ( line, entry.id )) lines entries
-
-    else
-        []
-
-
-{-| Scroll to a heading picked in the outline.
-
-The editor is what moves: the outline lists the rendered document, but the
-heading's source line is known, and scrolling the editor there carries the
-preview with it through the usual sync. Scrolling both directly instead would
-race - the preview scroll is computed from the container's current offset,
-which sync is moving at the same time, and the result overshoots.
-
-Only a heading whose source line cannot be resolved (see `syncAnchors`) falls
-back to scrolling the preview on its own.
-
--}
 scrollToHeadingCmd : String -> Model -> Cmd Msg
 scrollToHeadingCmd anchorId model =
-    if model.layoutMode == PreviewOnly then
-        scrollPreviewToHeadingCmd anchorId
-
-    else
-        case model.headingAnchors |> List.filter (\( _, id ) -> id == anchorId) |> List.head of
-            Just ( line, _ ) ->
-                ignoreResult
-                    (Browser.Dom.setViewportOf "veditor"
-                        0
-                        (toFloat (EditorLayout.lineStartRow line model.editor.layout) * model.editor.metrics.lineHeight)
-                    )
-
-            Nothing ->
-                scrollPreviewToHeadingCmd anchorId
-
-
-{-| Scroll the preview pane so the heading with `anchorId` is at the top.
-Computes the heading's offset relative to the scrollable preview container.
--}
-scrollPreviewToHeadingCmd : String -> Cmd Msg
-scrollPreviewToHeadingCmd anchorId =
-    Task.map3
-        (\heading container containerVp ->
-            -- Heading offset within the container's scrollable content.
-            containerVp.viewport.y + heading.element.y - container.element.y
-        )
-        (Browser.Dom.getElement anchorId)
-        (Browser.Dom.getElement "preview-container")
-        (Browser.Dom.getViewportOf "preview-container")
-        |> Task.andThen (\y -> Browser.Dom.setViewportOf "preview-container" 0 y)
-        |> ignoreResult
+    PreviewSync.scrollToHeadingCmd NoOp (model.layoutMode == PreviewOnly) model.headingAnchors model.editor anchorId
 
 
 {-| Is this `event.key` value a bare modifier key (no real character)?
@@ -2218,128 +1717,6 @@ outCmdToCommand cmd =
         FileTree.CmdFocusEditInput ->
             focusSilently treeEditInputId
 
-
-
--- DECODERS
-
-
-fileEntryDecoder : D.Decoder FileEntry
-fileEntryDecoder =
-    D.map4
-        (\name path ft children ->
-            FileEntry
-                { name = name
-                , path = path
-                , fileType = ft
-                , children = children
-                }
-        )
-        (D.field "name" D.string)
-        (D.field "path" D.string)
-        (D.field "fileType" fileTypeDecoder)
-        (D.maybe (D.field "children" (D.lazy (\_ -> D.list fileEntryDecoder))))
-
-
-fileTypeDecoder : D.Decoder FileType
-fileTypeDecoder =
-    D.string
-        |> D.andThen
-            (\s ->
-                case s of
-                    "directory" ->
-                        D.succeed Directory
-
-                    "file" ->
-                        D.succeed File
-
-                    _ ->
-                        D.fail ("Unknown file type: " ++ s)
-            )
-
-
-dirEntriesDecoder : D.Decoder ( FilePath, List FileEntry )
-dirEntriesDecoder =
-    D.map2 Tuple.pair
-        (D.field "path" D.string)
-        (D.field "entries" (D.list fileEntryDecoder))
-
-
-type alias FileContentPayload =
-    { path : FilePath
-    , content : String
-    , revision : String
-    , dirty : Bool
-    , line : Maybe Int -- 1-based line to put the caret on, for search results
-    }
-
-
-fileContentDecoder : D.Decoder FileContentPayload
-fileContentDecoder =
-    D.map5 FileContentPayload
-        (D.field "path" D.string)
-        (D.field "content" D.string)
-        (D.field "revision" D.string)
-        (D.field "dirty" D.bool)
-        (D.maybe (D.field "line" D.int))
-
-
-fileSavedDecoder : D.Decoder ( FilePath, String )
-fileSavedDecoder =
-    D.map2 Tuple.pair
-        (D.field "path" D.string)
-        (D.field "revision" D.string)
-
-
-fileItemDecoder : D.Decoder Palette.Item
-fileItemDecoder =
-    D.map2
-        (\path relative -> { primary = baseName path, secondary = relative, path = path, line = Nothing })
-        (D.field "path" D.string)
-        (D.field "relative" D.string)
-
-
-searchResultsDecoder : D.Decoder ( String, List Palette.Item )
-searchResultsDecoder =
-    D.map2 Tuple.pair
-        (D.field "query" D.string)
-        (D.field "hits"
-            (D.list
-                (D.map4
-                    (\path relative line text ->
-                        { primary = String.trim text
-                        , secondary = relative ++ ":" ++ String.fromInt line
-                        , path = path
-                        , line = Just line
-                        }
-                    )
-                    (D.field "path" D.string)
-                    (D.field "relative" D.string)
-                    (D.field "line" D.int)
-                    (D.field "text" D.string)
-                )
-            )
-        )
-
-
-treeCommandDecoder : D.Decoder ( String, Maybe FilePath )
-treeCommandDecoder =
-    D.map2 Tuple.pair
-        (D.field "command" D.string)
-        (D.maybe (D.field "path" D.string))
-
-
-renamedDecoder : D.Decoder ( FilePath, FilePath )
-renamedDecoder =
-    D.map2 Tuple.pair
-        (D.field "from" D.string)
-        (D.field "path" D.string)
-
-
-fsEventDecoder : D.Decoder ( String, FilePath )
-fsEventDecoder =
-    D.map2 Tuple.pair
-        (D.field "event" D.string)
-        (D.field "path" D.string)
 
 
 keyDecoder : D.Decoder Msg
@@ -2409,26 +1786,6 @@ pct f =
     String.fromFloat (f * 100) ++ "%"
 
 
-viewDivider : DragTarget -> Html Msg
-viewDivider target =
-    div
-        [ class "divider"
-        , attribute "data-testid"
-            (case target of
-                DraggingSidebar ->
-                    "divider-sidebar"
-
-                DraggingEditor ->
-                    "divider-editor"
-
-                DraggingRightSidebar ->
-                    "divider-outline"
-            )
-        , on "mousedown" (D.map (DividerMouseDown target) (D.field "clientX" D.float))
-        , onDoubleClick (DividerDoubleClick target)
-        ]
-        []
-
 
 view : Model -> Html Msg
 view model =
@@ -2461,7 +1818,7 @@ view model =
         leftSection =
             if model.leftSidebarVisible then
                 [ ( "sidebar", ( pct model.sidebarFraction, Html.map FileTreeMsg (Html.Lazy.lazy FileTree.view model.fileTree) ) )
-                , ( "sidebar-divider", ( "2px", viewDivider DraggingSidebar ) )
+                , ( "sidebar-divider", ( "2px", Splits.viewDivider DividerMouseDown DividerDoubleClick DraggingSidebar ) )
                 ]
 
             else
@@ -2487,7 +1844,7 @@ view model =
                   else
                     "0px"
                 , if model.layoutMode == Split then
-                    viewDivider DraggingEditor
+                    Splits.viewDivider DividerMouseDown DividerDoubleClick DraggingEditor
 
                   else
                     text ""
@@ -2506,7 +1863,7 @@ view model =
 
         rightSection =
             if model.rightSidebarVisible then
-                [ ( "outline-divider", ( "2px", viewDivider DraggingRightSidebar ) )
+                [ ( "outline-divider", ( "2px", Splits.viewDivider DividerMouseDown DividerDoubleClick DraggingRightSidebar ) )
                 , ( "outline", ( pct model.rightSidebarFraction, viewOutline model ) )
                 ]
 
@@ -2557,7 +1914,7 @@ view model =
                 (List.map (Tuple.mapSecond (\( _, pane ) -> div [ class "layout-cell" ] [ pane ])) sections)
             ]
         , if Palette.isOpen model.palette then
-            viewPalette model.palette
+            Html.map PaletteMsg (Palette.view model.palette)
 
           else
             text ""
@@ -2603,7 +1960,7 @@ viewEditorPane model =
                 model.editor
             )
         , if Find.isOpen model.find && model.layoutMode /= PreviewOnly then
-            viewFindBar (Find.count model.find) model.find
+            Html.map FindMsg (Find.view (Find.count model.find) model.find)
 
           else
             text ""
@@ -2637,7 +1994,7 @@ viewPreviewPane model =
         )
         [ Html.Lazy.lazy3 Preview.view model.editor.filePath model.frontmatter model.previewHtml
         , if model.layoutMode == PreviewOnly && Find.isOpen model.find then
-            viewFindBar model.previewFindCount model.find
+            Html.map FindMsg (Find.view model.previewFindCount model.find)
 
           else
             text ""
@@ -2709,232 +2066,6 @@ viewLayoutSelector model =
         , segment Split "Editor and preview" "Editor on the left, live preview on the right." Icon.splitLayout
         , segment PreviewOnly "Preview only" "Hide the editor and show only the rendered document." Icon.previewLayout
         ]
-
-
-viewPalette : Palette.Model -> Html Msg
-viewPalette palette =
-    let
-        rows =
-            Palette.results palette
-
-        placeholderText =
-            case Palette.mode palette of
-                Just Palette.Search ->
-                    "Search the workspace"
-
-                _ ->
-                    "Go to file"
-
-        row index item =
-            div
-                [ class "palette-row"
-                , classList [ ( "active", index == palette.active ) ]
-                , attribute "data-testid" "palette-row"
-                , attribute "role" "option"
-                , attribute "aria-selected"
-                    (if index == palette.active then
-                        "true"
-
-                     else
-                        "false"
-                    )
-                , onClick (PaletteChoose (Just item))
-                ]
-                [ span [ class "palette-primary" ] [ text item.primary ]
-                , span [ class "palette-secondary" ] [ text item.secondary ]
-                ]
-    in
-    div [ class "palette-backdrop", attribute "data-testid" "palette", onClick ClosePalette ]
-        [ div [ class "palette", stopPropagationOn "click" (D.succeed ( NoOp, True )) ]
-            [ input
-                [ class "palette-input"
-                , id paletteInputId
-                , attribute "data-testid" "palette-input"
-                , attribute "aria-label" placeholderText
-                , placeholder placeholderText
-                , value (Palette.query palette)
-                , spellcheck False
-                , onInput PaletteQueryChanged
-                , preventDefaultOn "keydown" (paletteKeyDecoder palette)
-                ]
-                []
-            , if List.isEmpty rows then
-                div [ class "palette-empty" ] [ text "No results" ]
-
-              else
-                div [ class "palette-results", attribute "role" "listbox" ] (List.indexedMap row rows)
-            ]
-        ]
-
-
-paletteKeyDecoder : Palette.Model -> D.Decoder ( Msg, Bool )
-paletteKeyDecoder palette =
-    D.field "key" D.string
-        |> D.andThen
-            (\key ->
-                case key of
-                    "ArrowDown" ->
-                        D.succeed ( PaletteStep 1, True )
-
-                    "ArrowUp" ->
-                        D.succeed ( PaletteStep -1, True )
-
-                    "Enter" ->
-                        D.succeed ( PaletteChoose (Palette.active palette), True )
-
-                    "Escape" ->
-                        D.succeed ( ClosePalette, True )
-
-                    _ ->
-                        D.fail "not a palette key"
-            )
-
-
-findInputId : String
-findInputId =
-    "find-input"
-
-
-viewFindBar : ( Int, Int ) -> Find.Model -> Html Msg
-viewFindBar counts find =
-    let
-        ( current, total ) =
-            counts
-
-        countLabel =
-            if find.query == "" then
-                ""
-
-            else if total == 0 then
-                "No results"
-
-            else
-                String.fromInt current
-                    ++ " of "
-                    ++ String.fromInt total
-                    ++ (if total >= Find.matchLimit then
-                            "+"
-
-                        else
-                            ""
-                       )
-
-        stepButton label delta =
-            button
-                [ class "find-button"
-                , attribute "aria-label" label
-                , title label
-                , disabled (total == 0)
-                , onClick (FindStep delta)
-                ]
-                [ text
-                    (if delta < 0 then
-                        "↑"
-
-                     else
-                        "↓"
-                    )
-                ]
-    in
-    div [ class "find-bar", attribute "data-testid" "find-bar" ]
-        [ div [ class "find-row" ]
-            [ input
-                [ class "find-input"
-                , id findInputId
-                , attribute "data-testid" "find-input"
-                , attribute "aria-label" "Find"
-                , placeholder "Find"
-                , value find.query
-                , spellcheck False
-                , onInput FindQueryChanged
-                , preventDefaultOn "keydown" (findKeyDecoder False)
-                ]
-                []
-            , span [ class "find-count", attribute "data-testid" "find-count" ] [ text countLabel ]
-            , button
-                [ class "find-button"
-                , classList [ ( "on", find.caseSensitive ) ]
-                , attribute "aria-label" "Match case"
-                , attribute "aria-pressed"
-                    (if find.caseSensitive then
-                        "true"
-
-                     else
-                        "false"
-                    )
-                , title "Match case"
-                , onClick FindToggleCase
-                ]
-                [ text "Aa" ]
-            , stepButton "Previous match" -1
-            , stepButton "Next match" 1
-            , button [ class "find-button", attribute "aria-label" "Close find", title "Close", onClick CloseFind ] [ text "×" ]
-            ]
-        , if find.replaceShown then
-            div [ class "find-row" ]
-                [ input
-                    [ class "find-input"
-                    , attribute "data-testid" "replace-input"
-                    , attribute "aria-label" "Replace with"
-                    , placeholder "Replace"
-                    , value find.replacement
-                    , spellcheck False
-                    , onInput FindReplacementChanged
-                    , preventDefaultOn "keydown" (findKeyDecoder True)
-                    ]
-                    []
-                , button
-                    [ class "find-button wide"
-                    , attribute "data-testid" "replace-one"
-                    , disabled (total == 0)
-                    , onClick ReplaceActive
-                    ]
-                    [ text "Replace" ]
-                , button
-                    [ class "find-button wide"
-                    , attribute "data-testid" "replace-all"
-                    , disabled (total == 0)
-                    , onClick ReplaceAll
-                    ]
-                    [ text "All" ]
-                ]
-
-          else
-            text ""
-        ]
-
-
-{-| Keys inside the find fields. Enter steps through matches (or replaces, in
-the replacement field) and Escape closes; everything else is ordinary typing.
--}
-findKeyDecoder : Bool -> D.Decoder ( Msg, Bool )
-findKeyDecoder inReplacement =
-    D.map2 Tuple.pair (D.field "key" D.string) (D.field "shiftKey" D.bool)
-        |> D.andThen
-            (\( key, shift ) ->
-                case key of
-                    "Enter" ->
-                        D.succeed
-                            ( if inReplacement then
-                                ReplaceActive
-
-                              else
-                                FindStep
-                                    (if shift then
-                                        -1
-
-                                     else
-                                        1
-                                    )
-                            , True
-                            )
-
-                    "Escape" ->
-                        D.succeed ( CloseFind, True )
-
-                    _ ->
-                        D.fail "not a find key"
-            )
 
 
 {-| The right sidebar: a clickable outline of the document's headings,
@@ -3044,443 +2175,12 @@ viewTitleBar model =
                     }
                 ]
             , if model.settingsOpen then
-                viewSettingsDropdown model
+                Html.map settingsMsg (Settings.view model.editor.softWrap model)
 
               else
                 text ""
             ]
         ]
-
-
-settingsKeyDecoder : D.Decoder ( Msg, Bool )
-settingsKeyDecoder =
-    D.field "key" D.string
-        |> D.map
-            (\key ->
-                if List.member key [ "ArrowDown", "ArrowUp", "Enter", " ", "Escape", "Home", "End" ] then
-                    ( SettingsKeyDown key, True )
-
-                else
-                    ( NoOp, False )
-            )
-
-
-{-| From the filter box: down steps into the list, Enter takes the first hit.
--}
-searchKeyDecoder : D.Decoder ( Msg, Bool )
-searchKeyDecoder =
-    D.field "key" D.string
-        |> D.map
-            (\key ->
-                case key of
-                    "ArrowDown" ->
-                        ( SettingsKeyDown "Home", True )
-
-                    "Enter" ->
-                        ( SettingsKeyDown "Enter", True )
-
-                    "Escape" ->
-                        ( CloseSettings, True )
-
-                    _ ->
-                        ( NoOp, False )
-            )
-
-
-viewSettingsDropdown : Model -> Html Msg
-viewSettingsDropdown model =
-    let
-        prefs =
-            model.preferences
-
-        toggle field on =
-            SetPreference (field on)
-
-        tip heading body =
-            { heading = heading, body = body, shortcut = Nothing }
-
-        fontSize tooltip label testId max size field =
-            viewStepper
-                { label = label
-                , value = size
-                , min = Preferences.fontSizeMin
-                , max = max
-                , step = 1
-                , format = formatSize
-                , toMsg = \v -> SetPreference (field v)
-                , testId = testId
-                , tooltip = tooltip
-                }
-    in
-    div [ class "settings-layer" ]
-        [ div [ class "settings-backdrop", onClick CloseSettings ] []
-        , div
-            [ class "settings-dropdown"
-            , attribute "data-testid" "settings-dropdown"
-            , attribute "role" "listbox"
-            , attribute "aria-label" "Settings"
-            ]
-            [ viewPicker model ThemePicker "Theme" (tip "Theme" "Colour scheme for the editor, preview and chrome. Default: GitHub Dark.")
-            , viewPicker model EditorFontPicker "Editor font" (tip "Editor font" "Monospace face for the editor, and for the preview when \"Use editor font\" is on. Default: system monospace.")
-            , viewPicker model UIFontPicker "UI font" (tip "UI font" "Face for the file tree, pane headings, settings and palette. Default: system UI.")
-            , div [ class "settings-dropdown-divider" ] []
-            , div [ class "settings-dropdown-label" ] [ text "Font Size" ]
-            , fontSize (tip "Editor font size" "Text size in the editor, in pixels (8–32). Default: 14.") "Editor" "editor-font-size-input" Preferences.fontSizeMax prefs.editorFontSize (\v p -> { p | editorFontSize = v })
-            , fontSize (tip "Preview font size" "Base size of preview text; headings scale from it (8–32). Default: 14.") "Preview" "preview-font-size-input" Preferences.fontSizeMax prefs.previewFontSize (\v p -> { p | previewFontSize = v })
-            , fontSize (tip "UI font size" "Size of file tree, headings and settings text (8–24). Default: 13.") "UI" "ui-font-size-input" Preferences.uiFontSizeMax prefs.uiFontSize (\v p -> { p | uiFontSize = v })
-            , div [ class "settings-dropdown-divider" ] []
-            , div [ class "settings-dropdown-label" ] [ text "Preview" ]
-            , viewSegmentedRow (tip "Preview width" "Caps and centres the preview column so lines wrap sooner. Narrow 560 px, Normal 680 px, Wide 900 px; Full uses the whole pane. Default: Full.") "Width" "preview-width" Preferences.previewWidthOptions prefs.previewWidth (\w -> SetPreference (\p -> { p | previewWidth = w }))
-            , if prefs.previewWidth == Custom then
-                viewStepper
-                    { label = "Custom width"
-                    , value = toFloat prefs.previewMaxWidth
-                    , min = toFloat Preferences.previewWidthMin
-                    , max = toFloat Preferences.previewWidthMax
-                    , step = 10
-                    , format = round >> String.fromInt
-                    , toMsg = \v -> SetPreference (\p -> { p | previewMaxWidth = round v })
-                    , testId = "preview-width-input"
-                    , tooltip = tip "Custom width" "Preview column width in pixels (320–2000). Applies only while Width is Custom."
-                    }
-
-              else
-                text ""
-            , viewToggleRow (tip "Use editor font in preview" "Render the preview in the editor's monospace font instead of the UI font. Default: off.") "Use editor font" "preview-mono-toggle" prefs.previewUsesEditorFont (toggle (\on p -> { p | previewUsesEditorFont = on }))
-            , div [ class "settings-dropdown-divider" ] []
-            , div [ class "settings-dropdown-label" ] [ text "Layout" ]
-            , viewToggleRow (tip "Pane headings" "Show the title strip above the file tree, editor, preview and outline. Default: on.") "Show pane headings" "pane-headers-toggle" prefs.showPaneHeaders (toggle (\on p -> { p | showPaneHeaders = on }))
-            , viewToggleRow (tip "Soft wrap" "Wrap long lines at the editor's edge instead of scrolling sideways. Default: on.") "Soft wrap" "soft-wrap-toggle" model.editor.softWrap SetSoftWrap
-            , viewToggleRow (tip "Reveal open file" "When a file opens from the palette, a link, history or the command line, expand the sidebar to it and select it. Default: on.") "Reveal open file" "reveal-in-sidebar-toggle" prefs.revealInSidebar (toggle (\on p -> { p | revealInSidebar = on }))
-            , div [ class "settings-dropdown-divider" ] []
-            , div [ class "settings-dropdown-label" ] [ text "Outline" ]
-            , viewOutlineLevelStepper model.outlineMaxLevel
-            , div [ class "settings-dropdown-divider" ] []
-            , div [ class "settings-dropdown-label" ] [ text "Shortcuts" ]
-            , viewRebindRow (tip "Toggle left sidebar" "Shortcut that shows or hides the file tree. Click, then press the new combination.") model.leftToggleKey RebindLeft model.rebinding
-            , viewRebindRow (tip "Cycle layout" "Shortcut that steps through Editor, Split and Preview. Click, then press the new combination.") model.layoutCycleKey RebindLayout model.rebinding
-            , viewRebindRow (tip "Toggle right sidebar" "Shortcut that shows or hides the outline. Click, then press the new combination.") model.rightToggleKey RebindRight model.rebinding
-            ]
-        ]
-
-
-{-| A collapsible list of options: only one picker is open at a time, and only
-its options take part in the keyboard walk.
--}
-viewPicker : Model -> Picker -> String -> Tooltip -> Html Msg
-viewPicker model picker title tip =
-    let
-        current =
-            Preferences.selected picker model.preferences
-
-        expanded =
-            model.expandedPicker == Just picker
-
-        currentLabel =
-            Preferences.options picker
-                |> List.filter (\( optionValue, _ ) -> optionValue == current)
-                |> List.head
-                |> Maybe.map Tuple.second
-                |> Maybe.withDefault current
-
-        visible =
-            visibleSettingsOptions model
-
-        {- The tab stop is where the arrows are, or the selected option so the
-           list can be tabbed into at all.
-        -}
-        tabbable =
-            if model.settingsFocus < List.length visible then
-                model.settingsFocus
-
-            else
-                indexOfValue current visible |> Maybe.withDefault 0
-    in
-    div [ class "settings-picker" ]
-        [ button
-            ([ class "settings-picker-header"
-             , id (pickerId picker)
-             , attribute "data-testid" (pickerId picker)
-             , attribute "aria-expanded"
-                (if expanded then
-                    "true"
-
-                 else
-                    "false"
-                )
-             , onClick
-                (ExpandPicker
-                    (if expanded then
-                        Nothing
-
-                     else
-                        Just picker
-                    )
-                )
-             ]
-            )
-            [ span (Tooltip.host (pickerId picker)) [ text title, Tooltip.view (pickerId picker) tip ]
-            , span [ class "settings-picker-value" ] [ text currentLabel ]
-            , span [ class "settings-picker-chevron" ] [ Icon.chevronRight 14 ]
-            ]
-        , if expanded then
-            div [ class "settings-picker-body" ]
-                [ input
-                    [ type_ "text"
-                    , class "settings-picker-search"
-                    , id pickerSearchId
-                    , attribute "data-testid" pickerSearchId
-                    , placeholder "Filter…"
-                    , value model.pickerFilter
-                    , onInput PickerFilterChanged
-                    , preventDefaultOn "keydown" searchKeyDecoder
-                    , attribute "aria-label" (title ++ " filter")
-                    ]
-                    []
-                , div [ class "settings-dropdown-list", tabindex -1 ]
-                    (List.indexedMap (viewOption picker current tabbable) visible)
-                ]
-
-          else
-            text ""
-        ]
-
-
-viewOption : Picker -> String -> Int -> Int -> ( String, String ) -> Html Msg
-viewOption picker activeValue tabbable idx ( optionValue, displayName ) =
-    let
-        isActive =
-            activeValue == optionValue
-    in
-    button
-        [ class "settings-dropdown-item"
-        , classList [ ( "active", isActive ) ]
-        , attribute "data-testid"
-            ("settings-option-"
-                ++ pickerSlug picker
-                ++ "-"
-                ++ (if String.isEmpty optionValue then
-                        "default"
-
-                    else
-                        optionValue
-                   )
-            )
-        , id (settingsItemId idx)
-        , tabindex
-            (if tabbable == idx then
-                0
-
-             else
-                -1
-            )
-        , attribute "role" "option"
-        , attribute "aria-selected"
-            (if isActive then
-                "true"
-
-             else
-                "false"
-            )
-        , onClick (SetPreference (Preferences.select picker optionValue))
-        , onFocus (SettingsFocused idx)
-        , preventDefaultOn "keydown" settingsKeyDecoder
-        ]
-        [ span [ class "settings-dropdown-item-label" ] [ text displayName ]
-        , span [ class "settings-dropdown-check" ]
-            [ if isActive then
-                Icon.checkmark 14
-
-              else
-                text ""
-            ]
-        ]
-
-
-viewToggleRow : Tooltip -> String -> String -> Bool -> (Bool -> Msg) -> Html Msg
-viewToggleRow tip rowLabel testId on toMsg =
-    label [ class "settings-dropdown-row" ]
-        [ viewRowLabel rowLabel testId tip
-        , input [ type_ "checkbox", checked on, onCheck toMsg, attribute "data-testid" testId ] []
-        ]
-
-
-{-| A row's label text, which is also where its tooltip lives: hovering the
-control itself should not explain it.
--}
-viewRowLabel : String -> String -> Tooltip -> Html Msg
-viewRowLabel rowLabel name tip =
-    span (class "settings-dropdown-row-label" :: Tooltip.host name)
-        [ text rowLabel, Tooltip.view name tip ]
-
-
-{-| A settings row whose control is a group of text segments, one checked.
--}
-viewSegmentedRow : Tooltip -> String -> String -> List ( a, String ) -> a -> (a -> Msg) -> Html Msg
-viewSegmentedRow tip rowLabel idPrefix items current toMsg =
-    div [ class "settings-dropdown-row" ]
-        [ viewRowLabel rowLabel idPrefix tip
-        , div
-            [ class "segmented"
-            , attribute "role" "radiogroup"
-            , attribute "aria-label" rowLabel
-            ]
-            (List.map
-                (\( value_, label_ ) ->
-                    button
-                        [ class "segment"
-                        , attribute "role" "radio"
-                        , attribute "aria-checked"
-                            (if value_ == current then
-                                "true"
-
-                             else
-                                "false"
-                            )
-                        , attribute "data-testid" (idPrefix ++ "-" ++ String.toLower label_)
-                        , onClick (toMsg value_)
-                        ]
-                        [ text label_ ]
-                )
-                items
-            )
-        ]
-
-
-{-| Integer +/- stepper for the maximum heading level shown in the outline.
--}
-viewOutlineLevelStepper : Int -> Html Msg
-viewOutlineLevelStepper level =
-    div [ class "settings-dropdown-row" ]
-        [ viewRowLabel "Max depth"
-            "outline-depth"
-            { heading = "Outline depth"
-            , body = "Deepest heading level listed in the outline: H1 shows only top-level headings, H6 shows all. Default: H3."
-            , shortcut = Nothing
-            }
-        , div [ class "stepper" ]
-            [ button
-                [ class "stepper-btn"
-                , onClick (SetOutlineMaxLevel (level - 1))
-                ]
-                [ text "−" ]
-            , span [ class "stepper-value" ] [ text ("H" ++ String.fromInt level) ]
-            , button
-                [ class "stepper-btn"
-                , onClick (SetOutlineMaxLevel (level + 1))
-                ]
-                [ text "+" ]
-            ]
-        ]
-
-
-{-| A row showing a shortcut's current combo plus a button to rebind it.
-While capturing, the button prompts for the next keypress.
--}
-viewRebindRow : Tooltip -> KeyBinding -> RebindTarget -> Maybe RebindTarget -> Html Msg
-viewRebindRow tip binding target rebinding =
-    let
-        isCapturing =
-            rebinding == Just target
-
-        name =
-            case target of
-                RebindLeft ->
-                    "rebind-left"
-
-                RebindLayout ->
-                    "rebind-layout"
-
-                RebindRight ->
-                    "rebind-right"
-    in
-    div [ class "settings-dropdown-row" ]
-        [ viewRowLabel tip.heading name { tip | shortcut = Just (keyBindingLabel binding) }
-        , button
-            [ class "rebind-btn"
-            , classList [ ( "capturing", isCapturing ) ]
-            , onClick (StartRebind target)
-            ]
-            [ text
-                (if isCapturing then
-                    "Press keys…"
-
-                 else
-                    keyBindingLabel binding
-                )
-            ]
-        ]
-
-
-{-| Where a value sits in one of the settings lists. -}
-indexOfValue : String -> List ( String, String ) -> Maybe Int
-indexOfValue wanted items =
-    items
-        |> List.indexedMap (\i ( value, _ ) -> ( i, value ))
-        |> List.filter (\( _, value ) -> value == wanted)
-        |> List.head
-        |> Maybe.map Tuple.first
-
-
-type alias Stepper =
-    { label : String
-    , value : Float
-    , min : Float
-    , max : Float
-    , step : Float
-    , format : Float -> String
-    , toMsg : Float -> Msg
-    , testId : String
-    , tooltip : Tooltip
-    }
-
-
-viewStepper : Stepper -> Html Msg
-viewStepper stepper =
-    div [ class "settings-dropdown-row" ]
-        [ viewRowLabel stepper.label stepper.testId stepper.tooltip
-        , div [ class "stepper" ]
-            [ button
-                [ class "stepper-btn"
-                , onClick (stepper.toMsg (stepper.value - stepper.step))
-                ]
-                [ text "−" ]
-            , input
-                [ type_ "number"
-                , class "stepper-input"
-                , attribute "data-testid" stepper.testId
-
-                -- "any" so typed decimals survive; the buttons move by `step`.
-                , Html.Attributes.step "any"
-                , Html.Attributes.min (stepper.format stepper.min)
-                , Html.Attributes.max (stepper.format stepper.max)
-                , value (stepper.format stepper.value)
-                , onInput (\typed -> stepper.toMsg (Maybe.withDefault stepper.value (String.toFloat typed)))
-                ]
-                []
-            , button
-                [ class "stepper-btn"
-                , onClick (stepper.toMsg (stepper.value + stepper.step))
-                ]
-                [ text "+" ]
-            ]
-        ]
-
-
-formatSize : Float -> String
-formatSize f =
-    let
-        rounded =
-            toFloat (round (f * 10)) / 10
-
-        str =
-            String.fromFloat rounded
-    in
-    if String.contains "." str then
-        str
-
-    else
-        str ++ ".0"
 
 
 main : Program D.Value Model Msg

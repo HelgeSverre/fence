@@ -44,6 +44,65 @@ describe("workspace filesystem operations", () => {
     await assert.rejects(fsOps.readImage(doc, "large.png"), /32 MiB/);
   });
 
+  test("resolveImagePath rejects a missing image and a document outside the workspace", async () => {
+    const doc = path.join(workspace, "note.md");
+    await fs.promises.writeFile(doc, "");
+    await assert.rejects(fsOps.resolveImagePath(doc, "missing.png"), { code: "ENOENT" });
+    await assert.rejects(fsOps.resolveImagePath(doc, "docs"), /Unsupported image type/);
+    await fs.promises.writeFile(path.join(outside, "note.md"), "");
+    await fs.promises.writeFile(path.join(outside, "pic.png"), "");
+    await assert.rejects(fsOps.resolveImagePath(path.join(outside, "note.md"), "pic.png"), /outside workspace/);
+  });
+
+  test("watchDir reports markdown changes until unwatchDir removes the watcher", async () => {
+    const file = path.join(workspace, "watched.md");
+    const events = [];
+    const next = (predicate) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timed out waiting; saw ${JSON.stringify(events)}`)), 5000);
+      const tick = () => (predicate() ? (clearTimeout(timer), resolve()) : setTimeout(tick, 20));
+      tick();
+    });
+    const seen = (event) => events.some((e) => e.event === event && e.path === file);
+    await fsOps.watchDir(workspace, (event, p) => events.push({ event, path: p }));
+    // chokidar needs a moment to be ready before the first write is noticed.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    await fs.promises.writeFile(file, "one");
+    await next(() => seen("add"));
+    await fs.promises.writeFile(file, "two");
+    await next(() => seen("change"));
+    await fs.promises.unlink(file);
+    await next(() => seen("unlink"));
+
+    await fsOps.unwatchDir(workspace);
+    const before = events.length;
+    await fs.promises.writeFile(file, "silent");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(events.length, before);
+
+    // The map entry is gone: a fresh watchDir on the same path takes a new
+    // callback instead of being ignored as a duplicate.
+    const again = [];
+    await fsOps.watchDir(workspace, (event) => again.push(event));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await fs.promises.writeFile(file, "again");
+    await next(() => again.includes("change"));
+    await fsOps.unwatchDir(workspace);
+  });
+
+  test("grep treats regex metacharacters literally and skips oversized files", async () => {
+    await fs.promises.writeFile(path.join(workspace, "a.md"), "price is $5.00 (approx)\nprice is 5x00", "utf-8");
+    const hits = await fsOps.grep(workspace, "$5.00 (approx)");
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].line, 1);
+    assert.deepEqual(await fsOps.grep(workspace, "5.00"), [{ ...hits[0], column: 10 }]);
+
+    const big = path.join(workspace, "big.md");
+    await fs.promises.writeFile(big, "needle", "utf-8");
+    await fs.promises.truncate(big, 4 * 1024 * 1024 + 1);
+    assert.deepEqual(await fsOps.grep(workspace, "needle"), []);
+  });
+
   test("lists only markdown files and directories that lead to some", async () => {
     const mk = (rel) => fs.promises.mkdir(path.join(workspace, rel), { recursive: true });
     const touch = (rel) => fs.promises.writeFile(path.join(workspace, rel), "", "utf-8");

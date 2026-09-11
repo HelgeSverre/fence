@@ -1,5 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
+// main.js already loads fs-ops (and chokidar) before parsing argv, so this
+// costs nothing on the --help/--version path.
+const { isMarkdownFile } = require('./fs-ops');
 
 // `forwarded` argv comes from a second instance via the single-instance lock:
 // the sender already rejected typos, and Electron splices its own Chromium
@@ -20,7 +23,7 @@ function parseCliArgs(args, cwd, { forwarded = false } = {}) {
     if (target) throw new Error('Open one file or folder at a time.');
     target = path.resolve(cwd, arg);
     if (!fs.existsSync(target)) throw new Error(`Path does not exist: ${arg}`);
-    if (!fs.statSync(target).isDirectory() && !/\.(md|markdown|mdown|mkd)$/i.test(target)) throw new Error(`Not a Markdown file: ${arg}`);
+    if (!fs.statSync(target).isDirectory() && !isMarkdownFile(target)) throw new Error(`Not a Markdown file: ${arg}`);
   }
   return { path: target };
 }

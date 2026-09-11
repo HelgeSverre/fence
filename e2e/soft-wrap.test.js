@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const { test, describe } = require("node:test");
-const { launchFence, focusEditor, save, waitForFile, MOD } = require("./helpers");
+const { launchFence, focusEditor, save, waitForFile, openSettings, MOD } = require("./helpers");
 
 async function rows(window) {
   return window.locator(".veditor-row").evaluateAll((items) => items.map((row) => ({
@@ -11,9 +11,10 @@ async function rows(window) {
 }
 
 async function toggle(window) {
-  await window.getByTestId("settings-button").click();
+  await openSettings(window);
   await window.getByTestId("soft-wrap-toggle").click();
-  await window.locator(".settings-backdrop").click({ position: { x: 10, y: 100 } });
+  await window.keyboard.press("Escape");
+  await window.getByTestId("settings-dropdown").waitFor({ state: "detached" });
 }
 
 async function caret(window) {
@@ -114,7 +115,7 @@ describe("soft wrap", () => {
       await focusEditor(window);
       await window.keyboard.press("ArrowDown");
       const before = (await rows(window))[0].end;
-      await window.getByTestId("settings-button").click();
+      await openSettings(window);
       const editorSize = window.getByTestId("editor-font-size-input");
       await editorSize.fill("22");
       await window.waitForFunction((oldEnd) => Number(document.querySelector(".veditor-row").dataset.sourceEnd) < oldEnd, before);
@@ -162,8 +163,11 @@ describe("soft wrap", () => {
       await window.getByTestId("veditor").evaluate((el) => { el.scrollTop = 3000; });
       await window.waitForFunction(() => Number(document.querySelector(".veditor-row").dataset.sourceStart) > 1000);
       const before = await topOffset();
+      const rowLength = () => window.evaluate(() => { const r = document.querySelector(".veditor-row").dataset; return Number(r.sourceEnd) - Number(r.sourceStart); });
+      const wide = await rowLength();
       await fence.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1000, 800));
-      await window.waitForTimeout(200);
+      // narrower window, shorter rows: wait for the reflow, not a fixed delay
+      await window.waitForFunction((n) => window.innerWidth <= 1000 && Number(document.querySelector(".veditor-row").dataset.sourceEnd) - Number(document.querySelector(".veditor-row").dataset.sourceStart) < n, wide);
       const after = await topOffset();
       assert.ok(Math.abs(after - before) < 100, `anchor moved from ${before} to ${after}`);
       assert.ok((await rows(window)).length < 100);

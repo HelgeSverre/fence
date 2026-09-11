@@ -1,3 +1,8 @@
+:root {
+  --control-height: 26px; /* one box for titlebar buttons, steppers, segments and inputs */
+  --radius: 4px;
+}
+
 *,
 *::before,
 *::after {
@@ -89,16 +94,16 @@ body {
   color: var(--text-muted);
   cursor: pointer;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   display: flex;
   align-items: center;
 }
 
-/* Titlebar buttons share one box (matches the settings controls' 26px). */
+/* Titlebar buttons share one box (matches the settings controls' --control-height). */
 .titlebar-actions > .icon-button {
   box-sizing: border-box;
-  height: 26px;
-  min-width: 26px;
+  height: var(--control-height);
+  min-width: var(--control-height);
   padding: 0 5px;
   justify-content: center;
 }

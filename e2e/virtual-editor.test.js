@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test, describe } = require("node:test");
-const { launchFence } = require("./helpers");
+const { launchFence, waitForPreviewSettled } = require("./helpers");
 
 const SOURCE = process.env.FENCE_LARGE_FILE || "/Users/helge/code/access-virus-archive/Access-Virus-Soundsets.md";
 
@@ -43,11 +43,7 @@ describe("virtual editor", { skip: !fs.existsSync(SOURCE) && `no ${path.basename
         await window.getByTestId("tree-file").filter({ hasText: "big.md" }).click();
         await window.waitForFunction(() => window.__marked);
         // let the preview's progressive fill-in finish so scroll layouts are the editor's alone
-        await window.waitForFunction(
-          () => new Promise((resolve) => { const n = document.querySelectorAll(".preview-chunk").length; setTimeout(() => resolve(n > 0 && document.querySelectorAll(".preview-chunk").length === n), 400); }),
-          undefined,
-          { timeout: 15000, polling: 100 },
-        );
+        await waitForPreviewSettled(window);
         // scroll to the end in a few jumps, like dragging the scrollbar
         await window.evaluate(async () => {
           performance.mark("fence:scroll-start");
@@ -82,7 +78,7 @@ describe("virtual editor", { skip: !fs.existsSync(SOURCE) && `no ${path.basename
         lastRowText: [...document.querySelectorAll(".veditor-row")].pop()?.textContent,
         scrollTop: document.querySelector("[data-testid=veditor]").scrollTop,
       }));
-      console.log(`virtual-editor: first frame ${paintedMs}ms, ${dom.rows} rows in DOM for ${lineCount} lines, worst layout during scroll ${worstLayout.toFixed(1)}ms${worstInfo}`);
+      if (process.env.FENCE_PERF_LOG) console.log(`virtual-editor: first frame ${paintedMs}ms, ${dom.rows} rows in DOM for ${lineCount} lines, worst layout during scroll ${worstLayout.toFixed(1)}ms${worstInfo}`);
       assert.ok(paintedMs < 150, `first frame painted after ${paintedMs}ms`);
       assert.ok(dom.rows < 200, `${dom.rows} rows rendered`);
       assert.ok(worstDirty < 5000, `scrolling dirtied ${worstDirty} layout objects, so rows are not virtualized`);

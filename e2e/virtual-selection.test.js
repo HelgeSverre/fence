@@ -1,7 +1,7 @@
 // Selection, clipboard and IME composition.
 const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
-const { openEditor, editorText, expectEditorText, MOD } = require("./helpers");
+const { openEditor, editorText, expectEditorText, waitFor, MOD } = require("./helpers");
 
 const selectionRects = (window) => window.locator(".veditor-selection").count();
 
@@ -101,6 +101,7 @@ describe("virtual editor: selection and clipboard", () => {
       // verify that auto-scroll does not continue while the button is up.
       await window.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const settled = await scrollTop();
+      // deliberate sleep: a negative assertion, nothing should happen in this window
       await window.waitForTimeout(300);
       assert.equal(await scrollTop(), settled);
     } finally {
@@ -116,14 +117,14 @@ describe("virtual editor: selection and clipboard", () => {
       await window.keyboard.press("Shift+End");
       // the selected text is exposed to the clipboard glue on the next frame
       await window.waitForFunction(() => document.getElementById("veditor-input").dataset.selection === "copy this");
+      const clipboardText = () => app.evaluate(({ clipboard }) => clipboard.readText());
       await window.keyboard.press(`${MOD}+c`);
-      await new Promise((r) => setTimeout(r, 200));
-      assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), "copy this");
+      assert.equal(await waitFor(async () => (await clipboardText()) === "copy this" && "copy this"), "copy this");
       await expectEditorText(window, "copy this\nkeep");
+      await app.evaluate(({ clipboard }) => clipboard.writeText(""));
       await window.keyboard.press(`${MOD}+x`);
       await expectEditorText(window, "\nkeep");
-      await new Promise((r) => setTimeout(r, 200));
-      assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), "copy this");
+      assert.equal(await waitFor(async () => (await clipboardText()) === "copy this" && "copy this"), "copy this");
       await window.keyboard.press("ArrowDown");
       await window.keyboard.press("End");
       await window.keyboard.press(`${MOD}+v`);
@@ -155,6 +156,7 @@ describe("virtual editor: selection and clipboard", () => {
       const { window, app } = fence;
       const cdp = await app.context().newCDPSession(window);
       await cdp.send("Input.imeSetComposition", { text: "ni", selectionStart: 2, selectionEnd: 2 });
+      // deliberate sleep: a negative assertion, the composition must not reach the document
       await new Promise((r) => setTimeout(r, 100));
       const during = await editorText(window);
       assert.ok(!during.includes("ni"), `composition text leaked into the document: ${JSON.stringify(during)}`);

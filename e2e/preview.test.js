@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
-const { launchFence, setEditorContent } = require("./helpers");
+const { launchFence, setEditorContent, openSettings } = require("./helpers");
 
 describe("preview", () => {
   test("the virtualized editor plan renders instead of showing the welcome screen", async () => {
@@ -110,7 +110,7 @@ describe("preview", () => {
       assert.equal(await window.locator("svg .error-icon, svg .error-text").count(), 0);
 
       const previousId = await valid.locator("svg").getAttribute("id");
-      await window.getByTestId("settings-button").click();
+      await openSettings(window);
       await window.getByTestId("settings-picker-theme").click();
       await window.getByTestId("settings-option-theme-light").click();
       await window.waitForFunction((id) => {

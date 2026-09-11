@@ -1,7 +1,7 @@
 // Portable fixtures: this test must not silently skip on another developer's machine.
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { launchFence } = require("./helpers");
+const { launchFence, waitForPreviewSettled } = require("./helpers");
 
 async function trace(fence, body) {
   const cdp = await fence.app.context().newCDPSession(fence.window);
@@ -33,10 +33,7 @@ for (const [name, content] of Object.entries(fixtures)) {
         await window.waitForFunction((length) => Number(document.querySelector(".veditor").dataset.length) === length, content.length);
         const openMs = performance.now() - started;
         // Let the independently progressive preview finish before measuring editor work.
-        await window.waitForFunction(() => new Promise((resolve) => {
-          const n = document.querySelectorAll(".preview-chunk").length;
-          setTimeout(() => resolve(n > 0 && document.querySelectorAll(".preview-chunk").length === n), 400);
-        }), undefined, { timeout: 15000 });
+        await waitForPreviewSettled(window);
         // Warm the first edit (dirty title/header and its preview update) before
         // measuring steady typing, just like the reference keystroke test.
         await window.evaluate(() => {
@@ -107,7 +104,7 @@ for (const [name, content] of Object.entries(fixtures)) {
           length: Number(el.dataset.length), left: el.scrollLeft,
         }));
         const dirty = Math.max(0, ...scroll.filter((e) => e.name === "Layout").map((e) => e.args?.beginData?.dirtyObjects || 0));
-        console.log(`wrap-perf ${name} ${softWrap ? "on" : "off"}: open ${openMs.toFixed(1)}ms (driver included), scroll layout ${worst(scroll, "Layout").toFixed(2)}ms, typing layout ${worst(typing, "Layout").toFixed(2)}ms, input handler ${worst(typing, "EventDispatch").toFixed(2)}ms, resize frame ${worst(resize, "FireAnimationFrame").toFixed(2)}ms; ${dom.rows} rows, ${dirty} dirty objects`);
+        if (process.env.FENCE_PERF_LOG) console.log(`wrap-perf ${name} ${softWrap ? "on" : "off"}: open ${openMs.toFixed(1)}ms (driver included), scroll layout ${worst(scroll, "Layout").toFixed(2)}ms, typing layout ${worst(typing, "Layout").toFixed(2)}ms, input handler ${worst(typing, "EventDispatch").toFixed(2)}ms, resize frame ${worst(resize, "FireAnimationFrame").toFixed(2)}ms; ${dom.rows} rows, ${dirty} dirty objects`);
         assert.ok(dom.rows <= dom.limit, `${dom.rows} rendered rows exceed viewport budget ${dom.limit}`);
         assert.equal(dom.length, content.length + 9, "input was lost during virtual scrolling");
         assert.ok(dirty < 5000, `scroll dirtied ${dirty} objects`);

@@ -110,6 +110,7 @@ describe("scroll sync", () => {
       await window.evaluate(() => {
         document.querySelector("#preview-container").scrollTop = 500;
       });
+      // deliberate sleep: a negative assertion, the editor must stay put
       await new Promise((resolve) => setTimeout(resolve, 500));
       assert.equal(await window.evaluate(() => document.querySelector("[data-testid=veditor]").scrollTop), 0);
     } finally {

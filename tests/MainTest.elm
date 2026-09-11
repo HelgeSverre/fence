@@ -8,7 +8,7 @@ import Main exposing (DragTarget(..), LayoutMode(..), Msg(..))
 import Preferences exposing (Picker(..))
 import Set
 import Test exposing (Test, describe, test)
-import Types exposing (DirtyState(..))
+import Types exposing (DirtyState(..), keyBindingLabel, matchesBinding)
 
 
 {-| A fresh app with default settings (no persisted state).
@@ -133,19 +133,19 @@ bindingSuite =
     in
     describe "key bindings"
         [ test "match is case-insensitive on the key" <|
-            \_ -> Main.matchesBinding { cmd1 | key = "a" } "A" True False False False |> Expect.equal True
+            \_ -> matchesBinding { cmd1 | key = "a" } "A" True False False False |> Expect.equal True
         , test "every modifier must match exactly" <|
             \_ ->
-                [ Main.matchesBinding cmd1 "1" True False False False
-                , Main.matchesBinding cmd1 "1" False True False False
-                , Main.matchesBinding cmd1 "1" True False True False
-                , Main.matchesBinding cmd1 "2" True False False False
+                [ matchesBinding cmd1 "1" True False False False
+                , matchesBinding cmd1 "1" False True False False
+                , matchesBinding cmd1 "1" True False True False
+                , matchesBinding cmd1 "2" True False False False
                 ]
                     |> Expect.equal [ True, False, False, False ]
         , test "labels use the macOS modifier glyphs in the conventional order" <|
             \_ ->
                 [ cmd1, { key = "a", meta = False, ctrl = True, shift = True, alt = True } ]
-                    |> List.map Main.keyBindingLabel
+                    |> List.map keyBindingLabel
                     |> Expect.equal [ "⌘1", "⌃⌥⇧A" ]
         , test "the default shortcuts toggle the sidebars" <|
             \_ ->

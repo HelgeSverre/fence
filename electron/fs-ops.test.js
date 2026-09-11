@@ -62,17 +62,27 @@ describe("workspace filesystem operations", () => {
     await touch("top.txt");
     await touch("notes.MKD");
 
-    const names = (await fsOps.readDir(workspace)).map((e) => e.name);
+    const discovered = [];
+    const names = (await fsOps.readDir(workspace, (p) => discovered.push(path.basename(p)))).map((e) => e.name);
 
-    assert.deepEqual(names, ["deep", "docs", "notes.MKD", "top.md"]);
+    // Directories that hold markdown directly are listed at once; "deep" only
+    // holds it further down and is confirmed in the background.
+    assert.deepEqual(names, ["docs", "notes.MKD", "top.md"]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.deepEqual(discovered, ["deep"]);
   });
 
-  test("a huge directory tree is shown rather than scanned exhaustively", async () => {
-    // Above the walk budget the check gives up and reports "yes".
+  test("a huge markdown-free tree is hidden, and its scan stops on workspace switch", async () => {
     const dir = path.join(workspace, "big");
     await fs.promises.mkdir(dir);
     await Promise.all(Array.from({ length: 6000 }, (_, i) => fs.promises.writeFile(path.join(dir, `f${i}.txt`), "")));
-    assert.equal(await fsOps.containsMarkdown(dir), true);
+    assert.equal(await fsOps.containsMarkdown(dir), false);
+
+    await fs.promises.mkdir(path.join(dir, "later"));
+    await fs.promises.writeFile(path.join(dir, "later", "note.md"), "");
+    const scan = fsOps.containsMarkdown(dir);
+    await fsOps.setWorkspace(workspace);
+    assert.equal(await scan, false);
   });
 
   test("reads content with a stable revision", async () => {

@@ -30,6 +30,7 @@ async function setWorkspace(dirPath) {
   const next = dirPath ? await fs.promises.realpath(path.resolve(dirPath)) : null;
   await closeWatchers();
   currentWorkspace = next;
+  scanGeneration += 1;
 }
 
 async function canonicalPath(target) {
@@ -64,8 +65,28 @@ const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown", ".mdown", ".mkd"]);
 // Directories that never hold a user's notes but can hold thousands of
 // READMEs; pruned from the "contains markdown" walk so they stay hidden.
 const NOISE_DIRS = new Set(["node_modules", "vendor", "dist", "build", "target", "out", "coverage", "__pycache__"]);
-const WALK_MAX_DEPTH = 12;
-const WALK_MAX_ENTRIES = 5000;
+
+// Bumped on every workspace switch so background discovery walks started for
+// the old workspace stop instead of announcing folders into the new one.
+let scanGeneration = 0;
+
+// At most this many discovery walks read the disk at once, so a workspace
+// with many large markdown-free folders cannot crowd out the file the user
+// just asked to open. Walks past the limit wait their turn.
+const MAX_CONCURRENT_SCANS = 4;
+let activeScans = 0;
+const waitingScans = [];
+
+async function withScanSlot(run) {
+  if (activeScans >= MAX_CONCURRENT_SCANS) await new Promise((resolve) => waitingScans.push(resolve));
+  activeScans += 1;
+  try {
+    return await run();
+  } finally {
+    activeScans -= 1;
+    waitingScans.shift()?.();
+  }
+}
 
 // Caps for the whole-workspace walk behind quick-open and search. Generous
 // enough for any notes folder, low enough that a wrong root can't hang the app.
@@ -143,8 +164,8 @@ async function listMarkdownFiles(rootPath) {
   const root = await pathWithinWorkspace(rootPath);
   const found = [];
 
-  async function walk(dirPath, depth) {
-    if (depth > WALK_MAX_DEPTH || found.length >= LIST_MAX_FILES) return;
+  async function walk(dirPath) {
+    if (found.length >= LIST_MAX_FILES) return;
     let entries;
     try {
       entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
@@ -156,14 +177,14 @@ async function listMarkdownFiles(rootPath) {
       if (entry.name.startsWith(".")) continue;
       const full = path.join(dirPath, entry.name);
       if (entry.isDirectory()) {
-        if (!NOISE_DIRS.has(entry.name)) await walk(full, depth + 1);
+        if (!NOISE_DIRS.has(entry.name)) await walk(full);
       } else if (entry.isFile() && isMarkdownFile(entry.name)) {
         found.push({ path: full, relative: path.relative(root, full).split(path.sep).join("/") });
       }
     }
   }
 
-  await walk(root, 0);
+  await walk(root);
   found.sort((a, b) => a.relative.localeCompare(b.relative, undefined, { sensitivity: "base" }));
   return found;
 }
@@ -212,38 +233,58 @@ function isMarkdownFile(name) {
   return MARKDOWN_EXTENSIONS.has(path.extname(name).toLowerCase());
 }
 
-// Does this directory (recursively) contain a markdown file? Hidden and
-// noise directories are skipped. Huge trees give up early and count as
-// "yes" so a big workspace is never silently hidden.
-async function containsMarkdown(dirPath, budget = { entries: WALK_MAX_ENTRIES }, depth = 0) {
-  if (depth > WALK_MAX_DEPTH || budget.entries <= 0) return true;
-  let entries;
-  try {
-    entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-  } catch {
-    return false;
-  }
-  if (entries.some((entry) => entry.isFile() && isMarkdownFile(entry.name))) return true;
-  budget.entries -= entries.length;
-  if (budget.entries <= 0) return true;
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".") || NOISE_DIRS.has(entry.name)) continue;
-    if (await containsMarkdown(path.join(dirPath, entry.name), budget, depth + 1)) return true;
-  }
-  return false;
+function hasMarkdownEntry(entries) {
+  return entries.some((entry) => entry.isFile() && isMarkdownFile(entry.name));
 }
 
-async function readDir(dirPath) {
+// Does this directory (recursively) contain a markdown file? Hidden and noise
+// directories are skipped. There is no size budget: this runs in the
+// background after the listing is sent, and stops if the workspace changes.
+function containsMarkdown(dirPath) {
+  const generation = scanGeneration;
+  // Symlinked directories fail isDirectory(), so the walk cannot loop.
+  async function walk(current) {
+    let entries;
+    try {
+      entries = await fs.promises.readdir(current, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    if (generation !== scanGeneration) return false;
+    if (hasMarkdownEntry(entries)) return true;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".") || NOISE_DIRS.has(entry.name)) continue;
+      if (await walk(path.join(current, entry.name))) return true;
+    }
+    return false;
+  }
+  return withScanSlot(() => (generation === scanGeneration ? walk(dirPath) : false));
+}
+
+// Lists markdown files and the directories that directly hold some. A
+// directory whose markdown sits deeper is confirmed in the background and
+// reported through `onDiscovered`, so a huge markdown-free tree never delays
+// the listing and never shows up.
+async function readDir(dirPath, onDiscovered) {
   const canonical = await pathWithinWorkspace(dirPath);
   const entries = await fs.promises.readdir(canonical, { withFileTypes: true });
-  // Only markdown files and directories that lead to some are worth showing.
   const relevant = await Promise.all(
     entries.map(async (entry) => {
       if (entry.name.startsWith(".")) return false;
-      if (entry.isDirectory()) {
-        return !NOISE_DIRS.has(entry.name) && (await containsMarkdown(path.join(canonical, entry.name)));
+      if (!entry.isDirectory()) return isMarkdownFile(entry.name);
+      if (NOISE_DIRS.has(entry.name)) return false;
+      const child = path.join(canonical, entry.name);
+      let children;
+      try {
+        children = await fs.promises.readdir(child, { withFileTypes: true });
+      } catch {
+        return false;
       }
-      return isMarkdownFile(entry.name);
+      if (hasMarkdownEntry(children)) return true;
+      if (onDiscovered) {
+        containsMarkdown(child).then((yes) => yes && onDiscovered(child), () => {});
+      }
+      return false;
     }),
   );
   return entries

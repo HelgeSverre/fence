@@ -6,6 +6,15 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+### Changed
+
+- Internal refactor, no user-facing changes: split `electron/main.js` into
+  `export.js`, `session.js`, `menu.js` and `validate.js`; split `src/Main.elm`
+  into `Decoders`, `PreviewSync`, `Settings` and `Splits`, and gave `Find` and
+  `Palette` their own update/view; unified the two `dirName` implementations.
+- Consolidated e2e test helpers, replaced timing-based waits with polling,
+  fixed brittle test locators, and added macOS to CI.
+
 ## [0.6.0] — 2026-09-11
 
 ### Added

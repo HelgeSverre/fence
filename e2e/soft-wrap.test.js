@@ -13,7 +13,8 @@ async function rows(window) {
 async function toggle(window) {
   await openSettings(window);
   await window.getByTestId("soft-wrap-toggle").click();
-  await window.locator(".settings-backdrop").click({ position: { x: 10, y: 100 } });
+  await window.keyboard.press("Escape");
+  await window.getByTestId("settings-dropdown").waitFor({ state: "detached" });
 }
 
 async function caret(window) {
@@ -162,8 +163,11 @@ describe("soft wrap", () => {
       await window.getByTestId("veditor").evaluate((el) => { el.scrollTop = 3000; });
       await window.waitForFunction(() => Number(document.querySelector(".veditor-row").dataset.sourceStart) > 1000);
       const before = await topOffset();
+      const rowLength = () => window.evaluate(() => { const r = document.querySelector(".veditor-row").dataset; return Number(r.sourceEnd) - Number(r.sourceStart); });
+      const wide = await rowLength();
       await fence.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1000, 800));
-      await window.waitForTimeout(200);
+      // narrower window, shorter rows: wait for the reflow, not a fixed delay
+      await window.waitForFunction((n) => window.innerWidth <= 1000 && Number(document.querySelector(".veditor-row").dataset.sourceEnd) - Number(document.querySelector(".veditor-row").dataset.sourceStart) < n, wide);
       const after = await topOffset();
       assert.ok(Math.abs(after - before) < 100, `anchor moved from ${before} to ${after}`);
       assert.ok((await rows(window)).length < 100);

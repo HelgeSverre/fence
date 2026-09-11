@@ -152,7 +152,7 @@ test("hovering a setting shows its tooltip and title bar buttons describe themse
   try {
     const { window } = fence;
     await openSettings(window);
-    const label = window.locator("#tip-pane-headers-toggle").locator("..");
+    const label = window.locator('[aria-describedby="tip-pane-headers-toggle"]');
     await label.hover();
     await window.locator("#tip-pane-headers-toggle").waitFor({ state: "visible" });
     await label.click();

@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test, describe } = require("node:test");
-const { launchFence, openEditor, focusEditor, editorText, expectEditorText, waitForFile, save, MOD } = require("./helpers");
+const { launchFence, openEditor, focusEditor, editorText, expectEditorText, waitForFile, waitForPreviewSettled, save, MOD } = require("./helpers");
 
 const SOURCE = process.env.FENCE_LARGE_FILE || "/Users/helge/code/access-virus-archive/Access-Virus-Soundsets.md";
 
@@ -207,11 +207,7 @@ describe("virtual editor: keystroke cost", { skip: !fs.existsSync(SOURCE) && `no
       await window.keyboard.press("ArrowDown");
       await window.keyboard.press("End");
       // let the progressive preview finish so its steps don't pollute the trace
-      await window.waitForFunction(
-        () => new Promise((resolve) => { const n = document.querySelectorAll(".preview-chunk").length; setTimeout(() => resolve(n > 0 && document.querySelectorAll(".preview-chunk").length === n), 400); }),
-        undefined,
-        { timeout: 20000, polling: 100 },
-      );
+      await waitForPreviewSettled(window, 20000);
       const cdp = await fence.app.context().newCDPSession(window);
       const events = [];
       cdp.on("Tracing.dataCollected", (e) => events.push(...e.value));
@@ -225,7 +221,7 @@ describe("virtual editor: keystroke cost", { skip: !fs.existsSync(SOURCE) && `no
       await finished;
       const layouts = events.filter((e) => e.name === "Layout" && e.dur).map((e) => e.dur / 1000).sort((a, b) => b - a);
       const worst = layouts[0] || 0;
-      console.log(`virtual-editing: ${layouts.length} layouts for 5 keystrokes, worst ${worst.toFixed(2)}ms`);
+      if (process.env.FENCE_PERF_LOG) console.log(`virtual-editing: ${layouts.length} layouts for 5 keystrokes, worst ${worst.toFixed(2)}ms`);
       assert.ok(worst < 2, `a keystroke layout took ${worst.toFixed(2)}ms`);
     } finally {
       await fence.close();

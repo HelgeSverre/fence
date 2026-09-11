@@ -70,9 +70,10 @@ describe("document layouts", () => {
     const userDataDir = first.userDataDir;
     try {
       await openSettings(first.window);
+      // no test id on the rebind row (src is out of scope here); the row is found by its tooltip heading
       await first.window.locator(".settings-dropdown-row").filter({ hasText: "Cycle layout" }).getByRole("button").click();
       await first.window.keyboard.press("Meta+4");
-      await first.window.getByRole("button", { name: "⌘4", exact: true }).waitFor();
+      await first.window.getByRole("button", { name: /4$/ }).waitFor();
       await first.window.keyboard.press("Escape");
       await first.window.keyboard.press("Meta+4");
       await modeIs(first.window, "preview");

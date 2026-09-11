@@ -213,13 +213,7 @@ type Msg
     | StartRebind RebindTarget
     | DismissError
     | OpenFind Bool
-    | CloseFind
-    | FindQueryChanged String
-    | FindReplacementChanged String
-    | FindStep Int
-    | FindToggleCase
-    | ReplaceActive
-    | ReplaceAll
+    | FindMsg Find.Msg
     | OpenPalette Palette.Mode
     | ClosePalette
     | PaletteQueryChanged String
@@ -694,69 +688,8 @@ update msg model =
                     { visibleModel | find = Find.open withReplace seed model.editor.lines visibleModel.find }
             in
             ( newModel
-            , Cmd.batch [ layoutCmd, focusSilently findInputId, previewFindCmd 0 newModel ]
+            , Cmd.batch [ layoutCmd, focusSilently Find.inputId, previewFindCmd 0 newModel ]
             )
-
-        CloseFind ->
-            let
-                newModel =
-                    { model | find = Find.close model.find }
-            in
-            ( newModel
-            , Cmd.batch
-                [ focusSilently
-                    (if model.layoutMode == PreviewOnly then
-                        "preview-container"
-
-                     else
-                        "veditor-input"
-                    )
-                , previewFindCmd 0 newModel
-                ]
-            )
-
-        FindQueryChanged query ->
-            let
-                newModel =
-                    { model | find = Find.setQuery query model.editor.lines model.find }
-            in
-            if model.layoutMode == PreviewOnly then
-                ( newModel, previewFindCmd 0 newModel )
-
-            else
-                goToActive newModel
-
-        FindReplacementChanged replacement ->
-            ( { model | find = Find.setReplacement replacement model.find }, Cmd.none )
-
-        FindStep delta ->
-            if model.layoutMode == PreviewOnly then
-                ( model, previewFindCmd delta model )
-
-            else
-                goToActive { model | find = Find.step delta model.find }
-
-        FindToggleCase ->
-            let
-                newModel =
-                    { model | find = Find.setCaseSensitive (not model.find.caseSensitive) model.editor.lines model.find }
-            in
-            if model.layoutMode == PreviewOnly then
-                ( newModel, previewFindCmd 0 newModel )
-
-            else
-                goToActive newModel
-
-        ReplaceActive ->
-            case Find.activeMatch model.find of
-                Just range ->
-                    applyReplacement [ range ] model
-
-                Nothing ->
-                    ( model, Cmd.none )
-
-        ReplaceAll ->
-            applyReplacement (Array.toList (Find.matches model.find)) model
 
         OpenPalette wanted ->
             ( { model | palette = Palette.open wanted model.palette }
@@ -772,15 +705,16 @@ update msg model =
                 ]
             )
 
+        FindMsg subMsg ->
+            let
+                ( find, outCmds ) =
+                    Find.update subMsg (model.layoutMode == PreviewOnly) model.editor.lines model.find
+            in
+            List.foldl runFindCmd ( { model | find = find }, Cmd.none ) outCmds
+
         ClosePalette ->
             ( { model | palette = Palette.close model.palette }
-            , focusSilently
-                (if model.layoutMode == PreviewOnly then
-                    "preview-container"
-
-                 else
-                    "veditor-input"
-                )
+            , focusSilently (documentFocusId model)
             )
 
         PaletteQueryChanged text ->
@@ -1005,18 +939,20 @@ update msg model =
 
                     else if key == "g" && (metaKey || ctrlKey) && Find.isOpen model.find then
                         update
-                            (FindStep
-                                (if shiftKey then
-                                    -1
+                            (FindMsg
+                                (Find.Step
+                                    (if shiftKey then
+                                        -1
 
-                                 else
-                                    1
+                                     else
+                                        1
+                                    )
                                 )
                             )
                             model
 
                     else if key == "Escape" && Find.isOpen model.find then
-                        update CloseFind model
+                        update (FindMsg Find.Close) model
 
                     else if matchesBinding model.leftToggleKey key metaKey ctrlKey shiftKey altKey then
                         update ToggleLeftSidebar model
@@ -1177,6 +1113,33 @@ updateEditor subMsg model =
             ]
         )
 
+
+
+{-| Where focus goes when an overlay closes: the visible document pane. -}
+documentFocusId : Model -> String
+documentFocusId model =
+    if model.layoutMode == PreviewOnly then
+        "preview-container"
+
+    else
+        "veditor-input"
+
+
+runFindCmd : Find.OutCmd -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+runFindCmd outCmd ( model, cmd ) =
+    Tuple.mapSecond (\next -> Cmd.batch [ cmd, next ]) <|
+        case outCmd of
+            Find.CmdFocusDocument ->
+                ( model, focusSilently (documentFocusId model) )
+
+            Find.CmdPreviewFind delta ->
+                ( model, previewFindCmd delta model )
+
+            Find.CmdGoToActive ->
+                goToActive model
+
+            Find.CmdReplace ranges ->
+                applyReplacement ranges model
 
 
 goToActive : Model -> ( Model, Cmd Msg )
@@ -2302,7 +2265,7 @@ viewEditorPane model =
                 model.editor
             )
         , if Find.isOpen model.find && model.layoutMode /= PreviewOnly then
-            viewFindBar (Find.count model.find) model.find
+            Html.map FindMsg (Find.view (Find.count model.find) model.find)
 
           else
             text ""
@@ -2336,7 +2299,7 @@ viewPreviewPane model =
         )
         [ Html.Lazy.lazy3 Preview.view model.editor.filePath model.frontmatter model.previewHtml
         , if model.layoutMode == PreviewOnly && Find.isOpen model.find then
-            viewFindBar model.previewFindCount model.find
+            Html.map FindMsg (Find.view model.previewFindCount model.find)
 
           else
             text ""
@@ -2486,153 +2449,6 @@ paletteKeyDecoder palette =
 
                     _ ->
                         D.fail "not a palette key"
-            )
-
-
-findInputId : String
-findInputId =
-    "find-input"
-
-
-viewFindBar : ( Int, Int ) -> Find.Model -> Html Msg
-viewFindBar counts find =
-    let
-        ( current, total ) =
-            counts
-
-        countLabel =
-            if find.query == "" then
-                ""
-
-            else if total == 0 then
-                "No results"
-
-            else
-                String.fromInt current
-                    ++ " of "
-                    ++ String.fromInt total
-                    ++ (if total >= Find.matchLimit then
-                            "+"
-
-                        else
-                            ""
-                       )
-
-        stepButton label delta =
-            button
-                [ class "find-button"
-                , attribute "aria-label" label
-                , title label
-                , disabled (total == 0)
-                , onClick (FindStep delta)
-                ]
-                [ text
-                    (if delta < 0 then
-                        "↑"
-
-                     else
-                        "↓"
-                    )
-                ]
-    in
-    div [ class "find-bar", attribute "data-testid" "find-bar" ]
-        [ div [ class "find-row" ]
-            [ input
-                [ class "find-input"
-                , id findInputId
-                , attribute "data-testid" "find-input"
-                , attribute "aria-label" "Find"
-                , placeholder "Find"
-                , value find.query
-                , spellcheck False
-                , onInput FindQueryChanged
-                , preventDefaultOn "keydown" (findKeyDecoder False)
-                ]
-                []
-            , span [ class "find-count", attribute "data-testid" "find-count" ] [ text countLabel ]
-            , button
-                [ class "find-button"
-                , classList [ ( "on", find.caseSensitive ) ]
-                , attribute "aria-label" "Match case"
-                , attribute "aria-pressed"
-                    (if find.caseSensitive then
-                        "true"
-
-                     else
-                        "false"
-                    )
-                , title "Match case"
-                , onClick FindToggleCase
-                ]
-                [ text "Aa" ]
-            , stepButton "Previous match" -1
-            , stepButton "Next match" 1
-            , button [ class "find-button", attribute "aria-label" "Close find", title "Close", onClick CloseFind ] [ text "×" ]
-            ]
-        , if find.replaceShown then
-            div [ class "find-row" ]
-                [ input
-                    [ class "find-input"
-                    , attribute "data-testid" "replace-input"
-                    , attribute "aria-label" "Replace with"
-                    , placeholder "Replace"
-                    , value find.replacement
-                    , spellcheck False
-                    , onInput FindReplacementChanged
-                    , preventDefaultOn "keydown" (findKeyDecoder True)
-                    ]
-                    []
-                , button
-                    [ class "find-button wide"
-                    , attribute "data-testid" "replace-one"
-                    , disabled (total == 0)
-                    , onClick ReplaceActive
-                    ]
-                    [ text "Replace" ]
-                , button
-                    [ class "find-button wide"
-                    , attribute "data-testid" "replace-all"
-                    , disabled (total == 0)
-                    , onClick ReplaceAll
-                    ]
-                    [ text "All" ]
-                ]
-
-          else
-            text ""
-        ]
-
-
-{-| Keys inside the find fields. Enter steps through matches (or replaces, in
-the replacement field) and Escape closes; everything else is ordinary typing.
--}
-findKeyDecoder : Bool -> D.Decoder ( Msg, Bool )
-findKeyDecoder inReplacement =
-    D.map2 Tuple.pair (D.field "key" D.string) (D.field "shiftKey" D.bool)
-        |> D.andThen
-            (\( key, shift ) ->
-                case key of
-                    "Enter" ->
-                        D.succeed
-                            ( if inReplacement then
-                                ReplaceActive
-
-                              else
-                                FindStep
-                                    (if shift then
-                                        -1
-
-                                     else
-                                        1
-                                    )
-                            , True
-                            )
-
-                    "Escape" ->
-                        D.succeed ( CloseFind, True )
-
-                    _ ->
-                        D.fail "not a find key"
             )
 
 

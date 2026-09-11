@@ -32,7 +32,13 @@ cask "fence" do
   depends_on macos: :ventura
 
   app "Fence.app"
-  command_wrapper "fence", executable: "#{appdir}/Fence.app/Contents/MacOS/Fence"
+  # Detach so \`fence PATH\` returns the terminal; help/version stay in the foreground to print.
+  command_wrapper "fence", content: <<~SH
+    #!/bin/sh
+    exe="#{appdir}/Fence.app/Contents/MacOS/Fence"
+    for a in "\$@"; do case "\$a" in -h|--help|-v|--version) exec "\$exe" "\$@";; esac; done
+    nohup "\$exe" "\$@" >/dev/null 2>&1 &
+  SH
 
   zap trash: [
     "~/Library/Application Support/Fence",

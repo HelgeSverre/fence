@@ -7,6 +7,7 @@ import Json.Encode as E
 import Main exposing (DragTarget(..), LayoutMode(..), Msg(..))
 import Preferences exposing (Picker(..))
 import Set
+import Settings
 import Test exposing (Test, describe, test)
 import Types exposing (DirtyState(..), keyBindingLabel, matchesBinding)
 
@@ -233,7 +234,7 @@ settingsSuite =
             step ToggleSettings fresh
 
         values model =
-            List.map Tuple.first (Main.visibleSettingsOptions model)
+            List.map Tuple.first (Settings.visibleSettingsOptions model)
     in
     describe "settings pickers"
         [ test "soft wrap updates both the editor and the persisted copy" <|

@@ -3221,7 +3221,7 @@ viewPicker model picker title tip =
             )
             [ span (Tooltip.host (pickerId picker)) [ text title, Tooltip.view (pickerId picker) tip ]
             , span [ class "settings-picker-value" ] [ text currentLabel ]
-            , span [ class "settings-picker-chevron" ] [ Icon.chevronRight 12 ]
+            , span [ class "settings-picker-chevron" ] [ Icon.chevronRight 14 ]
             ]
         , if expanded then
             div [ class "settings-picker-body" ]

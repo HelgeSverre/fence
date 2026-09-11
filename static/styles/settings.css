@@ -134,23 +134,36 @@
 }
 
 .settings-picker-chevron {
+  display: flex;
   flex-shrink: 0;
-  transition: transform 120ms ease;
+  color: var(--text-secondary);
+  transition: transform 120ms ease, color 120ms ease;
+}
+
+.settings-picker-header:hover .settings-picker-chevron,
+.settings-picker-header[aria-expanded="true"] .settings-picker-chevron {
+  color: var(--text-primary);
 }
 
 .settings-picker-header[aria-expanded="true"] .settings-picker-chevron {
   transform: rotate(90deg);
 }
 
+/* The open list sits in a slightly darker inset well, in every theme. */
 .settings-picker-body {
-  padding: 2px 0 4px;
+  margin: 0 4px 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: oklch(from var(--bg-surface) calc(l - 0.025) c h);
+  box-shadow: inset 0 1px 3px oklch(0 0 0 / 0.25);
 }
 
 .settings-picker-search {
   width: 100%;
   box-sizing: border-box;
   height: 26px;
-  margin: 2px 0 4px;
+  margin: 0 0 4px;
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 4px;

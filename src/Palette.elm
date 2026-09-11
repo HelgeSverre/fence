@@ -2,9 +2,12 @@ module Palette exposing
     ( Item
     , Mode(..)
     , Model
+    , Msg(..)
+    , OutCmd(..)
     , active
     , close
     , init
+    , inputId
     , isOpen
     , matchScore
     , mode
@@ -12,9 +15,12 @@ module Palette exposing
     , query
     , rank
     , results
+    , searchDelay
     , setQuery
     , setResults
     , step
+    , update
+    , view
     )
 
 {-| The overlay behind quick-open and workspace search: an input, a ranked
@@ -22,6 +28,10 @@ list, and a cursor over it. Quick-open ranks a file list held here; search
 shows whatever the main process sent back, in the order it found it.
 -}
 
+import Html exposing (Html, div, input, span, text)
+import Html.Attributes exposing (attribute, class, classList, id, placeholder, spellcheck, value)
+import Html.Events exposing (onClick, onInput, preventDefaultOn, stopPropagationOn)
+import Json.Decode as D
 import Types exposing (FilePath)
 
 
@@ -43,12 +53,13 @@ type alias Model =
     , query : String
     , items : List Item -- for Files, everything; for Search, the current hits
     , active : Int
+    , searchGeneration : Int -- the query the pending debounced search was for
     }
 
 
 init : Model
 init =
-    { opened = Nothing, query = "", items = [], active = 0 }
+    { opened = Nothing, query = "", items = [], active = 0, searchGeneration = 0 }
 
 
 isOpen : Model -> Bool
@@ -201,3 +212,193 @@ matchScore text candidate =
 
     else
         go needle haystack False '/' 0
+
+
+
+-- MESSAGES
+
+
+type Msg
+    = Open Mode
+    | Close
+    | QueryChanged String
+    | SearchDue Int
+    | Step Int
+    | Choose (Maybe Item)
+    | NoOp
+
+
+{-| What Main does on the module's behalf: focus, and talking to the main
+process.
+-}
+type OutCmd
+    = CmdFocusInput
+    | CmdFocusDocument -- give focus back to the editor or preview
+    | CmdListFiles FilePath -- the workspace root
+    | CmdDebounceSearch Int -- send `SearchDue` with this generation after `searchDelay`
+    | CmdSearch FilePath String -- root and query
+    | CmdReadFile FilePath (Maybe Int) -- and the line to put the caret on
+
+
+{-| How long to wait before searching the workspace for what has been typed. -}
+searchDelay : Float
+searchDelay =
+    200
+
+
+inputId : String
+inputId =
+    "palette-input"
+
+
+{-| `root` is the open workspace, if any: there is nothing to list or search
+without one.
+-}
+update : Msg -> Maybe FilePath -> Model -> ( Model, List OutCmd )
+update msg root model =
+    case msg of
+        Open wanted ->
+            ( open wanted model
+            , CmdFocusInput
+                :: (case ( wanted, root ) of
+                        -- the list is cheap to rebuild and always current this way
+                        ( Files, Just path ) ->
+                            [ CmdListFiles path ]
+
+                        _ ->
+                            []
+                   )
+            )
+
+        Close ->
+            ( close model, [ CmdFocusDocument ] )
+
+        QueryChanged text ->
+            let
+                palette =
+                    setQuery text model
+
+                generation =
+                    model.searchGeneration + 1
+            in
+            case ( palette.opened, root ) of
+                ( Just Search, Just _ ) ->
+                    ( { palette | searchGeneration = generation }, [ CmdDebounceSearch generation ] )
+
+                _ ->
+                    ( palette, [] )
+
+        SearchDue generation ->
+            if generation /= model.searchGeneration then
+                ( model, [] )
+
+            else
+                case ( root, String.trim model.query ) of
+                    ( Just path, text ) ->
+                        if text == "" then
+                            ( setResults [] model, [] )
+
+                        else
+                            ( model, [ CmdSearch path text ] )
+
+                    _ ->
+                        ( model, [] )
+
+        Step delta ->
+            ( step delta model, [] )
+
+        Choose item ->
+            case item of
+                Just chosen ->
+                    ( close model, [ CmdReadFile chosen.path chosen.line ] )
+
+                Nothing ->
+                    ( model, [] )
+
+        NoOp ->
+            ( model, [] )
+
+
+
+-- VIEW
+
+
+view : Model -> Html Msg
+view palette =
+    let
+        rows =
+            results palette
+
+        placeholderText =
+            case mode palette of
+                Just Search ->
+                    "Search the workspace"
+
+                _ ->
+                    "Go to file"
+
+        row index item =
+            div
+                [ class "palette-row"
+                , classList [ ( "active", index == palette.active ) ]
+                , attribute "data-testid" "palette-row"
+                , attribute "role" "option"
+                , attribute "aria-selected"
+                    (if index == palette.active then
+                        "true"
+
+                     else
+                        "false"
+                    )
+                , onClick (Choose (Just item))
+                ]
+                [ span [ class "palette-primary" ] [ text item.primary ]
+                , span [ class "palette-secondary" ] [ text item.secondary ]
+                ]
+    in
+    div [ class "palette-backdrop", attribute "data-testid" "palette", onClick Close ]
+        [ div [ class "palette", stopPropagationOn "click" (D.succeed ( NoOp, True )) ]
+            [ input
+                [ class "palette-input"
+                , id inputId
+                , attribute "data-testid" "palette-input"
+                , attribute "aria-label" placeholderText
+                , placeholder placeholderText
+                , value (query palette)
+                , spellcheck False
+                , onInput QueryChanged
+                , preventDefaultOn "keydown" (keyDecoder palette)
+                ]
+                []
+            , if List.isEmpty rows then
+                div [ class "palette-empty" ] [ text "No results" ]
+
+              else
+                div [ class "palette-results", attribute "role" "listbox" ] (List.indexedMap row rows)
+            ]
+        ]
+
+
+keyDecoder : Model -> D.Decoder ( Msg, Bool )
+keyDecoder palette =
+    D.field "key" D.string
+        |> D.andThen
+            (\key ->
+                case key of
+                    "ArrowDown" ->
+                        D.succeed ( Step 1, True )
+
+                    "ArrowUp" ->
+                        D.succeed ( Step -1, True )
+
+                    "Enter" ->
+                        D.succeed ( Choose (active palette), True )
+
+                    "Escape" ->
+                        D.succeed ( Close, True )
+
+                    _ ->
+                        D.fail "not a palette key"
+            )
+
+

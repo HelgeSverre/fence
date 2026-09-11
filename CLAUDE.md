@@ -37,9 +37,14 @@ src/              # Elm source code
   Icon.elm        # SVG icon components
   Ports.elm       # Elm <-> Electron IPC bridge definitions
 electron/
-  main.js         # Electron app init, window management, state persistence
+  main.js         # Electron app init, window management, IPC handlers, workspace
   preload.js      # Secure contextBridge IPC
-  fs-ops.js       # File system operations, chokidar watcher
+  fs-ops.js       # File system operations, chokidar watcher, image resolution
+  session.js      # state.json load/update, last-document session, recovery drafts
+  export.js       # Standalone HTML/PDF export, image inlining
+  menu.js         # Application menu
+  validate.js     # IPC payload validation, preference rule table, isAppUrl
+  cli.js          # Command-line argument parsing
 js/
   main.js         # Elm app initialization and flags
   ports.js        # Port wiring; applies `setPreferences` to the DOM then forwards to Electron

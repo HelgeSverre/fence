@@ -137,7 +137,9 @@ function rememberSession(data) {
     ...Object.fromEntries(["line", "col", "top", "left"].map(key => [key, Number.isFinite(data[key]) ? Math.max(0, data[key]) : 0])),
   };
   clearTimeout(sessionTimer);
-  sessionTimer = setTimeout(flushSession, 150);
+  // Every cursor move lands here; the flush is a sync read+write of
+  // state.json, so wait for a real pause. Close and navigation flush directly.
+  sessionTimer = setTimeout(flushSession, 1000);
 }
 
 async function confirmNavigation(closing = false) {

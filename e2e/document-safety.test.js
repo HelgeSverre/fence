@@ -96,8 +96,13 @@ test('restart restores the last document, caret, and viewport', async () => {
     await first.window.keyboard.press(`${MOD}+End`);
     // Direct scrolling is part of normal editor state, including when the caret is offscreen.
     await first.window.getByTestId('veditor').evaluate(e => { e.scrollTop = 2000; e.dispatchEvent(new Event('scroll')); });
-    await first.window.waitForTimeout(200);
-    const session = JSON.parse(await fs.readFile(require('node:path').join(first.userDataDir, 'state.json'), 'utf8')).lastDocument;
+    // The session flush is debounced; wait for the write rather than guess its delay.
+    const statePath = require('node:path').join(first.userDataDir, 'state.json');
+    let session;
+    for (let i = 0; i < 50 && !(session?.top > 1000); i += 1) {
+      await first.window.waitForTimeout(100);
+      session = JSON.parse(await fs.readFile(statePath, 'utf8').catch(() => '{}')).lastDocument;
+    }
     assert.ok(session.top > 1000);
     await first.close({ keepUserData: true, keepWorkspace: true });
     second = await launchFence({ restoreSession: true, userDataDir: first.userDataDir });

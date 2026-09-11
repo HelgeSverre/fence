@@ -5,6 +5,7 @@ module Types exposing
     , FilePath
     , KeyBinding
     , baseName
+    , dirName
     , encodeKeyBinding
     , fileEntryName
     , fileEntryPath
@@ -72,6 +73,25 @@ baseName path =
         |> List.reverse
         |> List.head
         |> Maybe.withDefault path
+
+
+{-| The directory holding a path: what the file tree keys its entries by, and
+the base a document's relative links resolve against. Absolute, no trailing
+slash, and "/" for a path at the root.
+-}
+dirName : FilePath -> FilePath
+dirName path =
+    let
+        parts =
+            String.split "/" path
+                |> List.filter (not << String.isEmpty)
+    in
+    case List.reverse parts of
+        _ :: rest ->
+            "/" ++ String.join "/" (List.reverse rest)
+
+        [] ->
+            "/"
 
 
 {-| DOM id for a file-tree row. Shared so focus-after-navigation in Main

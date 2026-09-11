@@ -773,12 +773,6 @@ countsFor content =
     }
 
 
-{-| The directory part of a path, for resolving a document's relative links. -}
-dirName : FilePath -> String
-dirName path =
-    String.split "/" path |> List.reverse |> List.drop 1 |> List.reverse |> String.join "/"
-
-
 {-| How many recently opened files back/forward can reach. -}
 historyLimit : Int
 historyLimit =

@@ -80,8 +80,8 @@
 
 /* Keep the shared ring inside full-width rows and clipped stepper controls.
    Plain :focus covers roving-tabindex navigation, and the checkbox's row carries
-   its ring so the switch itself can stay small. */
-.settings-btn:focus-visible,
+   its ring so the switch itself can stay small. The settings button itself
+   uses the shared titlebar ring, like the open-folder button beside it. */
 .settings-dropdown :focus-visible,
 .settings-dropdown-item:focus,
 .settings-dropdown-row:has(input[type="checkbox"]:focus-visible) {
@@ -251,17 +251,19 @@
 .segmented {
   display: flex;
   flex-shrink: 0;
+  box-sizing: border-box;
+  height: 26px; /* same as .stepper-btn, .stepper-value and .rebind-btn */
   gap: 1px;
   padding: 2px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
   background: var(--bg-base);
 }
 
 .segment {
-  padding: 2px 8px;
+  padding: 0 8px;
   border: none;
-  border-radius: 4px;
+  border-radius: 3px;
   background: none;
   color: var(--text-muted);
   font-family: var(--font-sans);

@@ -94,6 +94,15 @@ body {
   align-items: center;
 }
 
+/* Titlebar buttons share one box (matches the settings controls' 26px). */
+.titlebar-actions > .icon-button {
+  box-sizing: border-box;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 5px;
+  justify-content: center;
+}
+
 .icon-button:hover,
 .stepper-btn:hover {
   background: var(--bg-overlay);

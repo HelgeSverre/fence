@@ -1,35 +1,28 @@
-// Helpers for applying persisted font preferences as CSS custom properties on
-// <html>. Shared between init (js/main.js) and the runtime port handler
-// (js/ports.js) so the two stay in sync.
+// Applies persisted preferences as CSS custom properties on <html>. Shared
+// between init (js/main.js) and the runtime port handler (js/ports.js) so the
+// two stay in sync.
 
 const root = document.documentElement;
+const SANS_FALLBACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const setVar = (name, value) => (value ? root.style.setProperty(name, value) : root.style.removeProperty(name));
 
-export function applyFontFamily(font) {
-  if (font) {
-    root.style.setProperty("--font-mono", `"${font}", monospace`);
-  } else {
-    root.style.removeProperty("--font-mono");
-  }
+export function applyPreferences(p) {
+  if (p.theme) root.setAttribute("data-theme", p.theme);
+  else root.removeAttribute("data-theme");
+  setVar("--font-mono", p.editorFont && `"${p.editorFont}", monospace`);
+  setVar("--font-sans", p.uiFont && `"${p.uiFont}", ${SANS_FALLBACK}`);
+  setVar("--font-size-editor", p.editorFontSize && p.editorFontSize + "px");
+  setVar("--font-size-preview", p.previewFontSize && p.previewFontSize + "px");
+  setVar("--font-size-ui", p.uiFontSize && p.uiFontSize + "px");
 }
 
-export function applyFontSize(name, size) {
-  if (size) {
-    root.style.setProperty(`--font-size-${name}`, size + "px");
-  }
-}
-
-export function applyFontSizesFromState(state) {
-  applyFontSize("editor", state.editorFontSize);
-  applyFontSize("preview", state.previewFontSize);
-  applyFontSize("ui", state.uiFontSize);
-}
-
-// Load every bundled @font-face up front. Otherwise a face loads lazily the
-// first time a document needs it (a bold span, or a glyph the earlier fonts
-// in the stack lack), and each arrival relayouts the whole editor overlay.
-export function preloadBundledFonts() {
+// Load only the faces in use; the bundle ships ~60 faces and eagerly loading
+// all of them costs startup time.
+export function preloadFonts(families) {
   try {
-    for (const face of document.fonts) face.load().catch(() => {});
+    for (const face of document.fonts) {
+      if (families.includes(face.family.replace(/^"|"$/g, ""))) face.load().catch(() => {});
+    }
   } catch {
     /* no FontFaceSet (tests) */
   }

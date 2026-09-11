@@ -3,7 +3,14 @@
   font-size: var(--font-size-preview);
   line-height: var(--preview-line-height);
   color: var(--text-primary);
-  max-width: 100%;
+  /* the app root sets --preview-max-width when "limit preview width" is on */
+  max-width: var(--preview-max-width, 100%);
+  margin-inline: auto;
+}
+
+/* Preference: use the editor font for the preview too. */
+.preview-mono .preview-content {
+  font-family: var(--font-mono);
 }
 
 .preview-chunk:first-child > :first-child {

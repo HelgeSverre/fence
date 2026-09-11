@@ -1,4 +1,10 @@
-import mermaid from "mermaid";
+// Mermaid's core is ~560 KB; load it the first time a document has a diagram
+// so every other document skips the parse cost at startup.
+let mermaidModule = null;
+function loadMermaid() {
+  mermaidModule ??= import("mermaid").then((m) => m.default);
+  return mermaidModule;
+}
 
 function getMermaidTheme() {
   const appTheme = document.documentElement.getAttribute("data-theme");
@@ -40,12 +46,18 @@ async function renderMermaidBlocks() {
   }
   rendering = true;
   try {
-    for (const el of document.querySelectorAll(".preview-content .mermaid[data-source]")) {
+    const blocks = [...document.querySelectorAll(".preview-content .mermaid[data-source]")]
+      .filter((el) => {
+        const previous = rendered.get(el);
+        return el.isConnected && !(previous?.source === (el.dataset.source ?? "") && previous?.theme === getMermaidTheme());
+      });
+    if (blocks.length === 0) return;
+    const mermaid = await loadMermaid();
+    let configuredTheme = null;
+    for (const el of blocks) {
       if (!el.isConnected) continue;
       const source = el.dataset.source ?? "";
       const theme = getMermaidTheme();
-      const previous = rendered.get(el);
-      if (previous?.source === source && previous?.theme === theme) continue;
       rendered.set(el, { source, theme });
       el.dataset.state = "rendering";
       el.removeAttribute("data-processed");
@@ -54,12 +66,19 @@ async function renderMermaidBlocks() {
       // Source or theme may change while Mermaid is awaiting layout/imports.
       const isCurrent = () => el.isConnected && el.dataset.source === source && getMermaidTheme() === theme;
       try {
-        mermaid.initialize({
-          startOnLoad: false,
-          theme,
-          securityLevel: "strict",
-          suppressErrorRendering: true,
-        });
+        if (configuredTheme !== theme) {
+          configuredTheme = theme;
+          mermaid.initialize({
+            startOnLoad: false,
+            theme,
+            // Mermaid 12 defaults to ELK/"neo"; keep the dagre/classic look and
+            // skip the 1.4 MB ELK chunk.
+            layout: "dagre",
+            look: "classic",
+            securityLevel: "strict",
+            suppressErrorRendering: true,
+          });
+        }
         const { svg, bindFunctions } = await mermaid.render(`fence-mermaid-${++nextDiagramId}`, source);
         if (!isCurrent()) {
           rendered.delete(el);

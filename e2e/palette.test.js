@@ -110,6 +110,36 @@ describe("command palette", () => {
     }
   });
 
+
+  test("opening a file from the palette reveals it in the sidebar", async () => {
+    const fence = await launchFence({ files, open: "a.md" });
+    try {
+      const { window } = fence;
+      await window.keyboard.press(`${MOD}+p`);
+      await window.getByTestId("palette-input").fill("plan");
+      await window.keyboard.press("Enter");
+      await waitForEditorValue(window, files["docs/plan.md"]);
+      await window.locator("[data-testid=tree-file].selected", { hasText: "plan.md" }).waitFor();
+      await window.locator('[aria-expanded="true"] > [data-testid=tree-dir]', { hasText: "docs" }).waitFor();
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("with reveal turned off the tree is left alone", async () => {
+    const fence = await launchFence({ files, open: "a.md", state: { revealInSidebar: false } });
+    try {
+      const { window } = fence;
+      await window.keyboard.press(`${MOD}+p`);
+      await window.getByTestId("palette-input").fill("plan");
+      await window.keyboard.press("Enter");
+      await waitForEditorValue(window, files["docs/plan.md"]);
+      assert.equal(await window.getByTestId("tree-file").filter({ hasText: "plan.md" }).count(), 0);
+    } finally {
+      await fence.close();
+    }
+  });
+
   test("the outline pane reports the document's counts", async () => {
     const fence = await launchFence({ files, open: "a.md" });
     try {

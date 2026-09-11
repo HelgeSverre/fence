@@ -28,10 +28,20 @@ rootChildren model =
     model.root |> Maybe.andThen fileEntryChildren |> Maybe.withDefault [] |> List.map fileEntryPath
 
 
+{-| Every loaded path in the tree, depth first. -}
+allPaths : FileTree.Model -> List String
+allPaths model =
+    let
+        walk entry =
+            fileEntryPath entry :: List.concatMap walk (Maybe.withDefault [] (fileEntryChildren entry))
+    in
+    Maybe.map walk model.root |> Maybe.withDefault []
+
+
 suite : Test
 suite =
     describe "File tree"
-        [ stateSuite, keyboardSuite, fsEventSuite, editingSuite ]
+        [ stateSuite, keyboardSuite, fsEventSuite, editingSuite, revealSuite ]
 
 
 editingSuite : Test
@@ -124,6 +134,87 @@ editingSuite =
         ]
 
 
+revealSuite : Test
+revealSuite =
+    let
+        target =
+            "/notes/sub/deep/c.md"
+
+        loadSub =
+            FileTree.handleDirContents "/notes/sub" [ dir "/notes/sub/deep" ]
+
+        loadDeep =
+            FileTree.handleDirContents "/notes/sub/deep" [ file target ]
+    in
+    describe "revealing a file from outside the tree"
+        [ test "reveal expands and watches each collapsed ancestor, reads the first unloaded one, and selects the file" <|
+            \_ ->
+                FileTree.reveal target workspace
+                    |> (\( model, cmds ) ->
+                            Expect.equal
+                                ( [ "/notes", "/notes/sub", "/notes/sub/deep" ]
+                                , [ CmdWatchDir "/notes/sub", CmdWatchDir "/notes/sub/deep", CmdReadDir "/notes/sub" ]
+                                , ( Just target, Just target, Just target )
+                                )
+                                ( Set.toList model.expanded
+                                , cmds
+                                , ( model.selected, model.focused, model.pendingReveal )
+                                )
+                       )
+        , test "each arriving listing reads the next level, and the last one finishes the reveal" <|
+            \_ ->
+                let
+                    ( afterSub, subCmds ) =
+                        FileTree.reveal target workspace |> Tuple.first |> loadSub
+
+                    ( afterDeep, deepCmds ) =
+                        loadDeep afterSub
+                in
+                Expect.equal
+                    ( ( Just target, [ CmdReadDir "/notes/sub/deep" ] ), ( Nothing, [] ), True )
+                    ( ( afterSub.pendingReveal, subCmds ), ( afterDeep.pendingReveal, deepCmds ), List.member target (allPaths afterDeep) )
+        , test "reveal into a loaded, open directory emits nothing and is not pending" <|
+            \_ ->
+                FileTree.update (Toggle "/notes/sub") workspace
+                    |> Tuple.first
+                    |> FileTree.handleDirContents "/notes/sub" [ file "/notes/sub/c.md" ]
+                    |> Tuple.first
+                    |> FileTree.reveal "/notes/sub/c.md"
+                    |> (\( model, cmds ) ->
+                            Expect.equal
+                                ( [], Nothing, Just "/notes/sub/c.md" )
+                                ( cmds, model.pendingReveal, model.selected )
+                       )
+        , test "reveal of a file outside the workspace only selects it" <|
+            \_ ->
+                FileTree.reveal "/elsewhere/x.md" workspace
+                    |> (\( model, cmds ) ->
+                            Expect.equal
+                                ( workspace.expanded, [], Just "/elsewhere/x.md" )
+                                ( model.expanded, cmds, model.selected )
+                       )
+        , test "re-reading a directory keeps what its subdirectories had loaded" <|
+            \_ ->
+                workspace
+                    |> loadSub
+                    |> Tuple.first
+                    |> loadDeep
+                    |> Tuple.first
+                    |> loadSub
+                    |> Tuple.first
+                    |> allPaths
+                    |> List.member target
+                    |> Expect.equal True
+        , test "opening another folder drops a pending reveal" <|
+            \_ ->
+                FileTree.reveal target workspace
+                    |> Tuple.first
+                    |> FileTree.handleFolderOpened "/other" []
+                    |> .pendingReveal
+                    |> Expect.equal Nothing
+        ]
+
+
 stateSuite : Test
 stateSuite =
     describe "state"
@@ -158,7 +249,7 @@ stateSuite =
                        )
         , test "directory contents populate the matching entry" <|
             \_ ->
-                FileTree.handleDirContents "/notes/sub" [ file "/notes/sub/c.md" ] workspace
+                (FileTree.handleDirContents "/notes/sub" [ file "/notes/sub/c.md" ] workspace |> Tuple.first)
                     |> .root
                     |> Maybe.andThen fileEntryChildren
                     |> Maybe.withDefault []
@@ -252,7 +343,7 @@ fsEventSuite =
                     |> (\m -> Expect.equal ( Nothing, Nothing ) ( m.selected, m.focused ))
         , test "removing a directory clears a selection inside it" <|
             \_ ->
-                FileTree.handleDirContents "/notes/sub" [ file "/notes/sub/c.md" ] workspace
+                (FileTree.handleDirContents "/notes/sub" [ file "/notes/sub/c.md" ] workspace |> Tuple.first)
                     |> FileTree.update (FileSelected "/notes/sub/c.md")
                     |> Tuple.first
                     |> FileTree.handleFsEvent "unlinkDir" "/notes/sub"

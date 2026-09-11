@@ -16,8 +16,11 @@ describe("window lifecycle", { skip: process.platform !== "darwin" && "macOS-onl
 
       const opened = fence.app.waitForEvent("window");
       // `fence other.md` from a shell reaches the running app as second-instance
-      // argv as a development run sees it: [electron, main.js, ...args]
-      await fence.app.evaluate(({ app }, target) => app.emit("second-instance", {}, ["electron", "main.js", target], "/"), fence.file("other.md"));
+      // argv as a development run sees it: [electron, <switches Electron adds>, main.js, ...args]
+      await fence.app.evaluate(
+        ({ app }, target) => app.emit("second-instance", {}, ["electron", "--allow-file-access-from-files", "dist-electron/main.js", target], process.cwd()),
+        fence.file("other.md"),
+      );
 
       const page = await opened;
       await page.waitForFunction(

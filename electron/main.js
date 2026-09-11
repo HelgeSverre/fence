@@ -187,12 +187,18 @@ async function switchWorkspace(folderPath) {
   if (await openWorkspace(folderPath)) sendToRenderer({ tag: "documentClosed" });
 }
 
+// A directory confirmed to hold markdown after its parent's listing was
+// already sent; the tree inserts it like a directory created on disk.
+function announceDir(dirPath) {
+  sendToRenderer({ tag: "fsEvent", event: "addDir", path: dirPath });
+}
+
 // Open a folder as the active workspace: point fs-ops at it, push the
 // listing to the renderer, and record it in the recents list.
 async function openWorkspace(folderPath) {
   try {
     await fsOps.setWorkspace(folderPath);
-    const entries = await fsOps.readDir(folderPath);
+    const entries = await fsOps.readDir(folderPath, announceDir);
     const canonicalPath = entries.length > 0
       ? path.dirname(entries[0].path)
       : await fs.promises.realpath(folderPath);
@@ -340,6 +346,20 @@ function cliPathFrom(argv, cwd) {
   return parseCliArgs(argv.slice(app.isPackaged ? 1 : 2), cwd).path;
 }
 
+// The path a second `fence <path>` launch forwarded, relative to its shell's
+// directory; its own process already reported any bad input.
+function forwardedCliPath(argv, cwd) {
+  // In development the forwarded argv also names this script or the app
+  // directory, and Electron's switches push it off its usual slot.
+  const isSelf = (arg) =>
+    !app.isPackaged && [app.getAppPath(), process.argv[1]].some((own) => own && path.resolve(cwd, arg) === path.resolve(own));
+  try {
+    return parseCliArgs(argv.slice(1).filter((arg) => !isSelf(arg)), cwd, { forwarded: true }).path;
+  } catch {
+    return null;
+  }
+}
+
 // Open a CLI path: a folder becomes the workspace; a file opens its parent
 // folder as the workspace and loads the file into the editor.
 async function openCliPath(cliPath) {
@@ -402,7 +422,7 @@ function createWindow() {
     if (state.lastWorkspace) {
       try {
         await fsOps.setWorkspace(state.lastWorkspace);
-        const entries = await fsOps.readDir(state.lastWorkspace);
+        const entries = await fsOps.readDir(state.lastWorkspace, announceDir);
         sendToRenderer({
           tag: "folderOpened",
           path: state.lastWorkspace,
@@ -614,7 +634,7 @@ registerIpc("fence:open-folder", async () => {
 
 registerIpc("fence:read-dir", async (data) => {
   const dirPath = requireString(data, "path", 32768);
-  const entries = await fsOps.readDir(dirPath);
+  const entries = await fsOps.readDir(dirPath, announceDir);
   sendToRenderer({ tag: "dirContents", path: dirPath, entries });
 });
 
@@ -883,28 +903,27 @@ registerIpc("fence:save-splits", (data) => {
   updateState(() => updates);
 });
 
-registerIpc("fence:set-theme", (data) => {
-  updateState(() => ({ theme: requireString(data, "theme", 128) }));
-});
+// Invalid or missing keys are skipped silently, as in save-splits above.
+const string = (max) => (v) => typeof v === "string" && v.length <= max;
+const number = (lo, hi) => (v) => typeof v === "number" && v >= lo && v <= hi;
+const integer = (lo, hi) => (v) => Number.isInteger(v) && v >= lo && v <= hi;
+const boolean = (v) => typeof v === "boolean";
+const oneOf = (values) => (v) => values.includes(v);
 
-registerIpc("fence:set-font", (data) => {
-  updateState(() => ({ font: requireString(data, "font", 256) }));
-});
+const preferenceRules = {
+  theme: string(128), editorFont: string(256), uiFont: string(256),
+  editorFontSize: number(8, 32), previewFontSize: number(8, 32), uiFontSize: number(8, 24),
+  previewWidth: oneOf(["full", "narrow", "normal", "wide", "custom"]), previewMaxWidth: integer(320, 2000),
+  showPaneHeaders: boolean, previewUsesEditorFont: boolean, softWrap: boolean,
+  revealInSidebar: boolean,
+};
 
-registerIpc("fence:set-soft-wrap", (data) => {
-  if (typeof data.softWrap === "boolean") updateState(() => ({ softWrap: data.softWrap }));
-});
-
-registerIpc("fence:set-font-size", (data) => {
-  updateState(() => {
-    const updates = {};
-    for (const key of ["editorFontSize", "previewFontSize", "uiFontSize"]) {
-      if (typeof data[key] === "number" && Number.isFinite(data[key])) {
-        updates[key] = Math.min(32, Math.max(8, data[key]));
-      }
-    }
-    return updates;
-  });
+registerIpc("fence:set-preferences", (data) => {
+  const updates = {};
+  for (const [key, valid] of Object.entries(preferenceRules)) {
+    if (valid(data[key])) updates[key] = data[key];
+  }
+  updateState(() => updates);
 });
 
 registerIpc("fence:save-recovery-draft", data => {
@@ -951,7 +970,7 @@ if (!gotLock) {
   // `fence <path>` while the app is running: the new process forwards its
   // argv here and exits; open the path in the existing window.
   app.on("second-instance", (_event, argv, workingDirectory) => {
-    revealPath(cliPathFrom(argv, workingDirectory));
+    revealPath(forwardedCliPath(argv, workingDirectory));
   });
 
   app.whenReady().then(() => {

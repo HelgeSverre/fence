@@ -19,6 +19,7 @@ Fence is a desktop Markdown editor built with **Elm + Electron**. It features a 
 src/              # Elm source code
   Main.elm        # App entry, Model, update, view, drag/resize logic
   Types.elm       # Core type definitions
+  Preferences.elm # Appearance settings record: defaults, decode/encode, picker option lists
   Editor.elm      # Editing: cursor, selection, undo, keyboard shortcuts
   VirtualEditor.elm # The editor's view: only visible rows
   TextBuffer.elm  # Pure line-array edits
@@ -37,7 +38,8 @@ electron/
   fs-ops.js       # File system operations, chokidar watcher
 js/
   main.js         # Elm app initialization and flags
-  ports.js        # Port wiring and theme management
+  ports.js        # Port wiring; applies `setPreferences` to the DOM then forwards to Electron
+  preferences.js  # Sets data-theme and font CSS variables from a Preferences record
   virtual-input.js # hidden-input glue: paste, copy/cut, focus, IME
   editor-metrics.js # measures monospace metrics for the editor
   elm.js          # Generated Elm bundle (do not edit)
@@ -48,7 +50,7 @@ static/
     preview.css   # Preview pane markdown styles
     file-tree.css # Sidebar file browser
     syntax.css    # Code block syntax highlighting
-  fonts/          # Bundled web fonts (JetBrains Mono, IBM Plex, etc.)
+  fonts/          # Bundled woff2: mono fonts hand-vendored, sans fonts via scripts/vendor-fonts.mjs
 build/icons/      # App icons (icns, ico, png)
 lib/              # Custom syntax highlighting library
 ```
@@ -56,9 +58,12 @@ lib/              # Custom syntax highlighting library
 ## Development Commands
 
 ```bash
-bun run dev        # Start Vite dev server + Electron concurrently
-bun run build      # Production build and Electron package
-bun run dev:debug  # Open Electron DevTools
+bun run dev          # Start Vite dev server + Electron concurrently
+bun run build        # Production build and Electron package
+bun run dev:debug    # Open Electron DevTools
+bun run test         # elm-test + node unit tests
+bun run test:e2e     # Playwright/Electron e2e (needs `bunx vite build` first)
+bun run vendor-fonts # Copy sans fonts from @fontsource into static/fonts, regenerate fonts.css
 ```
 
 Vite dev server runs on **port 5173**.
@@ -99,11 +104,11 @@ CSS `data-theme` attribute switching. 5 themes: `catppuccin-mocha` (default), `c
 
 ### State Persistence
 
-Electron persists `sidebarFraction`, `editorFraction`, and recent workspaces to `app.getPath('userData')/state.json`.
+Electron persists layout (`saveSplits`), recent workspaces, and appearance preferences to `app.getPath('userData')/state.json`. Appearance settings live in one `Preferences` record (`src/Preferences.elm`): Elm sends the whole record as `setPreferences` on any change, `js/preferences.js` applies it to the DOM, and `electron/main.js` validates each key against a rules table before merging. Pure-CSS preferences (preview max width, hidden pane headers, mono preview) are classes and a `--preview-max-width` style on `.app-shell`.
 
 ### File Watching
 
-chokidar watches the open directory and pushes change events to Elm via ports. Auto-reloads files with no unsaved changes.
+chokidar watches the open directory and pushes change events to Elm via ports. Auto-reloads files with no unsaved changes. Directory listings only include folders that directly hold markdown; folders whose markdown sits deeper are confirmed in the background (`fs-ops.containsMarkdown`, no size budget, cancelled on workspace switch) and pushed as `addDir` events.
 
 ## Key Files to Know
 

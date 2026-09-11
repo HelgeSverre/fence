@@ -5,6 +5,8 @@ import Expect
 import FileTree
 import Json.Encode as E
 import Main exposing (DragTarget(..), LayoutMode(..), Msg(..))
+import Preferences exposing (Picker(..))
+import Set
 import Test exposing (Test, describe, test)
 import Types exposing (DirtyState(..))
 
@@ -49,6 +51,21 @@ openFile path content =
         )
 
 
+{-| A workspace at /notes with a collapsed sub directory, as the main process reports it. -}
+withWorkspace : Main.Model -> Main.Model
+withWorkspace =
+    let
+        entry name path fileType =
+            E.object [ ( "name", E.string name ), ( "path", E.string path ), ( "fileType", E.string fileType ) ]
+    in
+    step
+        (fromElectron "folderOpened"
+            [ ( "path", E.string "/notes" )
+            , ( "entries", E.list identity [ entry "a.md" "/notes/a.md" "file", entry "sub" "/notes/sub" "directory" ] )
+            ]
+        )
+
+
 {-| Replace the document the way a user would: select everything, then type.
 -}
 edit : String -> Main.Model -> Main.Model
@@ -64,7 +81,7 @@ keyDown key meta =
 suite : Test
 suite =
     describe "Main"
-        [ layoutModeSuite, initSuite, bindingSuite, dragSuite, layoutSuite, previewSuite, fileSuite, progressiveSuite, reloadSuite ]
+        [ layoutModeSuite, initSuite, bindingSuite, dragSuite, layoutSuite, settingsSuite, previewSuite, fileSuite, progressiveSuite, reloadSuite ]
 
 
 initSuite : Test
@@ -77,7 +94,7 @@ initSuite =
                     , \_ -> fresh.editorFraction |> Expect.within (Expect.Absolute 0.0001) 0.5
                     , \_ -> fresh.rightSidebarFraction |> Expect.within (Expect.Absolute 0.0001) 0.18
                     , \_ -> ( fresh.leftSidebarVisible, fresh.rightSidebarVisible, fresh.outlineMaxLevel ) |> Expect.equal ( True, False, 3 )
-                    , \_ -> fresh.theme |> Expect.equal "github-dark"
+                    , \_ -> fresh.preferences.theme |> Expect.equal "github-dark"
                     ]
                     ()
         , test "persisted flags override the defaults" <|
@@ -87,7 +104,7 @@ initSuite =
                         withFlags [ ( "theme", E.string "dracula" ), ( "sidebarFraction", E.float 0.3 ), ( "rightSidebarVisible", E.bool True ) ]
                 in
                 Expect.all
-                    [ \_ -> ( model.theme, model.rightSidebarVisible ) |> Expect.equal ( "dracula", True )
+                    [ \_ -> ( model.preferences.theme, model.rightSidebarVisible ) |> Expect.equal ( "dracula", True )
                     , \_ -> model.sidebarFraction |> Expect.within (Expect.Absolute 0.0001) 0.3
                     ]
                     ()
@@ -202,10 +219,65 @@ layoutSuite =
                     ( (step ToggleSettings fresh).settingsOpen, (steps [ ToggleSettings, CloseSettings ] fresh).settingsOpen )
         , test "theme and font selections are stored" <|
             \_ ->
-                steps [ SetTheme "dracula", SetFont "Hack" ] fresh
-                    |> (\m -> Expect.equal ( "dracula", "Hack" ) ( m.theme, m.font ))
+                steps [ SetPreference (\p -> { p | theme = "dracula" }), SetPreference (Preferences.select EditorFontPicker "Hack") ] fresh
+                    |> (\m -> Expect.equal ( "dracula", "Hack" ) ( m.preferences.theme, m.preferences.editorFont ))
         , test "a window resize updates the width used for drag maths" <|
             \_ -> (step (WindowResized 800 600) fresh).windowWidth |> Expect.within (Expect.Absolute 0.0001) 800
+        ]
+
+
+settingsSuite : Test
+settingsSuite =
+    let
+        opened =
+            step ToggleSettings fresh
+
+        values model =
+            List.map Tuple.first (Main.visibleSettingsOptions model)
+    in
+    describe "settings pickers"
+        [ test "soft wrap updates both the editor and the persisted copy" <|
+            \_ ->
+                step (SetSoftWrap False) fresh
+                    |> (\m -> Expect.equal ( False, False ) ( m.editor.softWrap, m.preferences.softWrap ))
+        , test "opening settings leaves every picker collapsed" <|
+            \_ -> opened.expandedPicker |> Expect.equal Nothing
+        , test "the filter narrows the expanded picker's options" <|
+            \_ ->
+                opened
+                    |> steps [ ExpandPicker (Just EditorFontPicker), PickerFilterChanged "plex" ]
+                    |> values
+                    |> Expect.equal [ "IBM Plex Mono" ]
+        , test "expanding another picker clears the filter" <|
+            \_ ->
+                opened
+                    |> steps [ ExpandPicker (Just EditorFontPicker), PickerFilterChanged "plex", ExpandPicker (Just ThemePicker) ]
+                    |> .pickerFilter
+                    |> Expect.equal ""
+        , test "arrow down then Enter selects the second option" <|
+            \_ ->
+                opened
+                    |> steps [ ExpandPicker (Just ThemePicker), SettingsKeyDown "ArrowDown", SettingsKeyDown "Enter" ]
+                    |> (\m -> m.preferences.theme |> Expect.equal "light")
+        , test "arrow keys do nothing while no picker is expanded" <|
+            \_ -> (step (SettingsKeyDown "ArrowDown") opened).settingsFocus |> Expect.equal 0
+        , test "End lands on the last visible option" <|
+            \_ ->
+                opened
+                    |> steps [ ExpandPicker (Just UIFontPicker), PickerFilterChanged "sans", SettingsKeyDown "End" ]
+                    |> (\m -> m.settingsFocus |> Expect.equal (List.length (values m) - 1))
+        , test "a preference is clamped before it is stored" <|
+            \_ ->
+                step (SetPreference (\p -> { p | previewMaxWidth = 9999 })) fresh
+                    |> (\m -> m.preferences.previewMaxWidth |> Expect.equal 2000)
+        , test "choosing a preset keeps the typed custom width" <|
+            \_ ->
+                steps
+                    [ SetPreference (\p -> { p | previewMaxWidth = 500 })
+                    , SetPreference (\p -> { p | previewWidth = Preferences.Narrow })
+                    ]
+                    fresh
+                    |> (\m -> Expect.equal ( Preferences.Narrow, 500 ) ( m.preferences.previewWidth, m.preferences.previewMaxWidth ))
         ]
 
 
@@ -252,6 +324,20 @@ fileSuite =
                     ( opened.editor.content, List.map .text opened.outline, opened.fileTree.selected )
         , test "opening a file resets any pending close-after-save" <|
             \_ -> opened.closeAfterSave |> Expect.equal False
+        , test "opening a nested file reveals it: its folder expands and the reveal waits for the row" <|
+            \_ ->
+                withWorkspace fresh
+                    |> openFile "/notes/sub/c.md" "x"
+                    |> .fileTree
+                    |> (\tree -> ( Set.member "/notes/sub" tree.expanded, tree.pendingReveal, tree.selected ))
+                    |> Expect.equal ( True, Just "/notes/sub/c.md", Just "/notes/sub/c.md" )
+        , test "with reveal off an opened file is only selected" <|
+            \_ ->
+                withWorkspace (withFlags [ ( "revealInSidebar", E.bool False ) ])
+                    |> openFile "/notes/sub/c.md" "x"
+                    |> .fileTree
+                    |> (\tree -> ( Set.member "/notes/sub" tree.expanded, tree.pendingReveal, tree.selected ))
+                    |> Expect.equal ( False, Nothing, Just "/notes/sub/c.md" )
         , test "Cmd+S with a file open starts a save of the current content" <|
             \_ ->
                 opened

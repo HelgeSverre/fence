@@ -196,6 +196,12 @@ body {
   background: var(--bg-base);
 }
 
+/* The app root carries .hide-pane-headers when the preference is off. */
+.hide-pane-headers .pane-header,
+.hide-pane-headers .sidebar-header {
+  display: none;
+}
+
 /* Outline (right sidebar) */
 .outline-empty {
   padding: 12px;
@@ -300,6 +306,67 @@ body {
   font-family: var(--font-mono);
   font-size: 0.85em;
   margin-right: 4px;
+}
+
+/* Rich tooltips: a child of .tip-host, anchored below it (above when there is
+   no room). Fixed so the settings dropdown's overflow does not clip it. */
+.tip {
+  position: fixed;
+  top: anchor(bottom);
+  left: anchor(left);
+  margin-top: 6px;
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  position-visibility: anchors-visible;
+  z-index: 101; /* above .settings-dropdown */
+  pointer-events: none;
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  max-width: 260px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-ui-sm);
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  box-shadow: 0 4px 12px oklch(0 0 0 / 0.3);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 80ms ease, visibility 0s 80ms;
+}
+
+.tip-heading {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.tip kbd {
+  background: var(--bg-overlay);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* Hover waits; keyboard focus shows at once. :focus-visible keeps a mouse
+   click on a switch from popping its tooltip. */
+.tip-host:hover > .tip {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 80ms ease 500ms, visibility 0s 500ms;
+}
+
+.tip-host:is(:focus-visible, :has(:focus-visible)) > .tip {
+  opacity: 1;
+  visibility: visible;
+  transition: none;
 }
 
 /* Scrollbar styling */

@@ -111,7 +111,8 @@ describe("preview", () => {
 
       const previousId = await valid.locator("svg").getAttribute("id");
       await window.getByTestId("settings-button").click();
-      await window.getByTestId("settings-item-light").click();
+      await window.getByTestId("settings-picker-theme").click();
+      await window.getByTestId("settings-option-theme-light").click();
       await window.waitForFunction((id) => {
         const svg = document.querySelector('.mermaid[data-state="rendered"] svg');
         return svg && svg.id !== id;

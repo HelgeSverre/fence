@@ -8,6 +8,7 @@ module FileTree exposing
     , handleFsEvent
     , handleRenamed
     , init
+    , reveal
     , select
     , startCommand
     , update
@@ -34,6 +35,10 @@ type alias Model =
     -- an in-place text field in the tree: the only way a name is entered,
     -- since Electron has no input dialog
     , editing : Maybe Edit
+
+    -- a file revealed from outside the tree, held until its own directory's
+    -- contents arrive and the row exists to scroll to
+    , pendingReveal : Maybe FilePath
     }
 
 
@@ -90,6 +95,7 @@ init =
     , selected = Nothing
     , focused = Nothing
     , editing = Nothing
+    , pendingReveal = Nothing
     }
 
 
@@ -399,6 +405,85 @@ select path model =
     { model | selected = Just path, focused = Just path }
 
 
+{-| Select a file opened from outside the tree and expand every directory
+above it. Listings load one level at a time, parent before child, because a
+child's listing has nowhere to go until its parent's has arrived;
+`pendingReveal` keeps the target until the chain completes, so Main can scroll
+the row into view once it exists. Files outside the workspace are only
+selected.
+-}
+reveal : FilePath -> Model -> ( Model, List OutCmd )
+reveal path model =
+    case model.rootPath of
+        Just root ->
+            if String.startsWith (root ++ "/") path then
+                let
+                    collapsed =
+                        ancestorsWithin root path
+                            |> List.filter (\dir -> not (Set.member dir model.expanded))
+
+                    ( revealed, reads ) =
+                        continueReveal path
+                            { model
+                                | selected = Just path
+                                , focused = Just path
+                                , expanded = List.foldl Set.insert model.expanded collapsed
+                            }
+                in
+                ( revealed, List.map CmdWatchDir collapsed ++ reads )
+
+            else
+                ( select path model, [] )
+
+        Nothing ->
+            ( select path model, [] )
+
+
+{-| Read the next unloaded directory on the way to a revealed file, or finish
+the reveal when every ancestor is loaded.
+-}
+continueReveal : FilePath -> Model -> ( Model, List OutCmd )
+continueReveal target model =
+    let
+        unloaded =
+            case model.rootPath of
+                Just root ->
+                    ancestorsWithin root target
+                        |> List.filter (\dir -> not (isLoaded dir model))
+                        |> List.head
+
+                Nothing ->
+                    Nothing
+    in
+    case unloaded of
+        Just dir ->
+            ( { model | pendingReveal = Just target }, [ CmdReadDir dir ] )
+
+        Nothing ->
+            ( { model | pendingReveal = Nothing }, [] )
+
+
+{-| The directories from the root down to the file's own directory, root first.
+-}
+ancestorsWithin : FilePath -> FilePath -> List FilePath
+ancestorsWithin root path =
+    dirName path
+        |> String.dropLeft (String.length root)
+        |> String.split "/"
+        |> List.filter (not << String.isEmpty)
+        |> List.foldl
+            (\segment acc ->
+                case acc of
+                    parent :: _ ->
+                        (parent ++ "/" ++ segment) :: acc
+
+                    [] ->
+                        acc
+            )
+            [ root ]
+        |> List.reverse
+
+
 {-| Move focus to the given path. For files, also select and read them.
 For directories, just move focus without opening.
 -}
@@ -532,6 +617,20 @@ findEntryType targetPath (FileEntry entry) =
                 Nothing
 
 
+{-| Whether a directory's listing has arrived. -}
+isLoaded : FilePath -> Model -> Bool
+isLoaded path model =
+    let
+        loaded (FileEntry entry) =
+            if entry.path == path then
+                entry.children /= Nothing
+
+            else
+                Maybe.withDefault [] entry.children |> List.any loaded
+    in
+    Maybe.map loaded model.root |> Maybe.withDefault False
+
+
 parentOf : FilePath -> Model -> Maybe FilePath
 parentOf path model =
     let
@@ -552,18 +651,27 @@ parentOf path model =
 -- TREE MANIPULATION (unchanged)
 
 
-handleDirContents : FilePath -> List FileEntry -> Model -> Model
+handleDirContents : FilePath -> List FileEntry -> Model -> ( Model, List OutCmd )
 handleDirContents path entries model =
     case model.rootPath of
         Just rp ->
             if path == rp || String.startsWith (rp ++ "/") path then
-                { model | root = Maybe.map (insertChildren path entries) model.root }
+                let
+                    loaded =
+                        { model | root = Maybe.map (insertChildren path entries) model.root }
+                in
+                case model.pendingReveal of
+                    Just target ->
+                        continueReveal target loaded
+
+                    Nothing ->
+                        ( loaded, [] )
 
             else
-                freshRoot path entries model
+                ( freshRoot path entries model, [] )
 
         Nothing ->
-            freshRoot path entries model
+            ( freshRoot path entries model, [] )
 
 
 handleFolderOpened : FilePath -> List FileEntry -> Model -> Model
@@ -589,6 +697,7 @@ freshRoot path entries model =
         , selected = Nothing
         , focused = Nothing
         , editing = Nothing
+        , pendingReveal = Nothing
     }
 
 
@@ -637,7 +746,7 @@ handleFsEvent event path model =
 insertChildren : FilePath -> List FileEntry -> FileEntry -> FileEntry
 insertChildren targetPath entries (FileEntry e) =
     if e.path == targetPath then
-        FileEntry { e | children = Just entries }
+        FileEntry { e | children = Just (List.map (keepLoaded (Maybe.withDefault [] e.children)) entries) }
 
     else
         case e.children of
@@ -646,6 +755,20 @@ insertChildren targetPath entries (FileEntry e) =
 
             Nothing ->
                 FileEntry e
+
+
+{-| A directory read again keeps whatever its subdirectories had already
+loaded; directory reads finish in any order, so a parent's listing may land
+after a child's.
+-}
+keepLoaded : List FileEntry -> FileEntry -> FileEntry
+keepLoaded previous (FileEntry entry) =
+    case ( entry.children, List.filter (\old -> fileEntryPath old == entry.path) previous ) of
+        ( Nothing, (FileEntry old) :: _ ) ->
+            FileEntry { entry | children = old.children }
+
+        _ ->
+            FileEntry entry
 
 
 addChild : FilePath -> FileEntry -> FileEntry -> FileEntry
@@ -712,10 +835,8 @@ view : Model -> Html Msg
 view model =
     div [ class "sidebar", attribute "data-testid" "sidebar" ]
         [ div [ class "sidebar-header" ]
-            [ span [ class "sidebar-title" ] [ text "Workspace" ]
-            , button [ class "icon-button open-folder-btn", attribute "data-testid" "open-folder-button", onClick OpenFolder ] [ Icon.folderPlus 16 ]
-            ]
-        , div [ class "sidebar-content" ]
+            [ span [ class "sidebar-title" ] [ text "Workspace" ] ]
+        , div [ class "sidebar-content", id "sidebar-content" ]
             [ case model.root of
                 Nothing ->
                     text ""

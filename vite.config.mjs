@@ -47,6 +47,9 @@ export default defineConfig({
   build: {
     outDir: "dist",
     minify: "esbuild",
+    // Assets load from disk inside Electron, so chunk size is not a network
+    // concern; Mermaid's diagram renderers are lazy chunks up to ~1.5 MB.
+    chunkSizeWarningLimit: 1600,
     esbuild: {
       pure: ["F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"],
     },

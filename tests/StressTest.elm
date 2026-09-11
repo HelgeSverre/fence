@@ -222,7 +222,7 @@ mainMsg =
         , Fuzz.constant (Main.EditorMsg Editor.SelectAll)
         , Fuzz.map Main.DebouncedParse (Fuzz.intRange 0 5)
         , Fuzz.map (\k -> Main.KeyDown k True False False False) (Fuzz.oneOfValues [ "1", "3", "s", "Escape", "x" ])
-        , Fuzz.map Main.SetTheme (Fuzz.oneOfValues [ "", "light", "dracula" ])
+        , Fuzz.map (\t -> Main.SetPreference (\p -> { p | theme = t })) (Fuzz.oneOfValues [ "", "light", "dracula" ])
         , Fuzz.constant (Main.FromElectron (E.object [ ( "tag", E.string "saveAndClose" ) ]))
         , Fuzz.constant (Main.FromElectron (E.object [ ( "tag", E.string "saveCancelled" ) ]))
         , Fuzz.constant (Main.FromElectron (E.object [ ( "tag", E.string "error" ), ( "message", E.string "boom" ) ]))

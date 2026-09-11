@@ -167,7 +167,8 @@ describe("document layouts", () => {
       await window.locator(".mermaid svg").waitFor();
       const previousId = await window.locator(".mermaid svg").getAttribute("id");
       await window.getByTestId("settings-button").click();
-      await window.getByTestId("settings-item-light").click();
+      await window.getByTestId("settings-picker-theme").click();
+      await window.getByTestId("settings-option-theme-light").click();
       await window.keyboard.press("Escape");
       await window.waitForFunction(id => {
         const svg = document.querySelector('.mermaid[data-state="rendered"] svg');

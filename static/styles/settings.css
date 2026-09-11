@@ -1,6 +1,7 @@
-/* Settings keeps its anchor and font separate from the shared icon button. */
+/* Settings keeps its font separate from the shared icon button; the dropdown
+   hangs off the button's tooltip anchor (--tip-settings) instead of one of its
+   own, since an element only gets a single anchor-name. */
 .settings-btn {
-  anchor-name: --settings-btn;
   font-family: var(--font-sans);
 }
 
@@ -21,7 +22,7 @@
 
 .settings-dropdown {
   position: fixed;
-  position-anchor: --settings-btn;
+  position-anchor: --tip-settings;
   top: anchor(bottom);
   right: anchor(right);
   margin-top: 4px;
@@ -36,7 +37,7 @@
   /* wide enough that the longest label ("Toggle right sidebar") keeps clear of
      its control; in em so it grows with the UI font size the labels use */
   font-size: var(--font-size-ui);
-  min-width: min(23em, calc(100vw - 24px));
+  min-width: min(28em, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
   max-height: calc(100dvh - var(--titlebar-height) - 12px);
   overflow-y: auto;
@@ -98,6 +99,69 @@
 
 .settings-dropdown-item.active {
   color: var(--accent);
+}
+
+/* Collapsible picker (theme, editor font, UI font): a header row that opens a
+   filterable list in place. */
+.settings-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-ui);
+  color: var(--text-primary);
+}
+
+.settings-picker-header:hover {
+  background: var(--state-hover);
+}
+
+.settings-picker-value {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-picker-chevron {
+  flex-shrink: 0;
+  transition: transform 120ms ease;
+}
+
+.settings-picker-header[aria-expanded="true"] .settings-picker-chevron {
+  transform: rotate(90deg);
+}
+
+.settings-picker-body {
+  padding: 2px 0 4px;
+}
+
+.settings-picker-search {
+  width: 100%;
+  box-sizing: border-box;
+  height: 26px;
+  margin: 2px 0 4px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-ui);
+}
+
+.settings-picker-search::placeholder {
+  color: var(--text-muted);
 }
 
 /* Theme and font lists: long enough to need scrolling rather than a dropdown
@@ -169,6 +233,35 @@
   outline: none;
 }
 
+/* Text segments (preview width). The title bar's icon segments keep
+   .layout-selector. */
+.segmented {
+  display: flex;
+  flex-shrink: 0;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-base);
+}
+
+.segment {
+  padding: 2px 8px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-ui-sm);
+  cursor: pointer;
+}
+
+.segment:hover,
+.segment[aria-checked="true"] {
+  color: var(--text-primary);
+  background: var(--bg-overlay);
+}
+
 .settings-dropdown-row-label {
   /* the label yields before the control does, however long it gets */
   min-width: 0;
@@ -209,7 +302,7 @@
 }
 
 .stepper-input {
-  width: 52px;
+  width: 60px; /* fits a four-digit value */
   text-align: center;
   background: none;
   border: none;

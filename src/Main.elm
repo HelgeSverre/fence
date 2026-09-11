@@ -10,6 +10,7 @@ module Main exposing
     , matchesBinding
     , previewDelay
     , update
+    , visibleSettingsOptions
     )
 
 import Array
@@ -31,10 +32,12 @@ import Json.Encode as E
 import Markdown
 import Palette
 import Ports
+import Preferences exposing (Picker(..), Preferences, PreviewWidth(..))
 import Preview
 import Process
 import Task
 import TextBuffer exposing (Cursor)
+import Tooltip exposing (Tooltip)
 import Types exposing (..)
 import VirtualEditor
 import Yaml
@@ -133,16 +136,14 @@ type alias Model =
     , savingContent : Maybe String
     , reloadGeneration : Int
     , pendingReload : Maybe { id : Int, path : FilePath, editGeneration : Int }
-    , theme : String
-    , font : String
-    , editorFontSize : Float
-    , previewFontSize : Float
-    , uiFontSize : Float
+    , preferences : Preferences
     , layoutMode : LayoutMode
     , layoutCycleKey : KeyBinding
     , previewFindCount : ( Int, Int )
     , settingsOpen : Bool
     , settingsFocus : Int
+    , expandedPicker : Maybe Picker
+    , pickerFilter : String
     , sidebarFraction : Float
     , editorFraction : Float
     , drag : Maybe DragState
@@ -191,12 +192,10 @@ type Msg
     | ToggleSettings
     | SetLayoutMode LayoutMode
     | CycleLayout
-    | SetTheme String
-    | SetFont String
+    | SetPreference (Preferences -> Preferences)
     | SetSoftWrap Bool
-    | SetEditorFontSize Float
-    | SetPreviewFontSize Float
-    | SetUIFontSize Float
+    | ExpandPicker (Maybe Picker)
+    | PickerFilterChanged String
     | CloseSettings
     | SettingsKeyDown String
     | SettingsFocused Int
@@ -327,49 +326,55 @@ keyBindingLabel binding =
     mods ++ keyLabel
 
 
-defaultEditorFontSize : Float
-defaultEditorFontSize =
-    14
-
-
-defaultPreviewFontSize : Float
-defaultPreviewFontSize =
-    14
-
-
-defaultUIFontSize : Float
-defaultUIFontSize =
-    13
-
-
 defaultWindowWidth : Float
 defaultWindowWidth =
     1400
 
 
-editorFontMin : Float
-editorFontMin =
-    8
-
-
-editorFontMax : Float
-editorFontMax =
-    32
-
-
-uiFontMin : Float
-uiFontMin =
-    8
-
-
-uiFontMax : Float
-uiFontMax =
-    24
-
-
 settingsItemId : Int -> String
 settingsItemId n =
     "settings-item-" ++ String.fromInt n
+
+
+pickerSlug : Picker -> String
+pickerSlug picker =
+    case picker of
+        ThemePicker ->
+            "theme"
+
+        EditorFontPicker ->
+            "editor-font"
+
+        UIFontPicker ->
+            "ui-font"
+
+
+pickerId : Picker -> String
+pickerId picker =
+    "settings-picker-" ++ pickerSlug picker
+
+
+pickerSearchId : String
+pickerSearchId =
+    "settings-picker-search"
+
+
+{-| The options the arrow keys can reach: the expanded picker's, filtered.
+-}
+visibleSettingsOptions : Model -> List ( String, String )
+visibleSettingsOptions model =
+    case model.expandedPicker of
+        Nothing ->
+            []
+
+        Just picker ->
+            let
+                needle =
+                    String.toLower (String.trim model.pickerFilter)
+            in
+            List.filter
+                (\( _, label ) -> String.contains needle (String.toLower label))
+                (Preferences.options picker)
 
 
 focusSilently : String -> Cmd Msg
@@ -383,9 +388,12 @@ init flagsValue =
         flag name decoder default =
             D.decodeValue (D.field name decoder) flagsValue
                 |> Result.withDefault default
+
+        preferences =
+            Preferences.decode flagsValue
     in
     ( { fileTree = FileTree.init
-      , editor = Editor.update (Editor.SetSoftWrap (flag "softWrap" D.bool True)) Editor.init
+      , editor = Editor.update (Editor.SetSoftWrap preferences.softWrap) Editor.init
       , previewHtml = []
       , parseCache = Markdown.emptyCache
       , parseProgress = Nothing
@@ -398,16 +406,14 @@ init flagsValue =
       , savingContent = Nothing
       , reloadGeneration = 0
       , pendingReload = Nothing
-      , theme = flag "theme" D.string "github-dark"
-      , font = flag "font" D.string ""
-      , editorFontSize = flag "editorFontSize" D.float defaultEditorFontSize
-      , previewFontSize = flag "previewFontSize" D.float defaultPreviewFontSize
-      , uiFontSize = flag "uiFontSize" D.float defaultUIFontSize
+      , preferences = preferences
       , layoutMode = layoutFromString (flag "layoutMode" D.string "split")
       , layoutCycleKey = flag "layoutCycleKey" keyBindingDecoder { key = "2", meta = True, ctrl = False, shift = False, alt = False }
       , previewFindCount = ( 0, 0 )
       , settingsOpen = False
       , settingsFocus = 0
+      , expandedPicker = Nothing
+      , pickerFilter = ""
       , sidebarFraction = flag "sidebarFraction" D.float defaultSidebarFraction
       , editorFraction = flag "editorFraction" D.float defaultEditorFraction
       , drag = Nothing
@@ -484,57 +490,41 @@ update msg model =
                 open =
                     not model.settingsOpen
             in
-            ( { model | settingsOpen = open, settingsFocus = 0 }
+            ( { model | settingsOpen = open, settingsFocus = 0, expandedPicker = Nothing, pickerFilter = "" }
             , if open then
-                focusSilently (settingsItemId 0)
+                focusSilently (pickerId ThemePicker)
 
               else
                 Cmd.none
             )
 
-        SetTheme themeValue ->
-            ( { model | theme = themeValue }
-            , command "setTheme" [ ( "theme", E.string themeValue ) ]
-            )
-
-        SetFont fontValue ->
-            ( { model | font = fontValue }
-            , command "setFont" [ ( "font", E.string fontValue ) ]
-            )
+        SetPreference change ->
+            savePreferences (Preferences.clamp (change model.preferences)) model
 
         SetSoftWrap enabled ->
+            -- Editor owns the behaviour; Preferences carries the persisted copy.
             let
                 ( changed, cmd ) =
                     update (EditorMsg (Editor.SetSoftWrap enabled)) model
-            in
-            ( changed, Cmd.batch [ cmd, command "setSoftWrap" [ ( "softWrap", E.bool enabled ) ] ] )
 
-        SetEditorFontSize size ->
-            let
-                clamped =
-                    clamp editorFontMin editorFontMax size
+                prefs =
+                    model.preferences
             in
-            ( { model | editorFontSize = clamped }
-            , command "setFontSize" [ ( "editorFontSize", E.float clamped ) ]
+            savePreferences { prefs | softWrap = enabled } changed
+                |> Tuple.mapSecond (\saveCmd -> Cmd.batch [ cmd, saveCmd ])
+
+        ExpandPicker picker ->
+            ( { model | expandedPicker = picker, pickerFilter = "", settingsFocus = 0 }
+            , case picker of
+                Just _ ->
+                    focusSilently pickerSearchId
+
+                Nothing ->
+                    Cmd.none
             )
 
-        SetPreviewFontSize size ->
-            let
-                clamped =
-                    clamp editorFontMin editorFontMax size
-            in
-            ( { model | previewFontSize = clamped }
-            , command "setFontSize" [ ( "previewFontSize", E.float clamped ) ]
-            )
-
-        SetUIFontSize size ->
-            let
-                clamped =
-                    clamp uiFontMin uiFontMax size
-            in
-            ( { model | uiFontSize = clamped }
-            , command "setFontSize" [ ( "uiFontSize", E.float clamped ) ]
-            )
+        PickerFilterChanged text ->
+            ( { model | pickerFilter = text, settingsFocus = 0 }, Cmd.none )
 
         CloseSettings ->
             ( { model | settingsOpen = False }, Cmd.none )
@@ -544,8 +534,11 @@ update msg model =
 
         SettingsKeyDown key ->
             let
+                visible =
+                    visibleSettingsOptions model
+
                 itemCount =
-                    List.length themes + List.length fonts
+                    List.length visible
 
                 focus =
                     model.settingsFocus
@@ -556,45 +549,42 @@ update msg model =
                     )
 
                 activateFocused =
-                    let
-                        allItems =
-                            List.map Tuple.first themes ++ List.map Tuple.first fonts
-                    in
-                    case List.head (List.drop focus allItems) of
-                        Just val ->
-                            if focus < List.length themes then
-                                update (SetTheme val) model
-
-                            else
-                                update (SetFont val) model
-
-                        Nothing ->
-                            ( model, Cmd.none )
+                    Maybe.map2
+                        (\picker ( optionValue, _ ) ->
+                            update (SetPreference (Preferences.select picker optionValue)) model
+                        )
+                        model.expandedPicker
+                        (List.head (List.drop focus visible))
+                        |> Maybe.withDefault ( model, Cmd.none )
             in
-            case key of
-                "ArrowDown" ->
-                    moveFocus (Basics.min (itemCount - 1) (focus + 1))
+            if key == "Escape" then
+                ( { model | settingsOpen = False }, Cmd.none )
 
-                "ArrowUp" ->
-                    moveFocus (Basics.max 0 (focus - 1))
+            else if itemCount == 0 then
+                ( model, Cmd.none )
 
-                "Enter" ->
-                    activateFocused
+            else
+                case key of
+                    "ArrowDown" ->
+                        moveFocus (Basics.min (itemCount - 1) (focus + 1))
 
-                " " ->
-                    activateFocused
+                    "ArrowUp" ->
+                        moveFocus (Basics.max 0 (focus - 1))
 
-                "Escape" ->
-                    ( { model | settingsOpen = False }, Cmd.none )
+                    "Enter" ->
+                        activateFocused
 
-                "Home" ->
-                    moveFocus 0
+                    " " ->
+                        activateFocused
 
-                "End" ->
-                    moveFocus (itemCount - 1)
+                    "Home" ->
+                        moveFocus 0
 
-                _ ->
-                    ( model, Cmd.none )
+                    "End" ->
+                        moveFocus (itemCount - 1)
+
+                    _ ->
+                        ( model, Cmd.none )
 
         DividerMouseDown target clientX ->
             let
@@ -1369,8 +1359,20 @@ handlePortMessage tag value model =
         "dirContents" ->
             case D.decodeValue dirEntriesDecoder value of
                 Ok ( path, entries ) ->
-                    ( { model | fileTree = FileTree.handleDirContents path entries model.fileTree }
-                    , Cmd.none
+                    let
+                        ( tree, treeCmds ) =
+                            FileTree.handleDirContents path entries model.fileTree
+                    in
+                    ( { model | fileTree = tree }
+                    , Cmd.batch
+                        [ outCmdsToPortCmds treeCmds
+                        , case ( model.fileTree.pendingReveal, tree.pendingReveal ) of
+                            ( Just target, Nothing ) ->
+                                revealScrollCmd target
+
+                            _ ->
+                                Cmd.none
+                        ]
                     )
 
                 Err _ ->
@@ -1474,11 +1476,18 @@ handlePortMessage tag value model =
                         gen =
                             model.debounceGeneration + 1
 
+                        ( tree, treeCmds ) =
+                            if model.preferences.revealInSidebar then
+                                FileTree.reveal file.path model.fileTree
+
+                            else
+                                ( FileTree.select file.path model.fileTree, [] )
+
                         ( parsedModel, parseCmd ) =
                             startParse Markdown.emptyCache
                                 { model
                                     | editor = newEditor
-                                    , fileTree = FileTree.select file.path model.fileTree
+                                    , fileTree = tree
                                     , debounceGeneration = gen
                                 }
                     in
@@ -1505,6 +1514,12 @@ handlePortMessage tag value model =
                         , sessionCmd newEditor
                         , setDirtyCmd file.dirty
                         , parseCmd
+                        , outCmdsToPortCmds treeCmds
+                        , if model.preferences.revealInSidebar then
+                            revealScrollCmd file.path
+
+                          else
+                            Cmd.none
 
                         -- Match the browser viewport to the new virtual rows,
                         -- including ordinary file opens while scrolled down.
@@ -1887,11 +1902,51 @@ command tag fields =
     Ports.toElectron (E.object (( "tag", E.string tag ) :: fields))
 
 
+{-| Bring a tree row into the sidebar's viewport without focusing it. Rows
+already in view stay put; a row that is not rendered yet is a no-op.
+-}
+revealScrollCmd : FilePath -> Cmd Msg
+revealScrollCmd path =
+    Task.map3
+        (\row pane viewport ->
+            let
+                rowTop =
+                    row.element.y - pane.element.y
+
+                rowBottom =
+                    rowTop + row.element.height
+            in
+            if rowTop >= 0 && rowBottom <= viewport.viewport.height then
+                Nothing
+
+            else
+                Just (Basics.max 0 (viewport.viewport.y + rowTop - (viewport.viewport.height - row.element.height) / 2))
+        )
+        (Browser.Dom.getElement (treeItemId path))
+        (Browser.Dom.getElement "sidebar-content")
+        (Browser.Dom.getViewportOf "sidebar-content")
+        |> Task.andThen
+            (\target ->
+                case target of
+                    Just y ->
+                        Browser.Dom.setViewportOf "sidebar-content" 0 y
+
+                    Nothing ->
+                        Task.succeed ()
+            )
+        |> ignoreResult
+
+
 {-| Run a task purely for its effect.
 -}
 ignoreResult : Task.Task x a -> Cmd Msg
 ignoreResult =
     Task.attempt (\_ -> NoOp)
+
+
+savePreferences : Preferences -> Model -> ( Model, Cmd Msg )
+savePreferences prefs model =
+    ( { model | preferences = prefs }, command "setPreferences" (Preferences.encode prefs) )
 
 
 saveSplitsCmd : Model -> Cmd Msg
@@ -2463,9 +2518,35 @@ view model =
 
         gridColumns =
             String.join " " (List.map (Tuple.second >> Tuple.first) sections)
+
+        prefs =
+            model.preferences
     in
     div []
-        [ div [ class "app-shell", attribute "aria-busy" (if model.navigationBusy then "true" else "false"), classList [ ( "navigation-busy", model.navigationBusy ) ] ]
+        [ div
+            ([ class "app-shell"
+             , attribute "aria-busy"
+                (if model.navigationBusy then
+                    "true"
+
+                 else
+                    "false"
+                )
+             , classList
+                [ ( "navigation-busy", model.navigationBusy )
+                , ( "hide-pane-headers", not prefs.showPaneHeaders )
+                , ( "preview-mono", prefs.previewUsesEditorFont )
+                ]
+             ]
+                ++ (case Preferences.previewWidthPx prefs of
+                        Just px ->
+                            -- Elm's `style` cannot set a CSS custom property.
+                            [ attribute "style" ("--preview-max-width: " ++ String.fromInt px ++ "px") ]
+
+                        Nothing ->
+                            []
+                   )
+            )
             [ viewTitleBar model
             , Html.Keyed.node "div"
                 [ class "app-layout"
@@ -2566,30 +2647,29 @@ viewPreviewPane model =
 viewLayoutSelector : Model -> Html Msg
 viewLayoutSelector model =
     let
-        segment mode label icon =
+        segment mode label body icon =
             button
-                [ class "icon-button layout-segment"
-                , id ("layout-" ++ layoutName mode)
-                , attribute "data-testid" ("layout-" ++ layoutName mode)
-                , attribute "role" "radio"
-                , attribute "aria-label" label
-                , attribute "aria-checked"
+                ([ class "icon-button layout-segment"
+                 , id ("layout-" ++ layoutName mode)
+                 , attribute "data-testid" ("layout-" ++ layoutName mode)
+                 , attribute "role" "radio"
+                 , attribute "aria-label" label
+                 , attribute "aria-checked"
                     (if model.layoutMode == mode then
                         "true"
 
                      else
                         "false"
                     )
-                , tabindex
+                 , tabindex
                     (if model.layoutMode == mode then
                         0
 
                      else
                         -1
                     )
-                , title (label ++ " · Cycle layout " ++ keyBindingLabel model.layoutCycleKey)
-                , onClick (SetLayoutMode mode)
-                , preventDefaultOn "keydown"
+                 , onClick (SetLayoutMode mode)
+                 , preventDefaultOn "keydown"
                     (D.field "key" D.string
                         |> D.map
                             (\key ->
@@ -2610,13 +2690,24 @@ viewLayoutSelector model =
                                         ( NoOp, False )
                             )
                     )
+                 ]
+                    ++ Tooltip.host (tipName mode)
+                )
+                [ icon 16
+                , Tooltip.view (tipName mode)
+                    { heading = label
+                    , body = body
+                    , shortcut = Just (keyBindingLabel model.layoutCycleKey)
+                    }
                 ]
-                [ icon 16 ]
+
+        tipName mode =
+            "layout-" ++ layoutName mode
     in
     div [ class "layout-selector", attribute "role" "radiogroup", attribute "aria-label" "Document layout" ]
-        [ segment EditorOnly "Editor only" Icon.editorLayout
-        , segment Split "Editor and preview" Icon.splitLayout
-        , segment PreviewOnly "Preview only" Icon.previewLayout
+        [ segment EditorOnly "Editor only" "Hide the preview and give the editor the full width." Icon.editorLayout
+        , segment Split "Editor and preview" "Editor on the left, live preview on the right." Icon.splitLayout
+        , segment PreviewOnly "Preview only" "Hide the editor and show only the rendered document." Icon.previewLayout
         ]
 
 
@@ -2926,7 +3017,32 @@ viewTitleBar model =
             ]
         , div [ class "titlebar-actions" ]
             [ viewLayoutSelector model
-            , button [ class "icon-button settings-btn", attribute "data-testid" "settings-button", onClick ToggleSettings ] [ Icon.settings 16 ]
+            , button
+                ([ class "icon-button open-folder-btn"
+                 , attribute "data-testid" "open-folder-button"
+                 , attribute "aria-label" "Open folder"
+                 , onClick (FileTreeMsg FileTree.OpenFolder)
+                 ]
+                    ++ Tooltip.host "open-folder"
+                )
+                [ Icon.folderPlus 16
+                , Tooltip.view "open-folder"
+                    { heading = "Open folder"
+                    , body = "Choose a folder as the workspace; its Markdown files fill the sidebar."
+                    , shortcut = Nothing
+                    }
+                ]
+            , button
+                ([ class "icon-button settings-btn", attribute "data-testid" "settings-button", onClick ToggleSettings ]
+                    ++ Tooltip.host "settings"
+                )
+                [ Icon.settings 16
+                , Tooltip.view "settings"
+                    { heading = "Settings"
+                    , body = "Theme, fonts, preview width, layout and shortcuts."
+                    , shortcut = Nothing
+                    }
+                ]
             , if model.settingsOpen then
                 viewSettingsDropdown model
 
@@ -2934,36 +3050,6 @@ viewTitleBar model =
                 text ""
             ]
         ]
-
-
-themes : List ( String, String )
-themes =
-    [ ( "", "Catppuccin Mocha" )
-    , ( "light", "Catppuccin Latte" )
-    , ( "github-dark", "GitHub Dark" )
-    , ( "vscode-dark", "VS Code Dark+" )
-    , ( "fleet-dark", "Fleet Dark" )
-    , ( "dracula", "Dracula" )
-    , ( "one-dark", "One Dark Pro" )
-    , ( "tokyo-night", "Tokyo Night" )
-    , ( "nord", "Nord" )
-    ]
-
-
-fonts : List ( String, String )
-fonts =
-    [ ( "", "System Default" )
-    , ( "JetBrains Mono", "JetBrains Mono" )
-    , ( "IBM Plex Mono", "IBM Plex Mono" )
-    , ( "Fira Code", "Fira Code" )
-    , ( "Hack", "Hack" )
-    , ( "Source Code Pro", "Source Code Pro" )
-    , ( "Inconsolata", "Inconsolata" )
-    , ( "Cascadia Code", "Cascadia Code" )
-    , ( "Monaspace Neon", "Monaspace Neon" )
-    , ( "Victor Mono", "Victor Mono" )
-    , ( "Iosevka", "Iosevka" )
-    ]
 
 
 settingsKeyDecoder : D.Decoder ( Msg, Bool )
@@ -2979,25 +3065,52 @@ settingsKeyDecoder =
             )
 
 
+{-| From the filter box: down steps into the list, Enter takes the first hit.
+-}
+searchKeyDecoder : D.Decoder ( Msg, Bool )
+searchKeyDecoder =
+    D.field "key" D.string
+        |> D.map
+            (\key ->
+                case key of
+                    "ArrowDown" ->
+                        ( SettingsKeyDown "Home", True )
+
+                    "Enter" ->
+                        ( SettingsKeyDown "Enter", True )
+
+                    "Escape" ->
+                        ( CloseSettings, True )
+
+                    _ ->
+                        ( NoOp, False )
+            )
+
+
 viewSettingsDropdown : Model -> Html Msg
 viewSettingsDropdown model =
     let
-        themeOffset =
-            0
+        prefs =
+            model.preferences
 
-        fontOffset =
-            List.length themes
+        toggle field on =
+            SetPreference (field on)
 
-        {- Each list keeps its own tab stop: the option the arrow keys are on
-           when they are in that list, otherwise the selected one. A listbox
-           whose only tab stop lives in a sibling list cannot be tabbed into.
-        -}
-        tabbableIn offset items activeValue =
-            if model.settingsFocus >= offset && model.settingsFocus < offset + List.length items then
-                model.settingsFocus
+        tip heading body =
+            { heading = heading, body = body, shortcut = Nothing }
 
-            else
-                offset + (indexOfValue activeValue items |> Maybe.withDefault 0)
+        fontSize tooltip label testId max size field =
+            viewStepper
+                { label = label
+                , value = size
+                , min = Preferences.fontSizeMin
+                , max = max
+                , step = 1
+                , format = formatSize
+                , toMsg = \v -> SetPreference (field v)
+                , testId = testId
+                , tooltip = tooltip
+                }
     in
     div [ class "settings-layer" ]
         [ div [ class "settings-backdrop", onClick CloseSettings ] []
@@ -3007,31 +3120,225 @@ viewSettingsDropdown model =
             , attribute "role" "listbox"
             , attribute "aria-label" "Settings"
             ]
-            [ div [ class "settings-dropdown-label" ] [ text "Theme" ]
-            , div [ class "settings-dropdown-list", tabindex -1 ]
-                (List.indexedMap (\i item -> viewSettingsItem model SetTheme model.theme (tabbableIn themeOffset themes model.theme) (themeOffset + i) item) themes)
-            , div [ class "settings-dropdown-divider" ] []
-            , div [ class "settings-dropdown-label" ] [ text "Font" ]
-            , div [ class "settings-dropdown-list", tabindex -1 ]
-                (List.indexedMap (\i item -> viewSettingsItem model SetFont model.font (tabbableIn fontOffset fonts model.font) (fontOffset + i) item) fonts)
+            [ viewPicker model ThemePicker "Theme" (tip "Theme" "Colour scheme for the editor, preview and chrome. Default: GitHub Dark.")
+            , viewPicker model EditorFontPicker "Editor font" (tip "Editor font" "Monospace face for the editor, and for the preview when \"Use editor font\" is on. Default: system monospace.")
+            , viewPicker model UIFontPicker "UI font" (tip "UI font" "Face for the file tree, pane headings, settings and palette. Default: system UI.")
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Font Size" ]
-            , viewStepper "Editor" model.editorFontSize SetEditorFontSize
-            , viewStepper "Preview" model.previewFontSize SetPreviewFontSize
-            , viewStepper "UI" model.uiFontSize SetUIFontSize
-            , label [ class "settings-dropdown-row" ]
-                [ span [ class "settings-dropdown-row-label" ] [ text "Soft wrap" ]
-                , input [ type_ "checkbox", checked model.editor.softWrap, onCheck SetSoftWrap, attribute "data-testid" "soft-wrap-toggle" ] []
-                ]
+            , fontSize (tip "Editor font size" "Text size in the editor, in pixels (8–32). Default: 14.") "Editor" "editor-font-size-input" Preferences.fontSizeMax prefs.editorFontSize (\v p -> { p | editorFontSize = v })
+            , fontSize (tip "Preview font size" "Base size of preview text; headings scale from it (8–32). Default: 14.") "Preview" "preview-font-size-input" Preferences.fontSizeMax prefs.previewFontSize (\v p -> { p | previewFontSize = v })
+            , fontSize (tip "UI font size" "Size of file tree, headings and settings text (8–24). Default: 13.") "UI" "ui-font-size-input" Preferences.uiFontSizeMax prefs.uiFontSize (\v p -> { p | uiFontSize = v })
+            , div [ class "settings-dropdown-divider" ] []
+            , div [ class "settings-dropdown-label" ] [ text "Preview" ]
+            , viewSegmentedRow (tip "Preview width" "Caps and centres the preview column so lines wrap sooner. Narrow 560 px, Normal 680 px, Wide 900 px; Full uses the whole pane. Default: Full.") "Width" "preview-width" Preferences.previewWidthOptions prefs.previewWidth (\w -> SetPreference (\p -> { p | previewWidth = w }))
+            , if prefs.previewWidth == Custom then
+                viewStepper
+                    { label = "Custom width"
+                    , value = toFloat prefs.previewMaxWidth
+                    , min = toFloat Preferences.previewWidthMin
+                    , max = toFloat Preferences.previewWidthMax
+                    , step = 10
+                    , format = round >> String.fromInt
+                    , toMsg = \v -> SetPreference (\p -> { p | previewMaxWidth = round v })
+                    , testId = "preview-width-input"
+                    , tooltip = tip "Custom width" "Preview column width in pixels (320–2000). Applies only while Width is Custom."
+                    }
+
+              else
+                text ""
+            , viewToggleRow (tip "Use editor font in preview" "Render the preview in the editor's monospace font instead of the UI font. Default: off.") "Use editor font" "preview-mono-toggle" prefs.previewUsesEditorFont (toggle (\on p -> { p | previewUsesEditorFont = on }))
+            , div [ class "settings-dropdown-divider" ] []
+            , div [ class "settings-dropdown-label" ] [ text "Layout" ]
+            , viewToggleRow (tip "Pane headings" "Show the title strip above the file tree, editor, preview and outline. Default: on.") "Show pane headings" "pane-headers-toggle" prefs.showPaneHeaders (toggle (\on p -> { p | showPaneHeaders = on }))
+            , viewToggleRow (tip "Soft wrap" "Wrap long lines at the editor's edge instead of scrolling sideways. Default: on.") "Soft wrap" "soft-wrap-toggle" model.editor.softWrap SetSoftWrap
+            , viewToggleRow (tip "Reveal open file" "When a file opens from the palette, a link, history or the command line, expand the sidebar to it and select it. Default: on.") "Reveal open file" "reveal-in-sidebar-toggle" prefs.revealInSidebar (toggle (\on p -> { p | revealInSidebar = on }))
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Outline" ]
             , viewOutlineLevelStepper model.outlineMaxLevel
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Shortcuts" ]
-            , viewRebindRow "Toggle left sidebar" model.leftToggleKey RebindLeft model.rebinding
-            , viewRebindRow "Cycle layout" model.layoutCycleKey RebindLayout model.rebinding
-            , viewRebindRow "Toggle right sidebar" model.rightToggleKey RebindRight model.rebinding
+            , viewRebindRow (tip "Toggle left sidebar" "Shortcut that shows or hides the file tree. Click, then press the new combination.") model.leftToggleKey RebindLeft model.rebinding
+            , viewRebindRow (tip "Cycle layout" "Shortcut that steps through Editor, Split and Preview. Click, then press the new combination.") model.layoutCycleKey RebindLayout model.rebinding
+            , viewRebindRow (tip "Toggle right sidebar" "Shortcut that shows or hides the outline. Click, then press the new combination.") model.rightToggleKey RebindRight model.rebinding
             ]
+        ]
+
+
+{-| A collapsible list of options: only one picker is open at a time, and only
+its options take part in the keyboard walk.
+-}
+viewPicker : Model -> Picker -> String -> Tooltip -> Html Msg
+viewPicker model picker title tip =
+    let
+        current =
+            Preferences.selected picker model.preferences
+
+        expanded =
+            model.expandedPicker == Just picker
+
+        currentLabel =
+            Preferences.options picker
+                |> List.filter (\( optionValue, _ ) -> optionValue == current)
+                |> List.head
+                |> Maybe.map Tuple.second
+                |> Maybe.withDefault current
+
+        visible =
+            visibleSettingsOptions model
+
+        {- The tab stop is where the arrows are, or the selected option so the
+           list can be tabbed into at all.
+        -}
+        tabbable =
+            if model.settingsFocus < List.length visible then
+                model.settingsFocus
+
+            else
+                indexOfValue current visible |> Maybe.withDefault 0
+    in
+    div [ class "settings-picker" ]
+        [ button
+            ([ class "settings-picker-header"
+             , id (pickerId picker)
+             , attribute "data-testid" (pickerId picker)
+             , attribute "aria-expanded"
+                (if expanded then
+                    "true"
+
+                 else
+                    "false"
+                )
+             , onClick
+                (ExpandPicker
+                    (if expanded then
+                        Nothing
+
+                     else
+                        Just picker
+                    )
+                )
+             ]
+                ++ Tooltip.host (pickerId picker)
+            )
+            [ span [] [ text title ]
+            , span [ class "settings-picker-value" ] [ text currentLabel ]
+            , span [ class "settings-picker-chevron" ] [ Icon.chevronRight 12 ]
+            , Tooltip.view (pickerId picker) tip
+            ]
+        , if expanded then
+            div [ class "settings-picker-body" ]
+                [ input
+                    [ type_ "text"
+                    , class "settings-picker-search"
+                    , id pickerSearchId
+                    , attribute "data-testid" pickerSearchId
+                    , placeholder "Filter…"
+                    , value model.pickerFilter
+                    , onInput PickerFilterChanged
+                    , preventDefaultOn "keydown" searchKeyDecoder
+                    , attribute "aria-label" (title ++ " filter")
+                    ]
+                    []
+                , div [ class "settings-dropdown-list", tabindex -1 ]
+                    (List.indexedMap (viewOption picker current tabbable) visible)
+                ]
+
+          else
+            text ""
+        ]
+
+
+viewOption : Picker -> String -> Int -> Int -> ( String, String ) -> Html Msg
+viewOption picker activeValue tabbable idx ( optionValue, displayName ) =
+    let
+        isActive =
+            activeValue == optionValue
+    in
+    button
+        [ class "settings-dropdown-item"
+        , classList [ ( "active", isActive ) ]
+        , attribute "data-testid"
+            ("settings-option-"
+                ++ pickerSlug picker
+                ++ "-"
+                ++ (if String.isEmpty optionValue then
+                        "default"
+
+                    else
+                        optionValue
+                   )
+            )
+        , id (settingsItemId idx)
+        , tabindex
+            (if tabbable == idx then
+                0
+
+             else
+                -1
+            )
+        , attribute "role" "option"
+        , attribute "aria-selected"
+            (if isActive then
+                "true"
+
+             else
+                "false"
+            )
+        , onClick (SetPreference (Preferences.select picker optionValue))
+        , onFocus (SettingsFocused idx)
+        , preventDefaultOn "keydown" settingsKeyDecoder
+        ]
+        [ span [ class "settings-dropdown-item-label" ] [ text displayName ]
+        , span [ class "settings-dropdown-check" ]
+            [ if isActive then
+                Icon.checkmark 14
+
+              else
+                text ""
+            ]
+        ]
+
+
+viewToggleRow : Tooltip -> String -> String -> Bool -> (Bool -> Msg) -> Html Msg
+viewToggleRow tip rowLabel testId on toMsg =
+    label (class "settings-dropdown-row" :: Tooltip.host testId)
+        [ span [ class "settings-dropdown-row-label" ] [ text rowLabel ]
+        , input [ type_ "checkbox", checked on, onCheck toMsg, attribute "data-testid" testId ] []
+        , Tooltip.view testId tip
+        ]
+
+
+{-| A settings row whose control is a group of text segments, one checked.
+-}
+viewSegmentedRow : Tooltip -> String -> String -> List ( a, String ) -> a -> (a -> Msg) -> Html Msg
+viewSegmentedRow tip rowLabel idPrefix items current toMsg =
+    div (class "settings-dropdown-row" :: Tooltip.host idPrefix)
+        [ span [ class "settings-dropdown-row-label" ] [ text rowLabel ]
+        , Tooltip.view idPrefix tip
+        , div
+            [ class "segmented"
+            , attribute "role" "radiogroup"
+            , attribute "aria-label" rowLabel
+            ]
+            (List.map
+                (\( value_, label_ ) ->
+                    button
+                        [ class "segment"
+                        , attribute "role" "radio"
+                        , attribute "aria-checked"
+                            (if value_ == current then
+                                "true"
+
+                             else
+                                "false"
+                            )
+                        , attribute "data-testid" (idPrefix ++ "-" ++ String.toLower label_)
+                        , onClick (toMsg value_)
+                        ]
+                        [ text label_ ]
+                )
+                items
+            )
         ]
 
 
@@ -3039,8 +3346,13 @@ viewSettingsDropdown model =
 -}
 viewOutlineLevelStepper : Int -> Html Msg
 viewOutlineLevelStepper level =
-    div [ class "settings-dropdown-row" ]
+    div (class "settings-dropdown-row" :: Tooltip.host "outline-depth")
         [ span [ class "settings-dropdown-row-label" ] [ text "Max depth" ]
+        , Tooltip.view "outline-depth"
+            { heading = "Outline depth"
+            , body = "Deepest heading level listed in the outline: H1 shows only top-level headings, H6 shows all. Default: H3."
+            , shortcut = Nothing
+            }
         , div [ class "stepper" ]
             [ button
                 [ class "stepper-btn"
@@ -3060,14 +3372,26 @@ viewOutlineLevelStepper level =
 {-| A row showing a shortcut's current combo plus a button to rebind it.
 While capturing, the button prompts for the next keypress.
 -}
-viewRebindRow : String -> KeyBinding -> RebindTarget -> Maybe RebindTarget -> Html Msg
-viewRebindRow label binding target rebinding =
+viewRebindRow : Tooltip -> KeyBinding -> RebindTarget -> Maybe RebindTarget -> Html Msg
+viewRebindRow tip binding target rebinding =
     let
         isCapturing =
             rebinding == Just target
+
+        name =
+            case target of
+                RebindLeft ->
+                    "rebind-left"
+
+                RebindLayout ->
+                    "rebind-layout"
+
+                RebindRight ->
+                    "rebind-right"
     in
-    div [ class "settings-dropdown-row" ]
-        [ span [ class "settings-dropdown-row-label" ] [ text label ]
+    div (class "settings-dropdown-row" :: Tooltip.host name)
+        [ span [ class "settings-dropdown-row-label" ] [ text tip.heading ]
+        , Tooltip.view name { tip | shortcut = Just (keyBindingLabel binding) }
         , button
             [ class "rebind-btn"
             , classList [ ( "capturing", isCapturing ) ]
@@ -3094,84 +3418,46 @@ indexOfValue wanted items =
         |> Maybe.map Tuple.first
 
 
-{-| One selectable row in the settings listbox. Used for both the theme and
-font lists; only the active value and the click message differ.
--}
-viewSettingsItem : Model -> (String -> Msg) -> String -> Int -> Int -> ( String, String ) -> Html Msg
-viewSettingsItem model toMsg activeValue tabbable idx ( itemValue, displayName ) =
-    let
-        isActive =
-            activeValue == itemValue
-
-        isFocused =
-            tabbable == idx
-    in
-    button
-        [ class "settings-dropdown-item"
-        , classList [ ( "active", isActive ) ]
-        , attribute "data-testid"
-            ("settings-item-"
-                ++ (if String.isEmpty itemValue then
-                        "default"
-
-                    else
-                        itemValue
-                   )
-            )
-        , id (settingsItemId idx)
-        , tabindex
-            (if isFocused then
-                0
-
-             else
-                -1
-            )
-        , attribute "role" "option"
-        , attribute "aria-selected"
-            (if isActive then
-                "true"
-
-             else
-                "false"
-            )
-        , onClick (toMsg itemValue)
-        , onFocus (SettingsFocused idx)
-        , preventDefaultOn "keydown" settingsKeyDecoder
-        ]
-        [ span [ class "settings-dropdown-item-label" ] [ text displayName ]
-        , span [ class "settings-dropdown-check" ]
-            [ if isActive then
-                Icon.checkmark 14
-
-              else
-                text ""
-            ]
-        ]
+type alias Stepper =
+    { label : String
+    , value : Float
+    , min : Float
+    , max : Float
+    , step : Float
+    , format : Float -> String
+    , toMsg : Float -> Msg
+    , testId : String
+    , tooltip : Tooltip
+    }
 
 
-viewStepper : String -> Float -> (Float -> Msg) -> Html Msg
-viewStepper label currentValue toMsg =
-    div [ class "settings-dropdown-row" ]
-        [ span [ class "settings-dropdown-row-label" ] [ text label ]
+viewStepper : Stepper -> Html Msg
+viewStepper stepper =
+    div (class "settings-dropdown-row" :: Tooltip.host stepper.testId)
+        [ span [ class "settings-dropdown-row-label" ] [ text stepper.label ]
+        , Tooltip.view stepper.testId stepper.tooltip
         , div [ class "stepper" ]
             [ button
                 [ class "stepper-btn"
-                , onClick (toMsg (currentValue - 1))
+                , onClick (stepper.toMsg (stepper.value - stepper.step))
                 ]
                 [ text "−" ]
             , input
                 [ type_ "number"
                 , class "stepper-input"
-                , Html.Attributes.step "0.1"
-                , Html.Attributes.min "8"
-                , Html.Attributes.max "32"
-                , value (formatSize currentValue)
-                , onInput (\s -> toMsg (Maybe.withDefault currentValue (String.toFloat s)))
+                , attribute "data-testid" stepper.testId
+
+                -- "any" so typed decimals survive; the buttons move by `step`.
+                , Html.Attributes.step "any"
+                , Html.Attributes.min (stepper.format stepper.min)
+                , Html.Attributes.max (stepper.format stepper.max)
+                , value (stepper.format stepper.value)
+                , onInput (\typed -> stepper.toMsg (Maybe.withDefault stepper.value (String.toFloat typed)))
                 ]
                 []
             , button
                 [ class "stepper-btn"
-                , onClick (toMsg (currentValue + 1))
+                , onClick (stepper.toMsg (stepper.value + stepper.step))
                 ]
                 [ text "+" ]
             ]

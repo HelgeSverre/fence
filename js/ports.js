@@ -2,7 +2,7 @@ import { resolvePreviewImages } from "./preview-images.js";
 import { setupPreviewFind } from "./preview-find.js";
 import { setupLayout } from "./layout.js";
 import { reRenderMermaid, finishMermaidRendering } from "./mermaid-init.js";
-import { applyFontFamily, applyFontSizesFromState } from "./font-settings.js";
+import { applyPreferences, preloadFonts } from "./preferences.js";
 import { setupEditorMetrics, remeasureEditorMetrics } from "./editor-metrics.js";
 import { setupVirtualInput } from "./virtual-input.js";
 
@@ -14,7 +14,7 @@ export function wirePorts(app, initialState = {}) {
   // Elm → Electron
   if (app.ports.toElectron) {
     app.ports.toElectron.subscribe((data) => {
-      // Theme/font changes apply locally, then fall through to IPC so the
+      // Preference changes apply locally, then fall through to IPC so the
       // main process persists them to state.json.
       if (data.tag === "previewFind") {
         previewFind(data);
@@ -25,19 +25,13 @@ export function wirePorts(app, initialState = {}) {
       } else if (data.tag === "saveSplits" && data.layoutCycleKey) {
         layout.setBinding(data.layoutCycleKey);
       }
-      if (data.tag === "setTheme") {
-        if (data.theme) {
-          document.documentElement.setAttribute("data-theme", data.theme);
-        } else {
-          document.documentElement.removeAttribute("data-theme");
-        }
-        reRenderMermaid();
-      } else if (data.tag === "setFont") {
-        applyFontFamily(data.font);
+      if (data.tag === "setPreferences") {
+        const themeChanged =
+          (data.theme ?? "") !== (document.documentElement.getAttribute("data-theme") ?? "");
+        applyPreferences(data);
+        preloadFonts([data.editorFont, data.uiFont].filter(Boolean));
         remeasureEditorMetrics();
-      } else if (data.tag === "setFontSize") {
-        applyFontSizesFromState(data);
-        remeasureEditorMetrics();
+        if (themeChanged) reRenderMermaid();
       } else if (data.tag === "exportDocument") {
         exportPreview(data, app);
         return;
@@ -65,10 +59,7 @@ export function wirePorts(app, initialState = {}) {
           setDirty: "setDirty",
           closeWindow: "closeWindow",
           saveSplits: "saveSplits",
-          setTheme: "setTheme",
-          setFont: "setFont",
-          setFontSize: "setFontSize",
-          setSoftWrap: "setSoftWrap",
+          setPreferences: "setPreferences",
           saveRecoveryDraft: "saveRecoveryDraft",
         }[data.tag];
         if (method && typeof window.electronAPI[method] === "function") {

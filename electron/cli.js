@@ -1,7 +1,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-function parseCliArgs(args, cwd) {
+// `forwarded` argv comes from a second instance via the single-instance lock:
+// the sender already rejected typos, and Electron splices its own Chromium
+// switches (--allow-file-access-from-files, ...) into what it forwards.
+function parseCliArgs(args, cwd, { forwarded = false } = {}) {
   let target = null;
   let positional = false;
   for (const arg of args) {
@@ -9,8 +12,11 @@ function parseCliArgs(args, cwd) {
     if (!positional && (arg === '--help' || arg === '-h')) return { help: true };
     if (!positional && (arg === '--version' || arg === '-v')) return { version: true };
     // Electron/Playwright debugging flags belong to the runtime.
-    if (!positional && /^(--inspect(?:-brk)?|--remote-debugging-port)(=|$)/.test(arg)) continue;
-    if (!positional && arg.startsWith('-')) throw new Error(`Unknown option: ${arg}. Use fence --help.`);
+    if (!positional && /^(--inspect(?:-brk)?|--remote-debugging-port|--no-sandbox)(=|$)/.test(arg)) continue;
+    if (!positional && arg.startsWith('-')) {
+      if (forwarded) continue;
+      throw new Error(`Unknown option: ${arg}. Use fence --help.`);
+    }
     if (target) throw new Error('Open one file or folder at a time.');
     target = path.resolve(cwd, arg);
     if (!fs.existsSync(target)) throw new Error(`Path does not exist: ${arg}`);

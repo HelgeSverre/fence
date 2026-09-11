@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
-const { launchFence, setEditorContent, waitForEditorValue, waitForFile, save } = require("./helpers");
+const { launchFence, setEditorContent, waitForEditorValue, waitForFile, sendFromElm, save } = require("./helpers");
 
 describe("editing and saving", () => {
   test("typing updates the preview after the debounce", async () => {
@@ -87,9 +87,7 @@ describe("editing and saving", () => {
       });
       // Replay a real watcher event AFTER the save acknowledgement, removing
       // the platform-dependent timing that normally makes this intermittent.
-      await app.evaluate(({ BrowserWindow }, path) => {
-        BrowserWindow.getAllWindows()[0].webContents.send("fromElm", { tag: "fsEvent", event: "change", path });
-      }, fence.file("note.md"));
+      await sendFromElm(app, { tag: "fsEvent", event: "change", path: fence.file("note.md") });
       await window.waitForFunction(() => window.reloadReceived);
       await window.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const after = await editorViewport(window);

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const { test } = require('node:test');
-const { launchFence, setEditorContent, waitForEditorValue, editorText, waitForFile, MOD } = require('./helpers');
+const { launchFence, setEditorContent, waitForEditorValue, editorText, waitForFile, waitFor, sendFromElm, openSettings, captureClipboard, stubSaveDialog, MOD } = require('./helpers');
 
 test('navigation offers Cancel and Save before replacing dirty content', async () => {
   const f = await launchFence({ files: { 'note.md': '# Old\n', 'other.md': '# Other\n' } });
@@ -23,7 +23,7 @@ test('saving an untitled document uses Save As and preserves content', async () 
   const f = await launchFence({ open: null });
   try {
     await f.window.getByTestId('tree-file').waitFor();
-    await f.app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, f.file('new.md'));
+    await stubSaveDialog(f.app, f.file('new.md'));
     await setEditorContent(f.window, '# Scratch\n');
     await f.window.keyboard.press(`${MOD}+s`);
     await f.window.waitForFunction(() => document.querySelector('#veditor-input').dataset.path.endsWith('/new.md'));
@@ -50,11 +50,10 @@ test('export immediately after an edit includes the current source', async () =>
   const f = await launchFence();
   try {
     await f.window.getByTestId('preview-content').locator('h1').waitFor();
-    await f.app.evaluate(({ clipboard }) => { globalThis.copied = null; clipboard.write = data => { globalThis.copied = data; }; });
+    const copied = await captureClipboard(f.app);
     await f.window.evaluate(() => document.querySelector('#veditor-input').dispatchEvent(new CustomEvent('fencepaste', { detail: 'FRESH ', bubbles: true })));
-    await f.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('fromElm', { tag: 'exportRequested', format: 'clipboard' }));
-    await f.window.waitForTimeout(200);
-    assert.match(await f.app.evaluate(() => globalThis.copied?.text), /FRESH/);
+    await sendFromElm(f.app, { tag: 'exportRequested', format: 'clipboard' });
+    assert.match((await waitFor(copied)).text, /FRESH/);
   } finally { await f.close(); }
 });
 
@@ -123,7 +122,7 @@ test('settings remains scrollable and inside a short viewport', async () => {
   const f = await launchFence({ state: { uiFontSize: 16 } });
   try {
     await f.window.setViewportSize({ width: 1100, height: 700 });
-    await f.window.getByTestId('settings-button').click();
+    await openSettings(f.window);
     const menu = f.window.getByTestId('settings-dropdown');
     const bounds = await menu.boundingBox();
     assert.ok(bounds.y + bounds.height <= 700);
@@ -148,7 +147,7 @@ test('cancelling Save As keeps an untitled document open, then Save on close wri
     });
     await f.window.waitForTimeout(150);
     assert.equal(await editorText(f.window), '# Keep me\n');
-    await f.app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, f.file('kept.md'));
+    await stubSaveDialog(f.app, f.file('kept.md'));
     const closed = f.window.waitForEvent('close');
     await f.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
     await closed;
@@ -159,7 +158,7 @@ test('cancelling Save As keeps an untitled document open, then Save on close wri
 test('Save As writes a new file without changing the original', async () => {
   const f = await launchFence({ files: { 'note.md': '# Original\n' } });
   try {
-    await f.app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, f.file('copy.md'));
+    await stubSaveDialog(f.app, f.file('copy.md'));
     await setEditorContent(f.window, '# Copy\n');
     await f.window.keyboard.press(`${MOD}+Shift+s`);
     await f.window.waitForFunction(() => document.querySelector('#veditor-input').dataset.path.endsWith('/copy.md'));

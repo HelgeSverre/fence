@@ -2,19 +2,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test, describe } = require("node:test");
-const { launchFence, waitForEditorValue } = require("./helpers");
+const { launchFence, waitForEditorValue, waitFor, waitForPath, sendFromElm, captureClipboard, stubSaveDialog } = require("./helpers");
 
 const doc = "# Title\n\nSome **bold** body.\n";
 
 // What the File > Export and Edit > Copy as Rich Text menu items send.
-const menuCommand = (app, message) =>
-  app.evaluate(({ BrowserWindow }, m) => BrowserWindow.getAllWindows()[0].webContents.send("fromElm", m), message);
-
-// Answer the next native save dialog with `target`, without showing it.
-const stubSaveDialog = (app, target) =>
-  app.evaluate(({ dialog }, filePath) => {
-    dialog.showSaveDialog = async () => ({ canceled: false, filePath });
-  }, target);
+const menuCommand = sendFromElm;
 
 describe("export", () => {
   test("exporting to HTML writes the rendered preview with its styles", async () => {
@@ -24,7 +17,7 @@ describe("export", () => {
       await stubSaveDialog(fence.app, target);
       await menuCommand(fence.app, { tag: "exportRequested", format: "html" });
 
-      await waitForPath(target);
+      await waitForPath(target, 20000);
       const html = await fs.promises.readFile(target, "utf-8");
       assert.match(html, /<h1[^>]*>Title<\/h1>/);
       assert.match(html, /<strong>bold<\/strong>/);
@@ -55,7 +48,7 @@ describe("export", () => {
           if (error.code !== "ENOENT") throw error;
           return null;
         }
-      });
+      }, { timeout: 10000 });
       assert.equal(bytes.subarray(0, 4).toString("latin1"), "%PDF");
       assert.ok(bytes.length > 1000, `PDF was only ${bytes.length} bytes`);
     } finally {
@@ -66,18 +59,10 @@ describe("export", () => {
   test("copying as rich text puts HTML and plain text on the clipboard", async () => {
     const fence = await launchFence({ files: { "note.md": doc }, open: "note.md" });
     try {
-      // Capture the write instead of reading the clipboard back: the test
-      // must not clobber the developer's clipboard, and Playwright's proxy
-      // cannot read the HTML flavour anyway.
-      await fence.app.evaluate(({ clipboard }) => {
-        globalThis.__copied = null;
-        clipboard.write = (data) => {
-          globalThis.__copied = data;
-        };
-      });
+      const clipboard = await captureClipboard(fence.app);
       await menuCommand(fence.app, { tag: "exportRequested", format: "clipboard" });
 
-      const copied = await waitFor(() => fence.app.evaluate(() => globalThis.__copied));
+      const copied = await waitFor(clipboard, { timeout: 10000 });
       assert.equal(copied.text, "TitleSome bold body.");
       assert.match(copied.html, /<h1[^>]*>Title<\/h1>/);
       assert.match(copied.html, /<strong>bold<\/strong>/);
@@ -138,23 +123,3 @@ describe("export", () => {
     }
   });
 });
-
-// Poll an async producer until it returns something truthy.
-async function waitFor(produce, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = await produce();
-    if (value) return value;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  assert.fail("Timed out waiting for a value");
-}
-
-async function waitForPath(target, timeoutMs = 20000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(target)) return;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  assert.fail(`Timed out waiting for ${path.basename(target)}`);
-}

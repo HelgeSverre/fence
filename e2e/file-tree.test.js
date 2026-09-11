@@ -1,17 +1,9 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { test, describe } = require("node:test");
-const path = require("node:path");
-const { launchFence, waitForEditorValue } = require("./helpers");
+const { launchFence, waitForEditorValue, waitForPath, sendFromElm } = require("./helpers");
 
-// Exactly what the File menu and the tree's context menu do: push a command
-// to the renderer from the main process. Playwright cannot click native menus.
-const treeCommand = (app, command, target = null) =>
-  app.evaluate(({ BrowserWindow }, message) => BrowserWindow.getAllWindows()[0].webContents.send("fromElm", message), {
-    tag: "treeCommand",
-    command,
-    path: target,
-  });
+const treeCommand = (app, command, target = null) => sendFromElm(app, { tag: "treeCommand", command, path: target });
 
 async function typeName(window, name) {
   const input = window.getByTestId("tree-name-input");
@@ -26,15 +18,6 @@ const waitForTitle = (window, name) =>
   window.waitForFunction((want) => document.querySelector("[data-testid=titlebar-filename]")?.textContent === want, name, {
     timeout: 10000,
   });
-
-async function waitForPath(target, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(target)) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  assert.fail(`Timed out waiting for ${path.basename(target)}`);
-}
 
 describe("file tree", () => {
   test("clicking a file loads it into the editor and selects it", async () => {

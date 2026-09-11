@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
-const { launchFence } = require("./helpers");
+const { launchFence, openSettings } = require("./helpers");
 
 describe("settings and layout", () => {
   test("choosing a theme applies it immediately and persists across a restart", async () => {
@@ -9,8 +9,7 @@ describe("settings and layout", () => {
     try {
       const { window } = first;
       userDataDir = first.userDataDir;
-      await window.getByTestId("settings-button").click();
-      await window.getByTestId("settings-dropdown").waitFor();
+      await openSettings(window);
       await window.getByTestId("settings-picker-theme").click();
       await window.getByTestId("settings-option-theme-github-dark").click();
       await window.waitForFunction(() => document.documentElement.dataset.theme === "github-dark");
@@ -32,7 +31,7 @@ describe("settings and layout", () => {
     try {
       const { window } = first;
       userDataDir = first.userDataDir;
-      await window.getByTestId("settings-button").click();
+      await openSettings(window);
       await window.getByTestId("settings-picker-ui-font").click();
       await window.getByTestId("settings-picker-search").fill("inter");
       await window.getByTestId("settings-option-ui-font-Inter").click();
@@ -58,7 +57,7 @@ describe("settings and layout", () => {
       const box = await content.boundingBox();
       const container = await window.getByTestId("preview-container").boundingBox();
       assert.ok(box.width <= 500 && Math.abs((box.x - container.x) - (container.x + container.width - box.x - box.width)) < 20, "the document is centered");
-      await window.getByTestId("settings-button").click();
+      await openSettings(window);
       await window.getByTestId("preview-width-narrow").click();
       await window.waitForFunction(() => getComputedStyle(document.querySelector('[data-testid="preview-content"]')).maxWidth === "560px");
       assert.equal(await window.getByTestId("preview-width-input").count(), 0);
@@ -76,7 +75,7 @@ describe("settings and layout", () => {
       const { window } = first;
       userDataDir = first.userDataDir;
       await window.getByTestId("editor-header").waitFor();
-      await window.getByTestId("settings-button").click();
+      await openSettings(window);
       await window.getByTestId("pane-headers-toggle").click();
       await window.getByTestId("editor-header").waitFor({ state: "hidden" });
     } finally {
@@ -152,8 +151,7 @@ test("hovering a setting shows its tooltip and title bar buttons describe themse
   const fence = await launchFence();
   try {
     const { window } = fence;
-    await window.getByTestId("settings-button").click();
-    await window.getByTestId("settings-dropdown").waitFor();
+    await openSettings(window);
     const label = window.locator("#tip-pane-headers-toggle").locator("..");
     await label.hover();
     await window.locator("#tip-pane-headers-toggle").waitFor({ state: "visible" });

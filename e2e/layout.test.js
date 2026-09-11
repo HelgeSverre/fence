@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { test, describe } = require("node:test");
-const { launchFence, openEditor, focusEditor, expectEditorText, MOD } = require("./helpers");
+const { launchFence, openEditor, focusEditor, expectEditorText, waitFor, sendFromElm, openSettings, stubSaveDialog, MOD } = require("./helpers");
 
 const modeIs = (window, mode) => window.waitForFunction((value) => document.querySelector(".app-layout")?.dataset.layout === value, mode);
 const countIs = (window, text) => window.waitForFunction((value) => document.querySelector("[data-testid=find-count]")?.textContent === value, text);
@@ -69,7 +69,7 @@ describe("document layouts", () => {
     const first = await launchFence();
     const userDataDir = first.userDataDir;
     try {
-      await first.window.getByTestId("settings-button").click();
+      await openSettings(first.window);
       await first.window.locator(".settings-dropdown-row").filter({ hasText: "Cycle layout" }).getByRole("button").click();
       await first.window.keyboard.press("Meta+4");
       await first.window.getByRole("button", { name: "⌘4", exact: true }).waitFor();
@@ -166,7 +166,7 @@ describe("document layouts", () => {
       await choose(window, "preview");
       await window.locator(".mermaid svg").waitFor();
       const previousId = await window.locator(".mermaid svg").getAttribute("id");
-      await window.getByTestId("settings-button").click();
+      await openSettings(window);
       await window.getByTestId("settings-picker-theme").click();
       await window.getByTestId("settings-option-theme-light").click();
       await window.keyboard.press("Escape");
@@ -187,15 +187,10 @@ describe("document layouts", () => {
       await window.waitForFunction(() => document.getElementById("preview-container").scrollTop > 1000);
       await choose(window, "editor");
       const target = path.join(fence.workspace, "export.html");
-      await fence.app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, target);
-      await fence.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send("fromElm", { tag: "exportRequested", format: "html" }));
+      await stubSaveDialog(fence.app, target);
+      await sendFromElm(fence.app, { tag: "exportRequested", format: "html" });
       await window.waitForFunction(() => !document.querySelector(".error-banner"));
-      let html;
-      for (let i = 0; i < 100; i++) {
-        html = await fs.readFile(target, "utf8").catch(() => "");
-        if (html) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
+      const html = await waitFor(() => fs.readFile(target, "utf8").catch(() => ""));
       assert.match(html, /<strong>Export me<\/strong>/);
       assert.doesNotMatch(html.split("<body>")[1], /pane-offscreen/); // no hidden wrapper in the exported body (CSS is collected separately)
     } finally { await fence.close(); }

@@ -109,15 +109,65 @@ async function openEditor(content) {
   return fence;
 }
 
-async function waitForFile(filePath, expected, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
+// Poll an async producer until it returns something truthy, and return that.
+async function waitFor(produce, { timeout = 5000, interval = 50, label = "a value" } = {}) {
+  const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if ((await fs.promises.readFile(filePath, "utf-8").catch(() => null)) === expected) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const value = await produce();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, interval));
   }
-  assert.fail(`Timed out waiting for ${path.basename(filePath)} to contain the expected content`);
+  assert.fail(`Timed out waiting for ${label}`);
 }
+
+const waitForFile = (filePath, expected, timeout = 5000) =>
+  waitFor(async () => (await fs.promises.readFile(filePath, "utf-8").catch(() => null)) === expected, { timeout, label: `${path.basename(filePath)} to contain the expected content` });
+
+const waitForPath = (target, timeout = 10000) => waitFor(() => fs.existsSync(target), { timeout, label: path.basename(target) });
+
+// Exactly what native menus and the tree's context menu do: push a command to
+// the renderer from the main process. Playwright cannot click native menus.
+const sendFromElm = (app, message) =>
+  app.evaluate(({ BrowserWindow }, m) => BrowserWindow.getAllWindows()[0].webContents.send("fromElm", m), message);
+
+async function openSettings(window) {
+  await window.getByTestId("settings-button").click();
+  await window.getByTestId("settings-dropdown").waitFor();
+}
+
+// Capture clipboard writes instead of reading the clipboard back: the test
+// must not clobber the developer's clipboard, and Playwright's proxy cannot
+// read the HTML flavour anyway. Returns a getter for the captured {html, text}.
+async function captureClipboard(app) {
+  await app.evaluate(({ clipboard }) => {
+    globalThis.__copied = null;
+    clipboard.write = (data) => { globalThis.__copied = data; };
+  });
+  return () => app.evaluate(() => globalThis.__copied);
+}
+
+// Answer the next native save dialog with `filePath`, without showing it.
+const stubSaveDialog = (app, filePath) =>
+  app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, filePath);
+
+// Launch, run the body, and always close the app afterwards.
+async function withFence(options, fn) {
+  const fence = await launchFence(options);
+  try {
+    return await fn(fence);
+  } finally {
+    await fence.close();
+  }
+}
+
+// The preview fills in progressively; wait until its chunk count has held still for 400ms.
+const waitForPreviewSettled = (window, timeout = 15000) =>
+  window.waitForFunction(
+    () => new Promise((resolve) => { const n = document.querySelectorAll(".preview-chunk").length; setTimeout(() => resolve(n > 0 && document.querySelectorAll(".preview-chunk").length === n), 400); }),
+    undefined,
+    { timeout, polling: 100 },
+  );
 
 const save = (window) => window.keyboard.press(`${MOD}+s`);
 
-module.exports = { MOD, launchFence, openEditor, focusEditor, editorText, expectEditorText, waitForEditorValue, setEditorContent, waitForFile, save };
+module.exports = { MOD, launchFence, withFence, openEditor, focusEditor, editorText, expectEditorText, waitForEditorValue, setEditorContent, waitFor, waitForFile, waitForPath, waitForPreviewSettled, sendFromElm, openSettings, captureClipboard, stubSaveDialog, save };

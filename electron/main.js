@@ -1,10 +1,16 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard, session, protocol, net } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const crypto = require("node:crypto");
 const { pathToFileURL, fileURLToPath } = require("node:url");
 const fsOps = require("./fs-ops");
 const { parseCliArgs, help: cliHelp } = require("./cli");
+const { requireString, preferenceRules, isAppUrl } = require("./validate");
+const { exportDocument, renderPdf } = require("./export");
+const { buildMenu } = require("./menu");
+const {
+  loadState, updateState, flushSession, rememberSession,
+  saveRecoveryDraft, queueRecoveryDraft, awaitRecoveryWrites, clearRecoveryDraft, loadRecoveryDraft, relocateRecoveryDrafts,
+} = require("./session");
 
 // Tests point this at a temp dir so they never touch the real state.json,
 // recovery drafts or single-instance lock. Must run before the lock below.
@@ -22,82 +28,6 @@ const MAX_RECENT_WORKSPACES = 20;
 // Where a pasted or dropped image is written, beside the open document.
 const ATTACHMENT_DIR = "assets";
 
-function getStatePath() {
-  return path.join(app.getPath("userData"), "state.json");
-}
-
-function loadState() {
-  try {
-    return JSON.parse(fs.readFileSync(getStatePath(), "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-function saveState(state) {
-  try {
-    // Write-then-rename so a crash mid-write can't leave a truncated state.json.
-    const statePath = getStatePath();
-    fs.writeFileSync(`${statePath}.tmp`, JSON.stringify(state));
-    fs.renameSync(`${statePath}.tmp`, statePath);
-  } catch {
-    /* ignore */
-  }
-}
-
-// Load → mutate → save the persisted state file. Use for any IPC handler
-// that needs to update one or more fields without dropping the others.
-function updateState(updater) {
-  const state = loadState();
-  const updates = updater(state) || {};
-  saveState({ ...state, ...updates });
-}
-
-let recoveryWrites = Promise.resolve();
-
-function recoveryPathFor(filePath) {
-  const key = crypto.createHash("sha256").update(filePath).digest("hex");
-  return path.join(app.getPath("userData"), "recovery", `${key}.json`);
-}
-
-async function saveRecoveryDraft(payload) {
-  const filePath = requireString(payload, "path", 32768);
-  const content = requireString(payload, "content");
-  const revision = payload.revision;
-  const canonical = await fsOps.resolvePath(filePath);
-  const destination = recoveryPathFor(canonical);
-  const temp = `${destination}.${process.pid}.tmp`;
-  await fs.promises.mkdir(path.dirname(destination), { recursive: true });
-  await fs.promises.writeFile(
-    temp,
-    JSON.stringify({
-      path: canonical,
-      content,
-      revision: typeof revision === "string" ? revision : null,
-      savedAt: new Date().toISOString(),
-    }),
-    "utf-8",
-  );
-  await fs.promises.rename(temp, destination);
-}
-
-async function clearRecoveryDraft(filePath) {
-  await recoveryWrites.catch(() => {});
-  await fs.promises.unlink(recoveryPathFor(filePath)).catch((error) => {
-    if (error.code !== "ENOENT") throw error;
-  });
-}
-
-async function loadRecoveryDraft(filePath) {
-  try {
-    return JSON.parse(
-      await fs.promises.readFile(recoveryPathFor(filePath), "utf-8"),
-    );
-  } catch {
-    return null;
-  }
-}
-
 let mainWindow;
 let pendingOpenPath = null; // open-file path received before the renderer loaded
 let rendererReady = false;
@@ -112,8 +42,6 @@ function queuedSave(payload) {
 }
 let snapshotId = 0;
 const snapshots = new Map();
-let currentSession = null;
-let sessionTimer;
 
 function requestDocumentState() {
   if (!liveWindow() || !rendererReady) return Promise.resolve({ path: null, content: "", dirty: false });
@@ -123,22 +51,6 @@ function requestDocumentState() {
     snapshots.set(id, (data) => { clearTimeout(timer); resolve(data); });
     sendToRenderer({ tag: "requestDocumentState", id });
   });
-}
-
-function flushSession() {
-  clearTimeout(sessionTimer);
-  if (currentSession !== null) updateState(() => ({ lastDocument: currentSession }));
-}
-
-function rememberSession(data) {
-  currentSession = {
-    path: typeof data.path === "string" ? data.path : null,
-    ...Object.fromEntries(["line", "col", "top", "left"].map(key => [key, Number.isFinite(data[key]) ? Math.max(0, data[key]) : 0])),
-  };
-  clearTimeout(sessionTimer);
-  // Every cursor move lands here; the flush is a sync read+write of
-  // state.json, so wait for a real pause. Close and navigation flush directly.
-  sessionTimer = setTimeout(flushSession, 1000);
 }
 
 async function confirmNavigation(closing = false) {
@@ -214,7 +126,7 @@ async function openWorkspace(folderPath) {
         recentWorkspaces: recents.slice(0, MAX_RECENT_WORKSPACES),
       };
     });
-    buildMenu();
+    rebuildMenu();
     return true;
   } catch (err) {
     sendToRenderer({ tag: "error", message: err.message });
@@ -222,124 +134,8 @@ async function openWorkspace(folderPath) {
   }
 }
 
-// (Re)build the application menu. Called again whenever the recent
-// workspaces list changes so File > Open Recent stays current.
-function buildMenu() {
-  const isMac = process.platform === "darwin";
-  const recents = loadState().recentWorkspaces || [];
-
-  const template = [
-    ...(isMac
-      ? [
-          {
-            label: app.name,
-            submenu: [
-              { role: "about" },
-              { type: "separator" },
-              {
-                label: "Settings...",
-                accelerator: "Cmd+,",
-                click: () => sendToRenderer({ tag: "toggleSettings" }),
-              },
-              { type: "separator" },
-              { role: "hide" },
-              { role: "hideOthers" },
-              { role: "unhide" },
-              { type: "separator" },
-              { role: "quit" },
-            ],
-          },
-        ]
-      : []),
-    {
-      label: "File",
-      submenu: [
-        {
-          label: "Open Folder...",
-          accelerator: "CmdOrCtrl+O",
-          click: () => sendToRenderer({ tag: "triggerOpenFolder" }),
-        },
-        {
-          label: "New File",
-          accelerator: "CmdOrCtrl+N",
-          click: () => sendToRenderer({ tag: "treeCommand", command: "newFile", path: null }),
-        },
-        {
-          label: "New Folder",
-          accelerator: "CmdOrCtrl+Shift+N",
-          click: () => sendToRenderer({ tag: "treeCommand", command: "newFolder", path: null }),
-        },
-        { type: "separator" },
-        { label: "Save", accelerator: "CmdOrCtrl+S", click: () => sendToRenderer({ tag: "saveRequested" }) },
-        { label: "Save As...", accelerator: "CmdOrCtrl+Shift+S", click: () => sendToRenderer({ tag: "saveAsRequested" }) },
-        {
-          label: "Open Recent",
-          submenu:
-            recents.length > 0
-              ? recents.map((p) => ({
-                  label: p,
-                  click: () => navigate(() => switchWorkspace(p)),
-                }))
-              : [{ label: "No Recent Workspaces", enabled: false }],
-        },
-        { type: "separator" },
-        {
-          label: "Export",
-          submenu: [
-            {
-              label: "PDF...",
-              click: () => sendToRenderer({ tag: "exportRequested", format: "pdf" }),
-            },
-            {
-              label: "HTML...",
-              click: () => sendToRenderer({ tag: "exportRequested", format: "html" }),
-            },
-          ],
-        },
-        { type: "separator" },
-        isMac ? { role: "close" } : { role: "quit" },
-      ],
-    },
-    {
-      label: "Edit",
-      submenu: [
-        { role: "undo" },
-        { role: "redo" },
-        { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "selectAll" },
-        { type: "separator" },
-        {
-          label: "Copy Document as Rich Text",
-          click: () => sendToRenderer({ tag: "exportRequested", format: "clipboard" }),
-        },
-      ],
-    },
-    {
-      label: "View",
-      submenu: [
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-        { type: "separator" },
-        { role: "togglefullscreen" },
-      ],
-    },
-    {
-      label: "Window",
-      submenu: [
-        { role: "minimize" },
-        { role: "zoom" },
-        ...(isMac
-          ? [{ type: "separator" }, { role: "front" }]
-          : [{ role: "close" }]),
-      ],
-    },
-  ];
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+function rebuildMenu() {
+  buildMenu(sendToRenderer, (p) => navigate(() => switchWorkspace(p)));
 }
 
 // Validate the optional CLI path relative to the invoking shell's directory.
@@ -472,19 +268,6 @@ function createWindow() {
   });
 }
 
-function isAppUrl(candidate) {
-  try {
-    const url = new URL(candidate);
-    if (process.env.VITE_DEV_SERVER_URL) {
-      return url.origin === new URL(process.env.VITE_DEV_SERVER_URL).origin;
-    }
-    const appUrl = pathToFileURL(path.join(__dirname, "../dist/index.html"));
-    return url.protocol === "file:" && url.pathname === appUrl.pathname;
-  } catch {
-    return false;
-  }
-}
-
 function openExternalIfSafe(candidate) {
   try {
     const url = new URL(candidate);
@@ -511,14 +294,6 @@ function isTrustedIpcEvent(event) {
   return Boolean(win && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame);
 }
 
-function requireString(payload, key, maxLength = 100 * 1024 * 1024) {
-  const value = payload?.[key];
-  if (typeof value !== "string" || value.length > maxLength) {
-    throw new TypeError(`Invalid ${key}`);
-  }
-  return value;
-}
-
 // Preview images: Elm renders `fence-image://local/?doc=<document>&src=<source>`
 // and Chromium streams the file from here, so no image bytes cross IPC.
 // Must be registered before app is ready.
@@ -535,22 +310,6 @@ async function serveImage(request) {
     // A missing/unsupported image is a broken image, never a banner.
     return new Response(null, { status: 404 });
   }
-}
-
-// Exports must stand on their own: swap every preview image URL for the
-// file's data URL. The HTML is serialized DOM, so `&` arrives as `&amp;`.
-async function inlineImages(html) {
-  const pattern = /src="(fence-image:\/\/[^"]*)"/g;
-  const inlined = await Promise.all([...html.matchAll(pattern)].map(async ([, raw]) => {
-    try {
-      const url = new URL(raw.replace(/&amp;/g, "&"));
-      return await fsOps.readImage(url.searchParams.get("doc") ?? "", (url.searchParams.get("src") ?? "") + url.hash);
-    } catch {
-      return "";
-    }
-  }));
-  let i = 0;
-  return html.replace(pattern, () => `src="${inlined[i++]}"`);
 }
 
 function registerIpc(channel, handler) {
@@ -722,23 +481,13 @@ registerIpc("fence:create-dir", async (data) => {
 });
 
 registerIpc("fence:rename-path", async data => {
-  await recoveryWrites.catch(() => {});
+  await awaitRecoveryWrites();
   const snapshot = await requestDocumentState();
   const renamed = await fsOps.renamePath(requireString(data, "path", 32768), requireString(data, "name", 255));
   sendToRenderer({ tag: "renamed", from: renamed.from, path: renamed.path });
   const follow = candidate => candidate === renamed.from ? renamed.path :
     candidate?.startsWith(renamed.from + path.sep) ? renamed.path + candidate.slice(renamed.from.length) : candidate;
-  const directory = path.join(app.getPath("userData"), "recovery");
-  for (const name of await fs.promises.readdir(directory).catch(() => [])) {
-    if (!name.endsWith(".json")) continue;
-    const file = path.join(directory, name);
-    const draft = await fs.promises.readFile(file, "utf8").then(JSON.parse).catch(() => null);
-    if (draft?.path && follow(draft.path) !== draft.path) {
-      const target = follow(draft.path);
-      await saveRecoveryDraft({ ...draft, path: target });
-      await fs.promises.unlink(file);
-    }
-  }
+  await relocateRecoveryDrafts(follow);
   if (snapshot.path && follow(snapshot.path) !== snapshot.path) {
     const target = follow(snapshot.path);
     if (snapshot.dirty) await saveRecoveryDraft({ ...snapshot, path: target });
@@ -765,50 +514,6 @@ registerIpc("fence:search-workspace", async (data) => {
   const query = requireString(data, "query", 1024);
   sendToRenderer({ tag: "searchResults", query, hits: await fsOps.grep(root, query) });
 });
-
-// Build a standalone HTML document from the rendered preview: the renderer
-// hands over the pane's markup and the stylesheet text it is using, so the
-// export looks exactly like what is on screen, mermaid diagrams included.
-async function exportDocument(data) {
-  const html = await inlineImages(requireString(data, "html"));
-  const css = requireString(data, "css");
-  const title = requireString(data, "title", 512);
-  const theme = typeof data.theme === "string" ? data.theme : "";
-  const base = typeof data.base === "string" ? data.base : "";
-
-  return `<!doctype html>
-<html${theme ? ` data-theme="${escapeAttribute(theme)}"` : ""}>
-<head>
-<meta charset="utf-8">
-<title>${escapeHtml(title)}</title>
-${base ? `<base href="${escapeAttribute(base)}">` : ""}
-<style>${css}
-@page { margin: 1.5cm; }
-body { margin: 0; }
-.preview-pane, .preview-content { overflow: visible !important; height: auto !important; }
-</style>
-</head>
-<body><div class="preview-pane"><div class="preview-content">${html}</div></div></body>
-</html>`;
-}
-
-function escapeHtml(value) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function escapeAttribute(value) {
-  return escapeHtml(value).replace(/"/g, "&quot;");
-}
-
-async function renderPdf(document_) {
-  const printer = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
-  try {
-    await printer.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(document_)}`);
-    return await printer.webContents.printToPDF({ printBackground: true });
-  } finally {
-    printer.destroy();
-  }
-}
 
 async function saveExport(defaultName, extension, contents) {
   const result = await dialog.showSaveDialog(mainWindow, {
@@ -931,20 +636,6 @@ registerIpc("fence:save-splits", (data) => {
 });
 
 // Invalid or missing keys are skipped silently, as in save-splits above.
-const string = (max) => (v) => typeof v === "string" && v.length <= max;
-const number = (lo, hi) => (v) => typeof v === "number" && v >= lo && v <= hi;
-const integer = (lo, hi) => (v) => Number.isInteger(v) && v >= lo && v <= hi;
-const boolean = (v) => typeof v === "boolean";
-const oneOf = (values) => (v) => values.includes(v);
-
-const preferenceRules = {
-  theme: string(128), editorFont: string(256), uiFont: string(256),
-  editorFontSize: number(8, 32), previewFontSize: number(8, 32), uiFontSize: number(8, 24),
-  previewWidth: oneOf(["full", "narrow", "normal", "wide", "custom"]), previewMaxWidth: integer(320, 2000),
-  showPaneHeaders: boolean, previewUsesEditorFont: boolean, softWrap: boolean,
-  revealInSidebar: boolean,
-};
-
 registerIpc("fence:set-preferences", (data) => {
   const updates = {};
   for (const [key, valid] of Object.entries(preferenceRules)) {
@@ -953,10 +644,7 @@ registerIpc("fence:set-preferences", (data) => {
   updateState(() => updates);
 });
 
-registerIpc("fence:save-recovery-draft", data => {
-  recoveryWrites = recoveryWrites.catch(() => {}).then(() => saveRecoveryDraft(data));
-  return recoveryWrites;
-});
+registerIpc("fence:save-recovery-draft", queueRecoveryDraft);
 
 let cliRequest;
 try { cliRequest = parseCliArgs(process.argv.slice(app.isPackaged ? 1 : 2), process.cwd()); }
@@ -1010,7 +698,7 @@ if (!gotLock) {
     });
 
     protocol.handle("fence-image", serveImage);
-    buildMenu();
+    rebuildMenu();
     createWindow();
 
     // Renderer never needs camera, notifications, clipboard-read or the rest.

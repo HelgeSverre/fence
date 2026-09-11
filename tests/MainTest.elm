@@ -4,10 +4,11 @@ import Editor
 import Expect
 import FileTree
 import Json.Encode as E
-import Main exposing (DragTarget(..), LayoutMode(..), Msg(..))
+import Main exposing (LayoutMode(..), Msg(..))
 import Preferences exposing (Picker(..))
 import Set
 import Settings
+import Splits exposing (DragTarget(..))
 import Test exposing (Test, describe, test)
 import Types exposing (DirtyState(..), keyBindingLabel, matchesBinding)
 

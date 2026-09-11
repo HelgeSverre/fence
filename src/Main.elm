@@ -1,6 +1,5 @@
 module Main exposing
-    ( DragTarget(..)
-    , LayoutMode(..)
+    ( LayoutMode(..)
     , Model
     , Msg(..)
     , init
@@ -32,6 +31,7 @@ import Ports
 import Preferences exposing (Picker(..), Preferences, PreviewWidth(..))
 import Preview
 import Settings exposing (RebindTarget(..))
+import Splits exposing (DragState, DragTarget(..))
 import PreviewSync exposing (SyncPoint, syncAnchors)
 import Process
 import Task
@@ -85,20 +85,6 @@ nextLayout mode =
 
         PreviewOnly ->
             EditorOnly
-
-
-type DragTarget
-    = DraggingSidebar
-    | DraggingEditor
-    | DraggingRightSidebar
-
-
-type alias DragState =
-    { target : DragTarget
-    , startX : Float
-    , startFraction : Float
-    }
-
 
 type alias Model =
     { fileTree : FileTree.Model
@@ -194,21 +180,6 @@ type Msg
     | NavigateHistory Int
     | SyncPointsMeasured (List SyncPoint)
     | NoOp
-
-
-defaultSidebarFraction : Float
-defaultSidebarFraction =
-    0.17
-
-
-defaultEditorFraction : Float
-defaultEditorFraction =
-    0.5
-
-
-defaultRightSidebarFraction : Float
-defaultRightSidebarFraction =
-    0.18
 
 
 defaultOutlineMaxLevel : Int
@@ -315,14 +286,14 @@ init flagsValue =
       , settingsFocus = 0
       , expandedPicker = Nothing
       , pickerFilter = ""
-      , sidebarFraction = flag "sidebarFraction" D.float defaultSidebarFraction
-      , editorFraction = flag "editorFraction" D.float defaultEditorFraction
+      , sidebarFraction = flag "sidebarFraction" D.float Splits.defaultSidebarFraction
+      , editorFraction = flag "editorFraction" D.float Splits.defaultEditorFraction
       , drag = Nothing
       , windowWidth = flag "windowWidth" D.float defaultWindowWidth
       , outline = []
       , leftSidebarVisible = flag "leftSidebarVisible" D.bool True
       , rightSidebarVisible = flag "rightSidebarVisible" D.bool False
-      , rightSidebarFraction = flag "rightSidebarFraction" D.float defaultRightSidebarFraction
+      , rightSidebarFraction = flag "rightSidebarFraction" D.float Splits.defaultRightSidebarFraction
       , outlineMaxLevel =
             flag "outlineMaxLevel" D.int defaultOutlineMaxLevel
                 |> clamp outlineMinLevel outlineMaxLevelLimit
@@ -487,58 +458,18 @@ update msg model =
                         ( model, Cmd.none )
 
         DividerMouseDown target clientX ->
-            let
-                startFraction =
-                    case target of
-                        DraggingSidebar ->
-                            model.sidebarFraction
-
-                        DraggingEditor ->
-                            model.editorFraction
-
-                        DraggingRightSidebar ->
-                            model.rightSidebarFraction
-            in
-            ( { model
-                | drag =
-                    Just
-                        { target = target
-                        , startX = clientX
-                        , startFraction = startFraction
-                        }
-              }
-            , Cmd.none
-            )
+            ( Splits.startDrag target clientX model, Cmd.none )
 
         DividerMouseMove clientX ->
-            case model.drag of
-                Just d ->
-                    let
-                        updatedModel =
-                            computeDrag d clientX model
-                    in
-                    ( updatedModel, Cmd.none )
-
-                Nothing ->
-                    ( model, Cmd.none )
+            ( Splits.drag clientX model, Cmd.none )
 
         DividerMouseUp ->
-            ( { model | drag = Nothing }
-            , saveSplitsCmd model
-            )
+            ( Splits.endDrag model, saveSplitsCmd model )
 
         DividerDoubleClick target ->
             let
                 newModel =
-                    case target of
-                        DraggingSidebar ->
-                            { model | sidebarFraction = defaultSidebarFraction }
-
-                        DraggingEditor ->
-                            { model | editorFraction = defaultEditorFraction }
-
-                        DraggingRightSidebar ->
-                            { model | rightSidebarFraction = defaultRightSidebarFraction }
+                    Splits.resetFraction target model
             in
             ( newModel, saveSplitsCmd newModel )
 
@@ -1661,61 +1592,6 @@ saveRecoveryDraftCmd editor =
 
 
 
--- SPLIT HELPERS
-
-
-computeDrag : DragState -> Float -> Model -> Model
-computeDrag d clientX model =
-    case d.target of
-        DraggingSidebar ->
-            let
-                deltaFraction =
-                    (clientX - d.startX) / model.windowWidth
-
-                newFraction =
-                    clamp 0.08 0.4 (d.startFraction + deltaFraction)
-            in
-            { model | sidebarFraction = newFraction }
-
-        DraggingEditor ->
-            let
-                rightFraction =
-                    if model.rightSidebarVisible then
-                        model.rightSidebarFraction
-
-                    else
-                        0
-
-                -- editorFraction is a fraction of the editor/preview region,
-                -- i.e. the window minus both sidebars.
-                remainingWidth =
-                    model.windowWidth * (1 - model.sidebarFraction - rightFraction)
-
-                deltaFraction =
-                    if remainingWidth > 0 then
-                        (clientX - d.startX) / remainingWidth
-
-                    else
-                        0
-
-                newFraction =
-                    clamp 0.15 0.85 (d.startFraction + deltaFraction)
-            in
-            { model | editorFraction = newFraction }
-
-        DraggingRightSidebar ->
-            let
-                -- The handle sits on the sidebar's left edge, so dragging
-                -- left (negative delta) widens the right sidebar.
-                deltaFraction =
-                    (clientX - d.startX) / model.windowWidth
-
-                newFraction =
-                    clamp 0.08 0.4 (d.startFraction - deltaFraction)
-            in
-            { model | rightSidebarFraction = newFraction }
-
-
 {-| A message to the main process: a tag naming the command, plus its fields.
 -}
 command : String -> List ( String, E.Value ) -> Cmd Msg
@@ -1772,18 +1648,8 @@ savePreferences prefs model =
 
 saveSplitsCmd : Model -> Cmd Msg
 saveSplitsCmd model =
-    command "saveSplits"
-        [ ( "sidebarFraction", E.float model.sidebarFraction )
-        , ( "editorFraction", E.float model.editorFraction )
-        , ( "rightSidebarFraction", E.float model.rightSidebarFraction )
-        , ( "leftSidebarVisible", E.bool model.leftSidebarVisible )
-        , ( "rightSidebarVisible", E.bool model.rightSidebarVisible )
-        , ( "outlineMaxLevel", E.int model.outlineMaxLevel )
-        , ( "leftToggleKey", encodeKeyBinding model.leftToggleKey )
-        , ( "rightToggleKey", encodeKeyBinding model.rightToggleKey )
-        , ( "layoutMode", E.string (layoutName model.layoutMode) )
-        , ( "layoutCycleKey", encodeKeyBinding model.layoutCycleKey )
-        ]
+    command "saveSplits" (Splits.encode (layoutName model.layoutMode) model)
+
 
 
 
@@ -1927,26 +1793,6 @@ pct f =
     String.fromFloat (f * 100) ++ "%"
 
 
-viewDivider : DragTarget -> Html Msg
-viewDivider target =
-    div
-        [ class "divider"
-        , attribute "data-testid"
-            (case target of
-                DraggingSidebar ->
-                    "divider-sidebar"
-
-                DraggingEditor ->
-                    "divider-editor"
-
-                DraggingRightSidebar ->
-                    "divider-outline"
-            )
-        , on "mousedown" (D.map (DividerMouseDown target) (D.field "clientX" D.float))
-        , onDoubleClick (DividerDoubleClick target)
-        ]
-        []
-
 
 view : Model -> Html Msg
 view model =
@@ -1979,7 +1825,7 @@ view model =
         leftSection =
             if model.leftSidebarVisible then
                 [ ( "sidebar", ( pct model.sidebarFraction, Html.map FileTreeMsg (Html.Lazy.lazy FileTree.view model.fileTree) ) )
-                , ( "sidebar-divider", ( "2px", viewDivider DraggingSidebar ) )
+                , ( "sidebar-divider", ( "2px", Splits.viewDivider DividerMouseDown DividerDoubleClick DraggingSidebar ) )
                 ]
 
             else
@@ -2005,7 +1851,7 @@ view model =
                   else
                     "0px"
                 , if model.layoutMode == Split then
-                    viewDivider DraggingEditor
+                    Splits.viewDivider DividerMouseDown DividerDoubleClick DraggingEditor
 
                   else
                     text ""
@@ -2024,7 +1870,7 @@ view model =
 
         rightSection =
             if model.rightSidebarVisible then
-                [ ( "outline-divider", ( "2px", viewDivider DraggingRightSidebar ) )
+                [ ( "outline-divider", ( "2px", Splits.viewDivider DividerMouseDown DividerDoubleClick DraggingRightSidebar ) )
                 , ( "outline", ( pct model.rightSidebarFraction, viewOutline model ) )
                 ]
 

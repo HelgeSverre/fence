@@ -12,6 +12,7 @@ import Frontmatter
 import Fuzz exposing (Fuzzer)
 import Json.Encode as E
 import Main
+import Splits
 import Markdown
 import Markdown.Parser
 import Parser
@@ -206,12 +207,12 @@ highlighterFuzzSuite =
 mainMsg : Fuzzer Main.Msg
 mainMsg =
     Fuzz.oneOf
-        [ Fuzz.map (Main.DividerMouseDown Main.DraggingSidebar) (Fuzz.floatRange -100 3000)
-        , Fuzz.map (Main.DividerMouseDown Main.DraggingEditor) (Fuzz.floatRange -100 3000)
-        , Fuzz.map (Main.DividerMouseDown Main.DraggingRightSidebar) (Fuzz.floatRange -100 3000)
+        [ Fuzz.map (Main.DividerMouseDown Splits.DraggingSidebar) (Fuzz.floatRange -100 3000)
+        , Fuzz.map (Main.DividerMouseDown Splits.DraggingEditor) (Fuzz.floatRange -100 3000)
+        , Fuzz.map (Main.DividerMouseDown Splits.DraggingRightSidebar) (Fuzz.floatRange -100 3000)
         , Fuzz.map Main.DividerMouseMove (Fuzz.floatRange -5000 5000)
         , Fuzz.constant Main.DividerMouseUp
-        , Fuzz.map Main.DividerDoubleClick (Fuzz.oneOfValues [ Main.DraggingSidebar, Main.DraggingEditor, Main.DraggingRightSidebar ])
+        , Fuzz.map Main.DividerDoubleClick (Fuzz.oneOfValues [ Splits.DraggingSidebar, Splits.DraggingEditor, Splits.DraggingRightSidebar ])
         , Fuzz.map2 Main.WindowResized (Fuzz.intRange 0 5000) (Fuzz.intRange 0 5000)
         , Fuzz.constant Main.ToggleLeftSidebar
         , Fuzz.constant Main.ToggleRightSidebar

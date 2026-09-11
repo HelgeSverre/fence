@@ -11,7 +11,11 @@ permissions:
 
 jobs:
   test-and-build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -32,4 +36,4 @@ jobs:
 
       - name: Electron smoke and performance test
         timeout-minutes: 5
-        run: xvfb-run -a bun run test:e2e
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a ' || '' }}bun run test:e2e

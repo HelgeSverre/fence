@@ -1,4 +1,5 @@
 # Fence — split-view markdown editor (Elm + Electron, built with Vite/bun).
+# Plain `bun run <script>` wrappers are kept for discoverability only; see package.json.
 
 [private]
 default:
@@ -35,17 +36,15 @@ test-e2e: setup
 build: setup
     bun run build
 
-# Package for macOS.
+# Package for macOS / Windows / Linux.
 [group('build')]
 build-mac: setup
     bun run build:mac
 
-# Package for Windows.
 [group('build')]
 build-win: setup
     bun run build:win
 
-# Package for Linux.
 [group('build')]
 build-linux: setup
     bun run build:linux
@@ -86,5 +85,5 @@ uninstall:
 
 # Re-copy sans woff2 files from @fontsource and regenerate static/styles/fonts.css.
 [group('build')]
-vendor-fonts: setup
+vendor-fonts:
     bun run vendor-fonts

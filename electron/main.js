@@ -5,7 +5,6 @@ const crypto = require("node:crypto");
 const { pathToFileURL, fileURLToPath } = require("node:url");
 const fsOps = require("./fs-ops");
 const { parseCliArgs, help: cliHelp } = require("./cli");
-const { autoUpdater } = require("electron-updater");
 
 // Tests point this at a temp dir so they never touch the real state.json,
 // recovery drafts or single-instance lock. Must run before the lock below.
@@ -876,7 +875,9 @@ registerIpc("fence:tree-context-menu", async (data) => {
 });
 
 registerIpc("fence:set-title", (data) => {
-  mainWindow.setTitle(requireString(data, "title", 512));
+  // Sent on every edit; the native call is only worth making on a change.
+  const title = requireString(data, "title", 512);
+  if (mainWindow.getTitle() !== title) mainWindow.setTitle(title);
 });
 
 registerIpc("fence:set-dirty", (data) => {
@@ -1012,9 +1013,15 @@ if (!gotLock) {
     buildMenu();
     createWindow();
 
-    // Check for updates in production (silent check, prompts on available update)
+    // Renderer never needs camera, notifications, clipboard-read or the rest.
+    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+    session.defaultSession.setPermissionCheckHandler(() => false);
+
+    // Check for updates in production (silent check, prompts on an available
+    // update). Loaded late: the module costs ~70 ms to require and the check
+    // hits the network, neither of which should compete with first paint.
     if (app.isPackaged) {
-      autoUpdater.checkForUpdatesAndNotify();
+      setTimeout(() => require("electron-updater").autoUpdater.checkForUpdatesAndNotify(), 10_000);
     }
   });
 

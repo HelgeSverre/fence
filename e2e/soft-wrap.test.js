@@ -115,7 +115,7 @@ describe("soft wrap", () => {
       await window.keyboard.press("ArrowDown");
       const before = (await rows(window))[0].end;
       await window.getByTestId("settings-button").click();
-      const editorSize = window.locator(".settings-dropdown-row").filter({ has: window.locator(".settings-dropdown-row-label", { hasText: /^Editor$/ }) }).locator("input");
+      const editorSize = window.getByTestId("editor-font-size-input");
       await editorSize.fill("22");
       await window.waitForFunction((oldEnd) => Number(document.querySelector(".veditor-row").dataset.sourceEnd) < oldEnd, before);
       const actual = await caret(window);

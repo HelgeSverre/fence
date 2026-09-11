@@ -14,7 +14,6 @@ import Browser.Dom
 import Browser.Events
 import Decoders exposing (..)
 import Editor
-import EditorLayout
 import FileTree
 import Find
 import Html exposing (..)
@@ -28,15 +27,15 @@ import Json.Encode as E
 import Markdown
 import Palette
 import Ports
-import Preferences exposing (Picker(..), Preferences, PreviewWidth(..))
+import Preferences exposing (Picker(..), Preferences)
 import Preview
+import PreviewSync exposing (SyncPoint, syncAnchors)
 import Settings exposing (RebindTarget(..))
 import Splits exposing (DragState, DragTarget(..))
-import PreviewSync exposing (SyncPoint, syncAnchors)
 import Process
 import Task
 import TextBuffer exposing (Cursor)
-import Tooltip exposing (Tooltip)
+import Tooltip
 import Types exposing (..)
 import VirtualEditor
 import Yaml

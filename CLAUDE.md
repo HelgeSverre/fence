@@ -17,17 +17,21 @@ Fence is a desktop Markdown editor built with **Elm + Electron**. It features a 
 
 ```
 src/              # Elm source code
-  Main.elm        # App entry, Model, update, view, drag/resize logic
-  Types.elm       # Core type definitions
+  Main.elm        # App entry, Model, update, view layout, port message handling
+  Types.elm       # Core type definitions, path helpers (baseName, dirName), KeyBinding
+  Decoders.elm    # Decoders for the payloads Electron sends over fromElectron
   Preferences.elm # Appearance settings record: defaults, decode/encode, picker option lists
+  Settings.elm    # Settings dropdown view (state stays on Main's model; Main maps its Msg)
+  Splits.elm      # Divider dragging, default pane fractions, the saveSplits record
   Editor.elm      # Editing: cursor, selection, undo, keyboard shortcuts
   VirtualEditor.elm # The editor's view: only visible rows
   TextBuffer.elm  # Pure line-array edits
-  Find.elm        # Find and replace over the open document
-  Palette.elm     # Quick-open and workspace search overlay
+  Find.elm        # Find and replace: model, update with OutCmd, find bar view
+  Palette.elm     # Quick-open and workspace search overlay: model, update with OutCmd, view
   FileTree.elm    # File browser with OutCmd side-effect pattern
   Markdown.elm    # Markdown parsing and custom renderer
   Preview.elm     # Preview pane
+  PreviewSync.elm # Editor-to-preview scroll sync and scroll-to-heading
   Frontmatter.elm # YAML frontmatter extraction
   Yaml.elm        # Custom YAML parser (elm/parser combinators)
   Icon.elm        # SVG icon components

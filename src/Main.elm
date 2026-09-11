@@ -1232,7 +1232,7 @@ startParse : Markdown.Cache Msg -> Model -> ( Model, Cmd Msg )
 startParse previous model =
     let
         ( progress, frontmatter ) =
-            Markdown.begin previous model.editor.content
+            Markdown.begin previous { path = model.editor.filePath, version = model.debounceGeneration } model.editor.content
     in
     continueParse firstParseBudget progress { model | frontmatter = frontmatter, counts = countsFor model.editor.content }
 
@@ -3218,12 +3218,10 @@ viewPicker model picker title tip =
                     )
                 )
              ]
-                ++ Tooltip.host (pickerId picker)
             )
-            [ span [] [ text title ]
+            [ span (Tooltip.host (pickerId picker)) [ text title, Tooltip.view (pickerId picker) tip ]
             , span [ class "settings-picker-value" ] [ text currentLabel ]
             , span [ class "settings-picker-chevron" ] [ Icon.chevronRight 12 ]
-            , Tooltip.view (pickerId picker) tip
             ]
         , if expanded then
             div [ class "settings-picker-body" ]
@@ -3301,20 +3299,27 @@ viewOption picker activeValue tabbable idx ( optionValue, displayName ) =
 
 viewToggleRow : Tooltip -> String -> String -> Bool -> (Bool -> Msg) -> Html Msg
 viewToggleRow tip rowLabel testId on toMsg =
-    label (class "settings-dropdown-row" :: Tooltip.host testId)
-        [ span [ class "settings-dropdown-row-label" ] [ text rowLabel ]
+    label [ class "settings-dropdown-row" ]
+        [ viewRowLabel rowLabel testId tip
         , input [ type_ "checkbox", checked on, onCheck toMsg, attribute "data-testid" testId ] []
-        , Tooltip.view testId tip
         ]
+
+
+{-| A row's label text, which is also where its tooltip lives: hovering the
+control itself should not explain it.
+-}
+viewRowLabel : String -> String -> Tooltip -> Html Msg
+viewRowLabel rowLabel name tip =
+    span (class "settings-dropdown-row-label" :: Tooltip.host name)
+        [ text rowLabel, Tooltip.view name tip ]
 
 
 {-| A settings row whose control is a group of text segments, one checked.
 -}
 viewSegmentedRow : Tooltip -> String -> String -> List ( a, String ) -> a -> (a -> Msg) -> Html Msg
 viewSegmentedRow tip rowLabel idPrefix items current toMsg =
-    div (class "settings-dropdown-row" :: Tooltip.host idPrefix)
-        [ span [ class "settings-dropdown-row-label" ] [ text rowLabel ]
-        , Tooltip.view idPrefix tip
+    div [ class "settings-dropdown-row" ]
+        [ viewRowLabel rowLabel idPrefix tip
         , div
             [ class "segmented"
             , attribute "role" "radiogroup"
@@ -3346,9 +3351,9 @@ viewSegmentedRow tip rowLabel idPrefix items current toMsg =
 -}
 viewOutlineLevelStepper : Int -> Html Msg
 viewOutlineLevelStepper level =
-    div (class "settings-dropdown-row" :: Tooltip.host "outline-depth")
-        [ span [ class "settings-dropdown-row-label" ] [ text "Max depth" ]
-        , Tooltip.view "outline-depth"
+    div [ class "settings-dropdown-row" ]
+        [ viewRowLabel "Max depth"
+            "outline-depth"
             { heading = "Outline depth"
             , body = "Deepest heading level listed in the outline: H1 shows only top-level headings, H6 shows all. Default: H3."
             , shortcut = Nothing
@@ -3389,9 +3394,8 @@ viewRebindRow tip binding target rebinding =
                 RebindRight ->
                     "rebind-right"
     in
-    div (class "settings-dropdown-row" :: Tooltip.host name)
-        [ span [ class "settings-dropdown-row-label" ] [ text tip.heading ]
-        , Tooltip.view name { tip | shortcut = Just (keyBindingLabel binding) }
+    div [ class "settings-dropdown-row" ]
+        [ viewRowLabel tip.heading name { tip | shortcut = Just (keyBindingLabel binding) }
         , button
             [ class "rebind-btn"
             , classList [ ( "capturing", isCapturing ) ]
@@ -3433,9 +3437,8 @@ type alias Stepper =
 
 viewStepper : Stepper -> Html Msg
 viewStepper stepper =
-    div (class "settings-dropdown-row" :: Tooltip.host stepper.testId)
-        [ span [ class "settings-dropdown-row-label" ] [ text stepper.label ]
-        , Tooltip.view stepper.testId stepper.tooltip
+    div [ class "settings-dropdown-row" ]
+        [ viewRowLabel stepper.label stepper.testId stepper.tooltip
         , div [ class "stepper" ]
             [ button
                 [ class "stepper-btn"

@@ -320,30 +320,29 @@ body {
   z-index: 101; /* above .settings-dropdown */
   pointer-events: none;
   display: grid;
-  gap: 3px;
+  gap: 4px;
   justify-items: start;
-  max-width: 260px;
-  padding: 6px 8px;
+  max-width: 280px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
+  background: var(--bg-base);
+  color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: var(--font-size-ui-sm);
+  font-size: var(--font-size-ui);
   font-weight: 400;
-  line-height: 1.35;
+  line-height: 1.4;
   text-align: left;
   white-space: normal;
   text-transform: none;
   letter-spacing: normal;
-  box-shadow: 0 4px 12px oklch(0 0 0 / 0.3);
+  box-shadow: 0 6px 16px oklch(0 0 0 / 0.45);
   opacity: 0;
   visibility: hidden;
   transition: opacity 80ms ease, visibility 0s 80ms;
 }
 
 .tip-heading {
-  color: var(--text-primary);
   font-weight: 600;
 }
 
@@ -355,17 +354,24 @@ body {
   font-size: 0.85em;
 }
 
-/* Hover waits; keyboard focus shows at once. :focus-visible keeps a mouse
-   click on a switch from popping its tooltip. */
-.tip-host:hover > .tip {
+/* Title bar buttons sit at the window's right edge: grow leftwards. (The
+   settings dropdown also lives in the title bar, so match the buttons.) */
+.icon-button.tip-host > .tip {
+  left: auto;
+  right: anchor(right);
+}
+
+/* Hover waits; keyboard focus on a row's control shows its label's tooltip at
+   once. A click adds .tips-dismissed on <html> (js/tooltips.js), which hides
+   tooltips until the pointer reaches another host. */
+:root:not(.tips-dismissed) .tip-host:hover > .tip,
+:root:not(.tips-dismissed) .settings-dropdown-row:has(:focus-visible) > .tip-host > .tip {
   opacity: 1;
   visibility: visible;
   transition: opacity 80ms ease 500ms, visibility 0s 500ms;
 }
 
-.tip-host:is(:focus-visible, :has(:focus-visible)) > .tip {
-  opacity: 1;
-  visibility: visible;
+:root:not(.tips-dismissed) .settings-dropdown-row:has(:focus-visible) > .tip-host > .tip {
   transition: none;
 }
 

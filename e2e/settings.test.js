@@ -154,8 +154,11 @@ test("hovering a setting shows its tooltip and title bar buttons describe themse
     const { window } = fence;
     await window.getByTestId("settings-button").click();
     await window.getByTestId("settings-dropdown").waitFor();
-    await window.getByTestId("pane-headers-toggle").hover();
+    const label = window.locator("#tip-pane-headers-toggle").locator("..");
+    await label.hover();
     await window.locator("#tip-pane-headers-toggle").waitFor({ state: "visible" });
+    await label.click();
+    await window.locator("#tip-pane-headers-toggle").waitFor({ state: "hidden" });
 
     const split = window.getByTestId("layout-split");
     assert.equal(await split.getAttribute("title"), null, "the native title must be gone");

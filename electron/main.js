@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard, session, protocol, net } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("node:crypto");
@@ -518,15 +518,39 @@ function requireString(payload, key, maxLength = 100 * 1024 * 1024) {
   return value;
 }
 
-ipcMain.handle("fence:read-image", async (event, payload) => {
-  if (!isTrustedIpcEvent(event)) return null;
+// Preview images: Elm renders `fence-image://local/?doc=<document>&src=<source>`
+// and Chromium streams the file from here, so no image bytes cross IPC.
+// Must be registered before app is ready.
+protocol.registerSchemesAsPrivileged([{ scheme: "fence-image", privileges: { standard: true, secure: true } }]);
+
+async function serveImage(request) {
+  const { searchParams } = new URL(request.url);
   try {
-    return await fsOps.readImage(requireString(payload, "documentPath", 32768), requireString(payload, "source", 32768));
+    const { imagePath } = await fsOps.resolveImagePath(searchParams.get("doc") ?? "", searchParams.get("src") ?? "");
+    // Elm adds a `v=<parse generation>` query so a re-rendered chunk gets a
+    // fresh URL: Blink reuses an image by URL for the document's lifetime.
+    return await net.fetch(pathToFileURL(imagePath).toString());
   } catch {
-    // A missing/unsupported image should not interrupt editing with a banner.
-    return null;
+    // A missing/unsupported image is a broken image, never a banner.
+    return new Response(null, { status: 404 });
   }
-});
+}
+
+// Exports must stand on their own: swap every preview image URL for the
+// file's data URL. The HTML is serialized DOM, so `&` arrives as `&amp;`.
+async function inlineImages(html) {
+  const pattern = /src="(fence-image:\/\/[^"]*)"/g;
+  const inlined = await Promise.all([...html.matchAll(pattern)].map(async ([, raw]) => {
+    try {
+      const url = new URL(raw.replace(/&amp;/g, "&"));
+      return await fsOps.readImage(url.searchParams.get("doc") ?? "", (url.searchParams.get("src") ?? "") + url.hash);
+    } catch {
+      return "";
+    }
+  }));
+  let i = 0;
+  return html.replace(pattern, () => `src="${inlined[i++]}"`);
+}
 
 function registerIpc(channel, handler) {
   ipcMain.on(channel, (event, payload = {}) => {
@@ -744,8 +768,8 @@ registerIpc("fence:search-workspace", async (data) => {
 // Build a standalone HTML document from the rendered preview: the renderer
 // hands over the pane's markup and the stylesheet text it is using, so the
 // export looks exactly like what is on screen, mermaid diagrams included.
-function exportDocument(data) {
-  const html = requireString(data, "html");
+async function exportDocument(data) {
+  const html = await inlineImages(requireString(data, "html"));
   const css = requireString(data, "css");
   const title = requireString(data, "title", 512);
   const theme = typeof data.theme === "string" ? data.theme : "";
@@ -797,7 +821,7 @@ async function saveExport(defaultName, extension, contents) {
 registerIpc("fence:export", async (data) => {
   const format = requireString(data, "format", 32);
   const name = requireString(data, "title", 512).replace(/\.[^.]*$/, "") || "document";
-  const document_ = exportDocument(data);
+  const document_ = await exportDocument(data);
 
   if (format === "pdf") {
     await saveExport(`${name}.pdf`, "pdf", await renderPdf(document_));
@@ -982,6 +1006,7 @@ if (!gotLock) {
       website: "https://github.com/HelgeSverre/fence",
     });
 
+    protocol.handle("fence-image", serveImage);
     buildMenu();
     createWindow();
 

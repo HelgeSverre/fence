@@ -339,9 +339,11 @@ async function unwatchDir(dirPath) {
   }
 }
 
-// Local preview images use data URLs so the same document works in both the
-// packaged file:// renderer and the development HTTP renderer.
-async function readImage(documentPath, source) {
+// Every check behind a preview image: the document and the image must both
+// canonicalize inside the workspace, the source must be a local relative or
+// file: reference, and the target a bounded regular file of a known type.
+// Serves both the fence-image:// protocol and export inlining.
+async function resolveImagePath(documentPath, source) {
   const document = await pathWithinWorkspace(documentPath);
   const url = new URL(source, pathToFileURL(document));
   if (url.protocol !== "file:") throw new Error("Not a local image");
@@ -352,15 +354,16 @@ async function readImage(documentPath, source) {
     ".avif": "image/avif", ".bmp": "image/bmp", ".ico": "image/x-icon",
   }[path.extname(imagePath).toLowerCase()];
   if (!mime) throw new Error("Unsupported image type");
-  const handle = await fs.promises.open(imagePath, "r");
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile() || stat.size > 32 * 1024 * 1024) throw new Error("Image exceeds 32 MiB or is not a file");
-    const bytes = await handle.readFile();
-    return `data:${mime};base64,${bytes.toString("base64")}${url.hash}`;
-  } finally {
-    await handle.close();
-  }
+  const stat = await fs.promises.stat(imagePath);
+  if (!stat.isFile() || stat.size > 32 * 1024 * 1024) throw new Error("Image exceeds 32 MiB or is not a file");
+  return { imagePath, mime, hash: url.hash };
+}
+
+// Inline copy of an image for exports, which must stand on their own.
+async function readImage(documentPath, source) {
+  const { imagePath, mime, hash } = await resolveImagePath(documentPath, source);
+  const bytes = await fs.promises.readFile(imagePath);
+  return `data:${mime};base64,${bytes.toString("base64")}${hash}`;
 }
 
 module.exports = {
@@ -376,6 +379,7 @@ module.exports = {
   readDir,
   readFile,
   readImage,
+  resolveImagePath,
   resolvePath,
   revisionForContent,
   setWorkspace,

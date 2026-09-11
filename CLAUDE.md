@@ -98,6 +98,10 @@ A virtualized editor written in Elm (`src/VirtualEditor.elm` view, `src/TextBuff
 
 Editor changes use a generation counter (50-400ms debounce by size) to discard stale parses. Documents are split at top-level headings (`Markdown.splitChunks`) and parsed chunk by chunk with a per-chunk cache; `Markdown.begin`/`step` render within a character budget and Main continues in `Frame` messages (one step every other animation frame) so a large file paints its first screen in ~150ms. 
 
+### Preview Images
+
+Elm renders local image sources as `fence-image://local/?doc=<document>&src=<source>` URLs. `electron/main.js` serves that scheme via `protocol.handle` after `fs-ops.resolveImagePath` confirms the file is inside the workspace, a known image type and under 32 MiB. Exports inline those URLs as data URLs in main (`inlineImages`).
+
 ### Themes
 
 CSS `data-theme` attribute switching. 5 themes: `catppuccin-mocha` (default), `catppuccin-latte`, `github-dark`, `vscode-dark`, `fleet-dark`. Colors use oklch for perceptual consistency.

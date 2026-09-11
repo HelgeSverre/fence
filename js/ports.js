@@ -1,4 +1,3 @@
-import { resolvePreviewImages } from "./preview-images.js";
 import { setupPreviewFind } from "./preview-find.js";
 import { setupLayout } from "./layout.js";
 import { reRenderMermaid, finishMermaidRendering } from "./mermaid-init.js";
@@ -123,7 +122,7 @@ async function exportPreview(data, app) {
   const pane = document.querySelector(".preview-content");
   if (!pane || !window.electronAPI || pane.dataset.documentPath !== data.path) return;
   const documentPath = pane.dataset.documentPath;
-  await resolvePreviewImages();
+  // Local images stay as fence-image:// URLs here; main inlines them.
   await finishMermaidRendering();
   if (!pane.isConnected || pane.dataset.documentPath !== documentPath) return;
   if (pane.closest(".preview-pane-wrap").dataset.renderGeneration !== String(data.generation)) {

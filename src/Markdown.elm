@@ -1,5 +1,6 @@
 module Markdown exposing
     ( Cache
+    , Document
     , OutlineEntry
     , Progress
     , begin
@@ -8,6 +9,7 @@ module Markdown exposing
     , headingLines
     , htmlChunks
     , isComplete
+    , noDocument
     , outline
     , parse
     , parseCached
@@ -28,6 +30,7 @@ import Markdown.Renderer exposing (Renderer)
 import Parser
 import Regex
 import SyntaxHighlight
+import Url
 import Yaml
 
 
@@ -66,6 +69,7 @@ type Progress msg
     = Progress
         { pending : List String
         , body : String
+        , imageSrc : String -> Maybe String
         , lookup : Cache msg
         , built : Cache msg
         , seen : Dict String Int
@@ -74,8 +78,24 @@ type Progress msg
         }
 
 
-begin : Cache msg -> String -> ( Progress msg, Maybe Yaml.Value )
-begin previous input =
+{-| Where relative image sources resolve from, and a version that changes
+with each parse so an image edited on disk is refetched when its chunk
+re-renders (Chromium reuses an image by URL for the page's lifetime; an
+unchanged chunk keeps its cached Html and URL, so it costs nothing).
+Cached chunks bake the path into their `src`, so the cache must not outlive
+the document (Main starts each file from `emptyCache`).
+-}
+type alias Document =
+    { path : Maybe String, version : Int }
+
+
+noDocument : Document
+noDocument =
+    { path = Nothing, version = 0 }
+
+
+begin : Cache msg -> Document -> String -> ( Progress msg, Maybe Yaml.Value )
+begin previous document input =
     let
         { frontmatter, body } =
             Frontmatter.extract input
@@ -83,6 +103,7 @@ begin previous input =
     ( Progress
         { pending = splitChunks body
         , body = body
+        , imageSrc = imageUrl document
         , lookup = previous
         , built = emptyCache
         , seen = Dict.empty
@@ -91,6 +112,48 @@ begin previous input =
         }
     , frontmatter
     )
+
+
+{-| The `src` for an image source written in the document. Remote and inline
+sources pass through; local ones become `fence-image://` URLs that the main
+process resolves and serves relative to the document. A `#fragment` stays
+outside the query so SVG fragment views keep working.
+-}
+imageUrl : Document -> String -> Maybe String
+imageUrl document source =
+    let
+        lower =
+            String.toLower source
+    in
+    if source == "" then
+        Nothing
+
+    else if String.startsWith "//" source then
+        Just ("https:" ++ source)
+
+    else if List.any (\prefix -> String.startsWith prefix lower) [ "http:", "https:", "data:", "blob:" ] then
+        Just source
+
+    else
+        case ( document.path, String.split "#" source ) of
+            ( Just doc, path :: fragment ) ->
+                Just
+                    ("fence-image://local/?doc="
+                        ++ Url.percentEncode doc
+                        ++ "&src="
+                        ++ Url.percentEncode path
+                        ++ "&v="
+                        ++ String.fromInt document.version
+                        ++ (if List.isEmpty fragment then
+                                ""
+
+                            else
+                                "#" ++ String.join "#" fragment
+                           )
+                    )
+
+            _ ->
+                Nothing
 
 
 isComplete : Progress msg -> Bool
@@ -167,10 +230,10 @@ step budget (Progress p) =
                                         r
 
                                     else
-                                        renderChunk chunk entry.blocks ids
+                                        renderChunk p.imageSrc chunk entry.blocks ids
 
                                 Nothing ->
-                                    renderChunk chunk entry.blocks ids
+                                    renderChunk p.imageSrc chunk entry.blocks ids
 
                         next =
                             Progress
@@ -202,7 +265,7 @@ wholeDocument (Progress p) =
             assignIds Dict.empty blocks
 
         rendered =
-            renderChunk p.body blocks ids
+            renderChunk p.imageSrc p.body blocks ids
     in
     Progress
         { p
@@ -213,15 +276,19 @@ wholeDocument (Progress p) =
         }
 
 
-renderChunk : String -> List Block.Block -> List String -> { ids : List String, html : List (Html msg), outline : List OutlineEntry }
-renderChunk source blocks ids =
+renderChunk : (String -> Maybe String) -> String -> List Block.Block -> List String -> { ids : List String, html : List (Html msg), outline : List OutlineEntry }
+renderChunk imageSrc source blocks ids =
+    let
+        base =
+            renderer imageSrc
+    in
     { ids = ids
     , html =
         -- Render block by block so each heading's renderer can close over its
         -- unique id (elm-markdown's heading callback has no position info).
         List.map2
             (\block headingId ->
-                Markdown.Renderer.render { customRenderer | heading = renderHeading headingId } [ block ]
+                Markdown.Renderer.render { base | heading = renderHeading headingId } [ block ]
             )
             blocks
             ids
@@ -243,7 +310,7 @@ parseCached : Cache msg -> String -> ( Cache msg, { frontmatter : Maybe Yaml.Val
 parseCached previous input =
     let
         ( progress, frontmatter ) =
-            begin previous input
+            begin previous noDocument input
 
         finished =
             runToEnd progress
@@ -757,8 +824,8 @@ voidTag =
         |> Maybe.withDefault Regex.never
 
 
-customRenderer : Renderer (Html msg)
-customRenderer =
+renderer : (String -> Maybe String) -> Renderer (Html msg)
+renderer imageSrc =
     { heading = renderHeading ""
     , paragraph = p []
     , blockQuote = blockquote [ class "md-blockquote" ]
@@ -783,7 +850,7 @@ customRenderer =
                 (\srcAttr altAttr widthAttr heightAttr _ ->
                     img
                         (List.filterMap identity
-                            [ Just (attribute "data-image-source" (Maybe.withDefault "" srcAttr))
+                            [ Maybe.andThen imageSrc srcAttr |> Maybe.map src
                             , Maybe.map alt altAttr
                             , Maybe.map (\w -> attribute "width" w) widthAttr
                             , Maybe.map (\h -> attribute "height" h) heightAttr
@@ -889,7 +956,7 @@ customRenderer =
     , strikethrough = \children -> del [] children
     , hardLineBreak = br [] []
     , link = renderLink
-    , image = renderImage
+    , image = renderImage imageSrc
     , unorderedList = renderUnorderedList
     , orderedList = renderOrderedList
     , codeBlock = renderCodeBlock
@@ -939,14 +1006,16 @@ renderLink link children =
             a [ href link.destination ] children
 
 
-renderImage : { alt : String, src : String, title : Maybe String } -> Html msg
-renderImage imageInfo =
-    case imageInfo.title of
-        Just title_ ->
-            img [ attribute "data-image-source" imageInfo.src, alt imageInfo.alt, title title_ ] []
-
-        Nothing ->
-            img [ attribute "data-image-source" imageInfo.src, alt imageInfo.alt ] []
+renderImage : (String -> Maybe String) -> { alt : String, src : String, title : Maybe String } -> Html msg
+renderImage imageSrc imageInfo =
+    img
+        (List.filterMap identity
+            [ Maybe.map src (imageSrc imageInfo.src)
+            , Just (alt imageInfo.alt)
+            , Maybe.map title imageInfo.title
+            ]
+        )
+        []
 
 
 renderUnorderedList : List (Block.ListItem (Html msg)) -> Html msg

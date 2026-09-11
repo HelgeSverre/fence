@@ -1,6 +1,5 @@
 import { Elm } from "../src/Main.elm";
 import { wirePorts } from "./ports.js";
-import { initPreviewImages } from "./preview-images.js";
 import { initMermaid } from "./mermaid-init.js";
 import { setupTooltips } from "./tooltips.js";
 import { applyPreferences, preloadFonts } from "./preferences.js";
@@ -22,4 +21,3 @@ preloadFonts([initialState.editorFont, initialState.uiFont].filter(Boolean));
 wirePorts(app, initialState);
 initMermaid();
 setupTooltips();
-initPreviewImages();

@@ -54,6 +54,7 @@ test("README-style PNGs load beside the file and missing images leave other imag
     });
     const imgs = fence.window.locator(".preview-content img");
     assert.equal(await imgs.nth(0).getAttribute("width"), "400");
+    assert.match(await imgs.nth(0).getAttribute("src"), /^fence-image:\/\/local\/\?doc=.*&src=screenshot\.png&v=\d+$/);
     assert.equal(await imgs.nth(3).getAttribute("src"), "https://example.com/logo.png");
     assert.equal(await imgs.nth(1).evaluate((img) => img.naturalWidth), 0);
     await setEditorContent(fence.window, '<img alt="Source removed">\n');

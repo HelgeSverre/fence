@@ -223,7 +223,7 @@ progressSuite =
             List.range 1 6 |> List.map (\i -> "# H" ++ String.fromInt i ++ "\n\n" ++ String.repeat 50 "word ") |> String.join "\n\n"
 
         ( fresh, _ ) =
-            Markdown.begin Markdown.emptyCache doc
+            Markdown.begin Markdown.emptyCache Nothing doc
 
         runToEnd p =
             if Markdown.isComplete p then
@@ -246,7 +246,7 @@ progressSuite =
                         Markdown.cache (runToEnd fresh)
 
                     ( again, _ ) =
-                        Markdown.begin cache (doc ++ " edited")
+                        Markdown.begin cache Nothing (doc ++ " edited")
                 in
                 Markdown.step 1 again |> Markdown.isComplete |> Expect.equal True
         , test "unchanged chunks keep the identical rendered value across a re-parse" <|
@@ -256,7 +256,7 @@ progressSuite =
                         runToEnd fresh
 
                     ( again, _ ) =
-                        Markdown.begin (Markdown.cache first) (doc ++ " edited")
+                        Markdown.begin (Markdown.cache first) Nothing (doc ++ " edited")
                 in
                 List.map2 (\a b -> a == b) (Markdown.htmlChunks first) (Markdown.htmlChunks (runToEnd again))
                     |> Expect.equal [ True, True, True, True, True, False ]
@@ -267,12 +267,12 @@ progressSuite =
                         runToEnd fresh
 
                     ( again, _ ) =
-                        Markdown.begin (Markdown.cache first) ("# H3\n\nintro\n\n" ++ doc)
+                        Markdown.begin (Markdown.cache first) Nothing ("# H3\n\nintro\n\n" ++ doc)
                 in
                 runToEnd again |> Markdown.outline |> List.map .id |> Expect.equal [ "h3", "h1", "h2", "h3-1", "h4", "h5", "h6" ]
         , test "an HTML document that cannot be split renders as one chunk" <|
             \_ ->
-                Markdown.begin Markdown.emptyCache "<div>\n\n# A\n\n# B\n\n</div>"
+                Markdown.begin Markdown.emptyCache Nothing "<div>\n\n# A\n\n# B\n\n</div>"
                     |> Tuple.first
                     |> runToEnd
                     |> Markdown.htmlChunks

@@ -6,6 +6,40 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-11
+
+### Added
+
+- Settings gains filterable pickers for the theme, the editor font and a new UI
+  font (13 bundled sans faces), preview width presets with a custom width, a
+  "use editor font in preview" toggle, a pane-headings toggle, and hover
+  tooltips on every row and title bar button.
+- Opening a file from the palette, a link, history or the CLI reveals it in the
+  sidebar.
+- The open-folder button lives in the title bar.
+
+### Changed
+
+- The sidebar lists folders that hold Markdown directly at once and confirms
+  deeper ones in the background, so large Markdown-free trees such as build
+  output never appear and never delay the listing.
+- Preview images are served through a `fence-image://` protocol instead of
+  base64 over IPC; exports still embed them.
+- Mermaid loads only when a document has a diagram, the update check waits
+  ten seconds after launch, and the session file is written after a second of
+  quiet instead of on every pause.
+- The bundled Iosevka font is subset to Latin, arrows and box drawing (984 KB
+  to 96 KB).
+- Electron fuses disable run-as-node, `NODE_OPTIONS` and inspect flags, and
+  enforce asar integrity; the renderer denies every permission request.
+
+### Fixed
+
+- A second `fence <file>` launch no longer crashes the running instance.
+- The Homebrew `fence` command returns the terminal after launching the app.
+- Title bar buttons and the preview width control share the same size and
+  focus ring as the other settings controls.
+
 ## [0.5.0] — 2026-09-10
 
 ### Added
@@ -274,7 +308,8 @@ First release. A split-view Markdown editor with a file browser, live
 preview, YAML frontmatter, syntax highlighting, several themes, and resizable
 panes.
 
-[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/HelgeSverre/fence/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/HelgeSverre/fence/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/HelgeSverre/fence/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/HelgeSverre/fence/compare/v0.4.0...v0.4.1

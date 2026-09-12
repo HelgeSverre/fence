@@ -99,6 +99,38 @@ describe("preview", () => {
     }
   });
 
+  test("a table wider than the pane scrolls instead of being clipped", async () => {
+    const row = (cell) => `| ${Array.from({ length: 30 }, (_, i) => `${cell}${i + 1}`).join(" | ")} |`;
+    const wide = [row("col"), `| ${Array.from({ length: 30 }, () => "---").join(" | ")} |`, row("v")].join("\n");
+    const fence = await launchFence();
+    try {
+      const { window } = fence;
+      await setEditorContent(window, `| A | B |\n| --- | --- |\n| 1 | 2 |\n\n${wide}\n`);
+      const preview = window.getByTestId("preview-content");
+      await preview.locator(".md-table-scroll").first().waitFor();
+      const state = await preview.evaluate((el) => {
+        const [narrow, wideTable] = el.querySelectorAll(".md-table-scroll");
+        wideTable.scrollLeft = 99999;
+        return {
+          narrowScrolls: narrow.scrollWidth > narrow.clientWidth + 1,
+          wideScrolls: wideTable.scrollWidth > wideTable.clientWidth + 1,
+          scrolledTo: Math.round(wideTable.scrollLeft),
+          maxScroll: Math.round(wideTable.scrollWidth - wideTable.clientWidth),
+          focusable: wideTable.getAttribute("tabindex"),
+          // the pane itself must not be dragged wider by the table
+          paneOverflows: el.scrollWidth > el.clientWidth + 1,
+        };
+      });
+      assert.equal(state.narrowScrolls, false, "a table that fits must not become a scroll region");
+      assert.equal(state.wideScrolls, true, "a wide table must scroll");
+      assert.equal(state.scrolledTo, state.maxScroll, "the full width must be reachable");
+      assert.equal(state.focusable, "0", "the scroll region must be keyboard reachable");
+      assert.equal(state.paneOverflows, false, "the pane must not overflow horizontally");
+    } finally {
+      await fence.close();
+    }
+  });
+
   test("mermaid blocks render to an SVG diagram", async () => {
     const fence = await launchFence();
     try {

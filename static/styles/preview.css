@@ -201,11 +201,81 @@
   vertical-align: middle;
 }
 
-/* Tables */
+/* Tables
+   A wide table scrolls inside its own container rather than overflowing the
+   pane, whose overflow-x is hidden and would simply clip the right-hand
+   columns away. scroll-state is what drives the edge shadows below. */
+.preview-content .md-table-scroll {
+  overflow-x: auto;
+  container-type: scroll-state;
+  /* Reaching the end of the table must not start scrolling the pane sideways. */
+  overscroll-behavior-x: contain;
+  margin: 1em 0;
+  /* Flex so the sticky edge shadows below can stretch to the table's height. */
+  display: flex;
+  align-items: stretch;
+}
+
+.preview-content .md-table-scroll:focus-visible {
+  outline: 2px solid var(--state-focus-ring);
+  outline-offset: 2px;
+}
+
 .preview-content .md-table {
   border-collapse: collapse;
-  width: 100%;
-  margin: 1em 0;
+  /* Fill the pane when the table is narrow, size to the content when it is
+     not: width: 100% would instead squeeze 40 columns into the pane. The
+     1px trim keeps the right-hand border inside the scrollport. */
+  min-width: calc(100% - 1px);
+  width: max-content;
+  max-width: none;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* Shadows on whichever edge still has columns behind it. Driven by
+   scroll-state queries, which are Chromium-only; Fence is Electron, so no
+   fallback is needed, and without support the shadows simply never appear
+   while scrolling still works.
+
+   Each shadow is a sticky flex item pinned to the edge of the scrollport,
+   pulled back over the table by a negative margin so it overlays a column
+   rather than taking layout space of its own. */
+.preview-content .md-table-scroll::before,
+.preview-content .md-table-scroll::after {
+  content: "";
+  position: sticky;
+  flex: 0 0 auto;
+  width: 18px;
+  align-self: stretch;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.preview-content .md-table-scroll::before {
+  left: 0;
+  margin-right: -18px;
+  background: linear-gradient(to right, oklch(0 0 0 / 0.6), transparent 85%);
+}
+
+.preview-content .md-table-scroll::after {
+  right: 0;
+  margin-left: -18px;
+  background: linear-gradient(to left, oklch(0 0 0 / 0.6), transparent 85%);
+}
+
+@container scroll-state(scrollable: left) {
+  .preview-content .md-table-scroll::before {
+    opacity: 1;
+  }
+}
+
+@container scroll-state(scrollable: right) {
+  .preview-content .md-table-scroll::after {
+    opacity: 1;
+  }
 }
 
 .preview-content .md-table th,

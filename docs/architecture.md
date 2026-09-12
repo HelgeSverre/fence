@@ -283,3 +283,29 @@ partial applications.
 - **`js/elm.js`** is a stale 860 KB build artifact from before
   `vite-plugin-elm` compiled `src/Main.elm` directly. Nothing imports it. It
   is still committed and is safe to delete.
+
+## Wide tables
+
+A table wider than the preview pane used to be clipped: the pane's
+`overflow-x` is `hidden`, so the right-hand columns simply became
+unreachable. `Markdown.scrollableTable` now wraps every table, from GFM
+syntax and from raw HTML alike, in its own horizontal scroll container.
+
+- The table is `width: max-content` with `min-width: calc(100% - 1px)`, so it
+  fills the pane when narrow and sizes to its content when wide rather than
+  squeezing 40 columns into the available space.
+- The wrapper carries `role="region"`, an accessible name and `tabindex="0"`.
+  A scroll container that answers only to the wheel leaves keyboard-only
+  readers unable to reach the columns at all.
+- `overscroll-behavior-x: contain` stops a scroll that reaches the end of the
+  table from continuing into the pane.
+- Edge shadows come from `@container scroll-state(scrollable: left|right)`, so
+  each side's shadow appears only while there is more table behind it. Scroll
+  state queries are Chromium-only, which is fine here: Fence ships its own
+  Chromium. Without support the shadows never appear and scrolling is
+  unaffected.
+
+Sticky headers are deliberately absent. Giving the wrapper `overflow-x` makes
+it the scroll container on both axes, which breaks `position: sticky` against
+the pane, so a sticky header row would need the pane itself to be the
+scroller.

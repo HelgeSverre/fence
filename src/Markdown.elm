@@ -1052,7 +1052,7 @@ renderer imageSrc =
             , simpleHtmlTag "li" (li [])
 
             -- Tables (raw HTML)
-            , simpleHtmlTag "table" (table [ class "md-table" ])
+            , simpleHtmlTag "table" scrollableTable
             , simpleHtmlTag "thead" (thead [])
             , simpleHtmlTag "tbody" (tbody [])
             , simpleHtmlTag "tr" (tr [])
@@ -1089,13 +1089,32 @@ renderer imageSrc =
     , orderedList = renderOrderedList
     , codeBlock = renderCodeBlock
     , thematicBreak = hr [ class "md-hr" ] []
-    , table = table [ class "md-table" ]
+    , table = scrollableTable
     , tableHeader = thead []
     , tableBody = tbody []
     , tableRow = tr []
     , tableCell = renderTableCell td
     , tableHeaderCell = renderTableCell th
     }
+
+
+{-| A table in its own horizontal scroll container, so one wide table scrolls
+instead of overflowing the pane and losing its right-hand columns.
+
+The wrapper is focusable and labelled: a scroll container that only responds
+to the wheel or a trackpad leaves keyboard-only readers unable to reach the
+columns at all.
+
+-}
+scrollableTable : List (Html msg) -> Html msg
+scrollableTable children =
+    div
+        [ class "md-table-scroll"
+        , attribute "role" "region"
+        , attribute "aria-label" "Table"
+        , attribute "tabindex" "0"
+        ]
+        [ table [ class "md-table" ] children ]
 
 
 renderHeading : String -> { level : Block.HeadingLevel, rawText : String, children : List (Html msg) } -> Html msg

@@ -13,3 +13,4 @@ static/fonts/*-latin-*.woff2
 
 # Playwright output
 test-results/
+.claude/

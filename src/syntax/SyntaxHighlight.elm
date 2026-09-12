@@ -4,6 +4,7 @@ module SyntaxHighlight exposing
     , Highlight(..), highlightLines
     , css, elm, javascript, python, sql, xml, json, nix, kotlin, go, noLang
     , rust, php, typescript, dart, fsharp, c, cpp
+    , yaml, toml, ruby, java, csharp, swift, scala
     , Theme, useTheme, monokai, gitHub, oneDark
     , ConsoleOptions, toConsole
     , CustomTransform, toCustom
@@ -51,6 +52,7 @@ import Html exposing (Html, text)
 import Parser
 import SyntaxHighlight.Language.C as C
 import SyntaxHighlight.Language.Css as Css
+import SyntaxHighlight.Language.CurlyBrace as CurlyBrace
 import SyntaxHighlight.Language.Elm as Elm
 import SyntaxHighlight.Language.Fsharp as Fsharp
 import SyntaxHighlight.Language.Go as Go
@@ -66,6 +68,9 @@ import SyntaxHighlight.Language.Rust as Rust
 import SyntaxHighlight.Language.Php as Php
 import SyntaxHighlight.Language.TypeScript as TypeScript
 import SyntaxHighlight.Language.Dart as Dart
+import SyntaxHighlight.Language.Ruby as Ruby
+import SyntaxHighlight.Language.Toml as Toml
+import SyntaxHighlight.Language.Yaml as Yaml
 import SyntaxHighlight.Line as Line exposing (Highlight, Line)
 import SyntaxHighlight.Style as Style
 import SyntaxHighlight.Theme as Theme
@@ -230,6 +235,62 @@ c =
 cpp : String -> Result (List Parser.DeadEnd) HCode
 cpp =
     C.toLines C.Cpp
+        >> Result.map HCode
+
+
+{-| Parse YAML syntax.
+-}
+yaml : String -> Result (List Parser.DeadEnd) HCode
+yaml =
+    Yaml.toLines
+        >> Result.map HCode
+
+
+{-| Parse TOML syntax.
+-}
+toml : String -> Result (List Parser.DeadEnd) HCode
+toml =
+    Toml.toLines
+        >> Result.map HCode
+
+
+{-| Parse Ruby syntax.
+-}
+ruby : String -> Result (List Parser.DeadEnd) HCode
+ruby =
+    Ruby.toLines
+        >> Result.map HCode
+
+
+{-| Parse Java syntax.
+-}
+java : String -> Result (List Parser.DeadEnd) HCode
+java =
+    CurlyBrace.toLines CurlyBrace.Java
+        >> Result.map HCode
+
+
+{-| Parse C# syntax.
+-}
+csharp : String -> Result (List Parser.DeadEnd) HCode
+csharp =
+    CurlyBrace.toLines CurlyBrace.CSharp
+        >> Result.map HCode
+
+
+{-| Parse Swift syntax.
+-}
+swift : String -> Result (List Parser.DeadEnd) HCode
+swift =
+    CurlyBrace.toLines CurlyBrace.Swift
+        >> Result.map HCode
+
+
+{-| Parse Scala syntax.
+-}
+scala : String -> Result (List Parser.DeadEnd) HCode
+scala =
+    CurlyBrace.toLines CurlyBrace.Scala
         >> Result.map HCode
 
 

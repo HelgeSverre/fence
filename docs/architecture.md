@@ -64,7 +64,7 @@ overscan). Two layers of caching sit on top:
   paragraph would re-tokenize the entire line once per visual row.
 
 ```mermaid
-flowchart LR
+flowchart TB
     A["visible row range<br/>VirtualEditor.visibleRange"] --> B{"soft wrap on?"}
     B -- no --> C["highlightLine per row"]
     B -- yes --> D["refreshTokens:<br/>indexTokens per source line,<br/>cached by line number"]

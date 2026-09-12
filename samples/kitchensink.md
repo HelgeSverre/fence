@@ -831,27 +831,37 @@ and `*italic*` for emphasis, and a fenced block for preformatted text.
 
 ## Sanitization Check
 
-Everything below is deliberately hostile. None of it should execute, load, or
-apply styling. Because these tags are not on the allowlist, they are shown as
-source here rather than embedded live — the point is that Fence has no code path
-that turns them into live elements.
+Everything below is deliberately hostile and is embedded **live**, not shown as
+source. The renderer recognizes these tags specifically in order to drop them:
+neither the tag nor its contents reach the DOM. Attributes are filtered too, so
+`style`, `onclick` and `onerror` are stripped even from allowed tags.
 
-**If a future change makes any of this render as a real element, that is a bug.**
+**If you see a dialog, an embedded page, a red background, red text, a form
+control, or any of the script text below appearing as visible content, that is a
+bug.** The correct result is that this section renders as nothing but its
+prose.
 
-```html
-<script>alert("XSS: script tag executed");</script>
-<iframe src="https://example.com" width="400" height="200"></iframe>
-<object data="https://example.com"></object>
-<embed src="https://example.com">
-<svg width="100" height="100"><circle cx="50" cy="50" r="40" fill="red" /></svg>
+<script>alert("XSS: script tag executed"); window.__xss = true;</script>
+
 <style>body { background: red !important; }</style>
-<form action="https://example.com" method="post">
-  <input type="text" name="probe"><button type="submit">Submit</button>
-</form>
-```
 
-Attributes are filtered too. These are stripped even on allowlisted tags, so the
-text below must not be red, huge, or clickable:
+<svg width="100" height="100"><circle cx="50" cy="50" r="40" fill="red" /></svg>
+
+<iframe src="https://example.com" width="400" height="200"></iframe>
+
+<object data="https://example.com"></object>
+
+<embed src="https://example.com">
+
+<form action="https://example.com" method="post">
+  <input type="text" name="probe" value="should not be an input">
+  <button type="submit">Submit</button>
+</form>
+
+<textarea>should not be editable</textarea>
+
+Attribute filtering on allowlisted tags. None of these should be red, huge, or
+clickable:
 
 <div style="color: red; font-size: 40px">This text should NOT be red or huge.</div>
 

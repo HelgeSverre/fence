@@ -191,11 +191,17 @@ renderSuite =
                     , \_ -> result |> Query.has [ Selector.text "<3ms", Selector.text "<4ms", Selector.text "<5ms", Selector.text "<6ms" ]
                     ]
                     ()
-        , test "unrecoverable HTML parsing displays the source rather than an empty preview" <|
+        , test "an unparseable segment keeps its source and the rest still renders" <|
             \_ ->
-                render "# Keep me\n\n<div>unclosed\n"
-                    |> Query.find [ Selector.tag "pre" ]
-                    |> Query.has [ Selector.text "# Keep me\n\n<div>unclosed\n" ]
+                let
+                    result =
+                        render "# Keep me\n\n<div>unclosed\n"
+                in
+                Expect.all
+                    [ \_ -> result |> Query.has [ Selector.tag "h1" ]
+                    , \_ -> result |> Query.find [ Selector.tag "pre" ] |> Query.has [ Selector.text "<div>unclosed" ]
+                    ]
+                    ()
         , test "parse recovery terminates with an isolated low surrogate" <|
             \_ ->
                 Markdown.parse "\nb👩‍💻]\u{2028}~🌈Zk\n\u{000D}\u{DE00}"
@@ -211,7 +217,7 @@ renderSuite =
             \_ ->
                 render "<2ms\n\n`multiline\n<6ms`\n"
                     |> Query.find [ Selector.tag "pre" ]
-                    |> Query.has [ Selector.text "<2ms\n\n`multiline\n<6ms`\n" ]
+                    |> Query.has [ Selector.text "`multiline\n<6ms`" ]
         ]
 
 

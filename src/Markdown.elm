@@ -256,10 +256,16 @@ wholeDocument : Progress msg -> Progress msg
 wholeDocument (Progress p) =
     let
         blocks =
-            -- A parse error is not an empty document. Keep the source visible
-            -- (as text, never raw HTML) if whole-document recovery also fails.
-            parseChunk p.body
-                |> Result.withDefault [ Block.CodeBlock { body = p.body, language = Nothing } ]
+            -- A parse error is not an empty document. Recover at the finest
+            -- granularity that parses: the whole body, else segment by
+            -- segment so only the segment the parser chokes on shows as
+            -- source (as text, never raw HTML).
+            case parseChunk p.body of
+                Ok parsed ->
+                    parsed
+
+                Err _ ->
+                    List.concatMap recoverSegment (splitSegments p.body)
 
         ( _, ids ) =
             assignIds Dict.empty blocks
@@ -276,6 +282,75 @@ wholeDocument (Progress p) =
         }
 
 
+{-| One blank-line-separated segment, parsed on its own. A segment the parser
+rejects keeps its source visible as a code block instead of taking the
+document with it.
+-}
+recoverSegment : String -> List Block.Block
+recoverSegment segment =
+    if String.trim segment == "" then
+        []
+
+    else
+        case parseChunk segment of
+            Ok blocks ->
+                blocks
+
+            Err _ ->
+                [ Block.CodeBlock { body = segment, language = Nothing } ]
+
+
+{-| Split on blank lines, keeping fenced code blocks intact so a blank line
+inside a fence does not cut it in half.
+-}
+splitSegments : String -> List String
+splitSegments source =
+    let
+        segmentLine line state =
+            let
+                fence =
+                    fenceOf line
+            in
+            case state.openFence of
+                Just ( char, len ) ->
+                    { state
+                        | current = line :: state.current
+                        , openFence =
+                            case fence of
+                                Just ( c, l ) ->
+                                    if c == char && l >= len && String.trim line == String.repeat l (String.fromChar c) then
+                                        Nothing
+
+                                    else
+                                        state.openFence
+
+                                Nothing ->
+                                    state.openFence
+                    }
+
+                Nothing ->
+                    if String.trim line == "" && not (List.isEmpty state.current) then
+                        { state
+                            | done = String.join "\n" (List.reverse state.current) :: state.done
+                            , current = []
+                        }
+
+                    else
+                        { state | current = line :: state.current, openFence = fence }
+
+        final =
+            String.lines source
+                |> List.foldl segmentLine { done = [], current = [], openFence = Nothing }
+    in
+    (if List.isEmpty final.current then
+        final.done
+
+     else
+        String.join "\n" (List.reverse final.current) :: final.done
+    )
+        |> List.reverse
+
+
 renderChunk : (String -> Maybe String) -> String -> List Block.Block -> List String -> { ids : List String, html : List (Html msg), outline : List OutlineEntry }
 renderChunk imageSrc source blocks ids =
     let
@@ -285,17 +360,36 @@ renderChunk imageSrc source blocks ids =
     { ids = ids
     , html =
         -- Render block by block so each heading's renderer can close over its
-        -- unique id (elm-markdown's heading callback has no position info).
+        -- unique id (elm-markdown's heading callback has no position info),
+        -- and so one block the renderer rejects (an HTML tag outside the
+        -- allowlist) degrades on its own instead of discarding the chunk.
         List.map2
             (\block headingId ->
                 Markdown.Renderer.render { base | heading = renderHeading headingId } [ block ]
+                    |> Result.withDefault [ unrenderableBlock block ]
             )
             blocks
             ids
-            |> List.foldr (Result.map2 (++)) (Ok [])
-            |> Result.withDefault [ pre [] [ text source ] ]
+            |> List.concat
     , outline = extractOutline blocks ids
     }
+
+
+{-| Placeholder for a block the renderer refused. Keeps the reader informed
+without ever putting the offending markup into the DOM.
+-}
+unrenderableBlock : Block.Block -> Html msg
+unrenderableBlock block =
+    let
+        label =
+            case block of
+                Block.HtmlBlock _ ->
+                    "Unsupported HTML element"
+
+                _ ->
+                    "Unsupported content"
+    in
+    div [ class "md-unrenderable", attribute "role" "note" ] [ text label ]
 
 
 {-| Whole-document convenience used by tests and small documents: run steps
@@ -877,6 +971,40 @@ renderer imageSrc =
                 |> Markdown.Html.withOptionalAttribute "href"
                 |> Markdown.Html.withOptionalAttribute "title"
 
+            -- Elements that must never reach the DOM. Dropping them here is
+            -- both the sanitizing answer and the robust one: without a
+            -- decoder the renderer rejects the block, and `script`/`style`/
+            -- `svg` in particular are raw-text elements that a document is
+            -- quite likely to contain.
+            , droppedHtmlTag "script"
+            , droppedHtmlTag "style"
+            , droppedHtmlTag "svg"
+            , droppedHtmlTag "math"
+            , droppedHtmlTag "iframe"
+            , droppedHtmlTag "frame"
+            , droppedHtmlTag "frameset"
+            , droppedHtmlTag "object"
+            , droppedHtmlTag "embed"
+            , droppedHtmlTag "applet"
+            , droppedHtmlTag "canvas"
+            , droppedHtmlTag "noscript"
+            , droppedHtmlTag "template"
+            , droppedHtmlTag "form"
+            , droppedHtmlTag "input"
+            , droppedHtmlTag "button"
+            , droppedHtmlTag "select"
+            , droppedHtmlTag "option"
+            , droppedHtmlTag "textarea"
+            , droppedHtmlTag "label"
+            , droppedHtmlTag "audio"
+            , droppedHtmlTag "video"
+            , droppedHtmlTag "source"
+            , droppedHtmlTag "track"
+            , droppedHtmlTag "link"
+            , droppedHtmlTag "meta"
+            , droppedHtmlTag "base"
+            , droppedHtmlTag "title"
+
             -- Void elements
             , Markdown.Html.tag "br" (\_ -> br [] [])
             , Markdown.Html.tag "hr" (\_ -> hr [] [])
@@ -1197,6 +1325,14 @@ renderTableCell element maybeAlignment children =
 simpleHtmlTag : String -> (List (Html msg) -> Html msg) -> Markdown.Html.Renderer (List (Html msg) -> Html msg)
 simpleHtmlTag tagName viewFn =
     Markdown.Html.tag tagName (\children -> viewFn children)
+
+
+{-| Recognized so the renderer does not reject the block, and rendered as
+nothing at all: neither the tag nor its contents reach the DOM.
+-}
+droppedHtmlTag : String -> Markdown.Html.Renderer (List (Html msg) -> Html msg)
+droppedHtmlTag tagName =
+    Markdown.Html.tag tagName (\_ -> text "")
 
 
 {-| Handler for block elements that support an optional `align` attribute.

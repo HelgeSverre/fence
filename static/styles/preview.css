@@ -355,3 +355,14 @@ dl.frontmatter-grid dd {
 .preview-chunk > :last-child {
   margin-bottom: 0;
 }
+
+/* A block the renderer refused (an HTML tag outside the allowlist). Shown in
+   place of the block so the rest of the document still renders. */
+.preview-content .md-unrenderable {
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: var(--font-size-ui-sm);
+  font-style: italic;
+}

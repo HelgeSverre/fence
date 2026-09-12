@@ -2978,23 +2978,19 @@ collapse the row.
 | a | | c |
 | a | b | c |
 
-### 6.5 A row of entirely empty cells — KNOWN BUG, shown as source
+### 6.5 A row of entirely empty cells — degrades to source
 
-A row whose cells are *all* empty currently breaks the parser, and the failure
-is not contained: the whole document falls back to rendering as plain source,
-so a single such row anywhere blanks the entire preview. GitHub renders it as
-an ordinary empty row.
+Row 2 below is empty in every column. A single empty cell is fine (see 6.4);
+an all-empty row is a parser bug, so this one table cannot render. The failure
+is contained: it shows as source and the rest of the file is unaffected.
 
-A single empty cell in a row is fine (see 6.4); it is specifically the
-all-empty row that fails. Both of these are therefore shown as source rather
-than live, so the rest of this file renders:
-
-```markdown
 | One | Two | Three |
 | --- | --- | --- |
 | filled | filled | filled |
 | | | |
 | filled | filled | filled |
+
+Two consecutive empty rows, same story:
 
 | One | Two |
 | --- | --- |
@@ -3002,15 +2998,6 @@ than live, so the rest of this file renders:
 | | |
 | | |
 | c | d |
-```
-
-Minimal reproduction:
-
-```markdown
-| A | B |
-| --- | --- |
-| | |
-```
 
 ### 6.6 Delimiter row count does not match the header
 
@@ -3539,23 +3526,20 @@ Nested disclosure elements, table in the inner one:
 
 </details>
 
-**KNOWN BUG.** The cells above deliberately spell the tag names out instead of
-writing them in backticks. A code span containing an HTML-looking tag, inside a
-table, inside a raw HTML block breaks parsing of the entire document: the HTML
-block scanner does not skip code spans, so the tag inside the backticks is
-counted as a real opening tag and the block never closes. The failure is not
-contained; the whole file falls back to plain source.
+A code span containing an HTML-looking tag, inside a table, inside a raw HTML
+block is a parser bug: the HTML block scanner does not skip code spans, so the
+tag in backticks is counted as a real opening tag and the block never closes.
+The block below therefore degrades to source, while everything around it stays
+rendered:
 
-```markdown
 <details>
-<summary>S</summary>
+<summary>Code span with a tag in it</summary>
 
 | A | B |
 | --- | --- |
 | x | after `<summary>` is required |
 
 </details>
-```
 
 The same code span outside a raw HTML block is fine:
 

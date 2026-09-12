@@ -59,8 +59,11 @@ static/
     syntax.css    # Code block syntax highlighting
   fonts/          # Bundled woff2: mono fonts hand-vendored, sans fonts via scripts/vendor-fonts.mjs
 build/icons/      # App icons (icns, ico, png)
-lib/              # Custom syntax highlighting library
 ```
+
+`src/syntax/` is a vendored fork of elm-syntax-highlight and is its own Elm
+source root (see `elm.json`), so its modules are `SyntaxHighlight.*`. See
+`docs/architecture.md` for how the two highlighting pipelines fit together.
 
 ## Development Commands
 

@@ -2,7 +2,7 @@
     "type": "application",
     "source-directories": [
         "src",
-        "lib/syntax-highlight"
+        "src/syntax"
     ],
     "elm-version": "0.19.2",
     "dependencies": {

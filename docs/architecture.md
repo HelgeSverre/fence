@@ -158,17 +158,21 @@ highlighters : Dict String Highlighter
 highlighters =
     [ ( [ "elm" ], SyntaxHighlight.elm )
     , ( [ "javascript", "js", "jsx", "mdx" ], SyntaxHighlight.javascript )
-    -- …17 entries, ~45 aliases total
+    -- …26 entries, 65 aliases total
     ]
         |> List.concatMap (\( names, fn ) -> List.map (\name -> ( name, fn )) names)
         |> Dict.fromList
 ```
 
-Seventeen highlighter functions cover about 45 fence aliases. Some aliases are
-lexically-close stand-ins rather than real support: `java`, `scala`, `swift`
-and `groovy` run on the Kotlin lexer, which gets strings, comments, numbers
-and brackets right but misses most keywords. Anything absent from the table
-(shell, YAML, Ruby, C#, …) renders as unstyled text.
+Twenty-six highlighter functions cover 65 fence aliases. One alias is still a
+lexically-close stand-in rather than real support: `groovy` runs on the Kotlin
+lexer, which gets strings, comments, numbers and brackets right but misses
+most keywords. Anything absent from the table (Lua, Haskell, R, Perl,
+PowerShell, Zig, Objective-C, …) renders as unstyled text.
+
+Some lexers serve more than one language through a dialect parameter that
+only swaps the keyword and type sets: `C.elm` covers C and C++, and
+`CurlyBrace.elm` covers Java, C#, Swift and Scala.
 
 ### Stage 3, the lexer
 

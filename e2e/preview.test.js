@@ -174,6 +174,48 @@ describe("preview", () => {
     }
   });
 
+  test("an expanded diagram zooms and pans, and resets", async () => {
+    const fence = await launchFence();
+    try {
+      const { window } = fence;
+      await setEditorContent(window, "```mermaid\nflowchart LR\n  A[One] --> B[Two] --> C[Three]\n```\n");
+      const preview = window.getByTestId("preview-content");
+      await preview.locator(".mermaid[data-state=rendered]").waitFor({ timeout: 20000 });
+      await preview.locator(".mermaid").hover();
+      await preview.locator(".mermaid-fullscreen-btn").click();
+      await window.waitForFunction(() => document.querySelector("#mermaid-fullscreen")?.matches(":popover-open"));
+
+      const view = () => window.evaluate(() => ({
+        transform: document.querySelector("#mermaid-fullscreen svg").style.transform,
+        label: document.querySelector(".mermaid-fullscreen-level").textContent,
+      }));
+      assert.deepEqual(await view(), { transform: "translate(0px, 0px) scale(1)", label: "100%" });
+
+      await window.locator(".mermaid-fullscreen-zoom[aria-label='Zoom in']").click();
+      assert.equal((await view()).label, "125%", "the zoom button must zoom in");
+
+      await window.keyboard.press("ArrowRight");
+      assert.match((await view()).transform, /translate\(-40px, 0px\)/, "arrow keys must pan");
+
+      await window.keyboard.press("0");
+      assert.deepEqual(await view(), { transform: "translate(0px, 0px) scale(1)", label: "100%" }, "0 must reset");
+
+      // Drag to pan, then double-click to reset.
+      const box = await window.locator(".mermaid-fullscreen-figure").boundingBox();
+      const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
+      await window.mouse.move(cx, cy);
+      await window.mouse.down();
+      await window.mouse.move(cx + 100, cy + 50, { steps: 5 });
+      await window.mouse.up();
+      assert.match((await view()).transform, /translate\(100px, 50px\)/, "dragging must pan by the cursor delta");
+
+      await window.mouse.dblclick(cx, cy);
+      assert.equal((await view()).transform, "translate(0px, 0px) scale(1)", "double-click must reset");
+    } finally {
+      await fence.close();
+    }
+  });
+
   test("mermaid blocks render to an SVG diagram", async () => {
     const fence = await launchFence();
     try {

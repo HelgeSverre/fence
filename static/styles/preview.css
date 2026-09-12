@@ -161,13 +161,13 @@
 /* Syntax highlighting token colors — mapped to theme CSS variables */
 .preview-content .elmsh,
 .preview-content .elmsh7 { color: var(--text-primary); }
-.preview-content .elmsh-comm { color: var(--text-muted); font-style: italic; }
-.preview-content .elmsh1,
-.preview-content .elmsh6 { color: var(--syntax-strong); }
+.preview-content .elmsh-comm { color: var(--code-comment, var(--text-muted)); font-style: italic; }
+.preview-content .elmsh1 { color: var(--code-number, var(--syntax-strong)); }
+.preview-content .elmsh6 { color: var(--code-keyword, var(--syntax-strong)); }
 .preview-content .elmsh2 { color: var(--syntax-code); }
 .preview-content .elmsh3,
-.preview-content .elmsh4 { color: var(--syntax-heading); }
-.preview-content .elmsh5 { color: var(--accent); }
+.preview-content .elmsh4 { color: var(--code-keyword, var(--syntax-heading)); }
+.preview-content .elmsh5 { color: var(--code-function, var(--accent)); }
 
 /* Blockquotes */
 .preview-content .md-blockquote {
@@ -499,6 +499,51 @@ dl.frontmatter-grid dd {
   justify-content: center;
   width: 100%;
   height: 100%;
+  overflow: hidden;
+  cursor: grab;
+  /* The drag gesture pans; it must not scroll or pinch-zoom the page. */
+  touch-action: none;
+}
+
+.mermaid-fullscreen-figure[data-dragging] {
+  cursor: grabbing;
+}
+
+.mermaid-fullscreen-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+
+.mermaid-fullscreen-zoom {
+  box-sizing: border-box;
+  min-width: var(--control-height);
+  height: calc(var(--control-height) - 4px);
+  padding: 0 6px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-ui-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mermaid-fullscreen-level {
+  min-width: 48px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mermaid-fullscreen-zoom:hover {
+  color: var(--text-primary);
+  background: var(--bg-overlay);
 }
 
 .mermaid-fullscreen-svg {
@@ -506,6 +551,9 @@ dl.frontmatter-grid dd {
   height: 100%;
   max-width: 100%;
   max-height: 100%;
+  /* Scale 1 is the fitted size; pan and zoom ride on top as a transform. */
+  transform-origin: center center;
+  will-change: transform;
 }
 
 .mermaid-fullscreen-close {

@@ -308,47 +308,33 @@ splitSegments source =
     let
         segmentLine line state =
             let
-                fence =
-                    fenceOf line
+                next =
+                    { state | openFence = afterFence line state.openFence }
             in
-            case state.openFence of
-                Just ( char, len ) ->
-                    { state
-                        | current = line :: state.current
-                        , openFence =
-                            case fence of
-                                Just ( c, l ) ->
-                                    if c == char && l >= len && String.trim line == String.repeat l (String.fromChar c) then
-                                        Nothing
+            if state.openFence == Nothing && String.trim line == "" && not (List.isEmpty state.current) then
+                { next | done = joinLines state.current :: state.done, current = [] }
 
-                                    else
-                                        state.openFence
-
-                                Nothing ->
-                                    state.openFence
-                    }
-
-                Nothing ->
-                    if String.trim line == "" && not (List.isEmpty state.current) then
-                        { state
-                            | done = String.join "\n" (List.reverse state.current) :: state.done
-                            , current = []
-                        }
-
-                    else
-                        { state | current = line :: state.current, openFence = fence }
+            else
+                { next | current = line :: state.current }
 
         final =
-            String.lines source
+            String.split "\n" source
                 |> List.foldl segmentLine { done = [], current = [], openFence = Nothing }
     in
-    (if List.isEmpty final.current then
-        final.done
+    List.reverse
+        (if List.isEmpty final.current then
+            final.done
 
-     else
-        String.join "\n" (List.reverse final.current) :: final.done
-    )
-        |> List.reverse
+         else
+            joinLines final.current :: final.done
+        )
+
+
+{-| Lines gathered in reverse, back into source text.
+-}
+joinLines : List String -> String
+joinLines =
+    List.reverse >> String.join "\n"
 
 
 renderChunk : (String -> Maybe String) -> String -> List Block.Block -> List String -> { ids : List String, html : List (Html msg), outline : List OutlineEntry }
@@ -691,60 +677,45 @@ splitChunks source =
         let
             splitLine line state =
                 let
-                    fence =
-                        fenceOf line
-                in
-                case state.openFence of
-                    Just ( char, len ) ->
+                    next =
                         { state
-                            | current = line :: state.current
-                            , prevBlank = False
-                            , openFence =
-                                case fence of
-                                    Just ( c, l ) ->
-                                        if c == char && l >= len && String.trim line == String.repeat l (String.fromChar c) then
-                                            Nothing
-
-                                        else
-                                            state.openFence
-
-                                    Nothing ->
-                                        state.openFence
+                            | openFence = afterFence line state.openFence
+                            , prevBlank = state.openFence == Nothing && String.isEmpty (String.trim line)
                         }
 
-                    Nothing ->
-                        if state.prevBlank && Regex.contains atxHeading line && not (List.isEmpty state.current) then
-                            let
-                                -- Blank lines go with the next chunk: a chunk that
-                                -- ends in blank lines can parse differently (e.g.
-                                -- an indented code block keeps them at end of input).
-                                ( blanks, body ) =
-                                    splitWhile (String.trim >> String.isEmpty) state.current
-                            in
-                            { state
-                                | done =
-                                    -- only blank lines so far: nothing to emit yet
-                                    if List.isEmpty body then
-                                        state.done
+                    startsChunk =
+                        state.openFence
+                            == Nothing
+                            && state.prevBlank
+                            && Regex.contains atxHeading line
+                            && not (List.isEmpty state.current)
+                in
+                if startsChunk then
+                    let
+                        -- Blank lines go with the next chunk: a chunk that
+                        -- ends in blank lines can parse differently (e.g.
+                        -- an indented code block keeps them at end of input).
+                        ( blanks, body ) =
+                            splitWhile (String.trim >> String.isEmpty) state.current
+                    in
+                    { next
+                        | done =
+                            -- only blank lines so far: nothing to emit yet
+                            if List.isEmpty body then
+                                state.done
 
-                                    else
-                                        String.join "\n" (List.reverse body) :: state.done
-                                , current = line :: blanks
-                                , prevBlank = False
-                                , openFence = fence
-                            }
+                            else
+                                joinLines body :: state.done
+                        , current = line :: blanks
+                    }
 
-                        else
-                            { state
-                                | current = line :: state.current
-                                , prevBlank = String.isEmpty (String.trim line)
-                                , openFence = fence
-                            }
+                else
+                    { next | current = line :: state.current }
 
             final =
                 List.foldl splitLine { done = [], current = [], prevBlank = True, openFence = Nothing } (String.split "\n" source)
         in
-        List.reverse (String.join "\n" (List.reverse final.current) :: final.done)
+        List.reverse (joinLines final.current :: final.done)
 
 
 splitWhile : (a -> Bool) -> List a -> ( List a, List a )
@@ -759,6 +730,35 @@ splitWhile pred items =
 
         [] ->
             ( [], [] )
+
+
+{-| Whether a line splitter is currently inside a fenced code block, and on
+which marker, so that a blank line or a heading inside a fence is content
+rather than a place to split.
+-}
+type alias OpenFence =
+    Maybe ( Char, Int )
+
+
+{-| The fence state after this line. A fence closes only on a line of at
+least as many of the same character and nothing else; outside a fence, any
+line that opens one puts us inside it.
+-}
+afterFence : String -> OpenFence -> OpenFence
+afterFence line open =
+    case ( open, fenceOf line ) of
+        ( Nothing, opened ) ->
+            opened
+
+        ( Just ( char, len ), Just ( closingChar, closingLen ) ) ->
+            if closingChar == char && closingLen >= len && String.trim line == String.repeat closingLen (String.fromChar closingChar) then
+                Nothing
+
+            else
+                open
+
+        ( Just _, Nothing ) ->
+            open
 
 
 {-| Opening fence marker (char, length) if this line starts one.

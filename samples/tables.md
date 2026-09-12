@@ -2965,7 +2965,6 @@ column and not push the table wider.
 | 1 | 2 | 3 |
 | 1 |
 | 1 | 2 | 3 | 4 | 5 |
-| | | |
 | 1 | 2 | 3 |
 
 ### 6.4 A single empty cell
@@ -2979,17 +2978,23 @@ collapse the row.
 | a | | c |
 | a | b | c |
 
-### 6.5 A row of entirely empty cells
+### 6.5 A row of entirely empty cells — KNOWN BUG, shown as source
 
-Row 2 is empty in every column. The row should still exist and occupy height.
+A row whose cells are *all* empty currently breaks the parser, and the failure
+is not contained: the whole document falls back to rendering as plain source,
+so a single such row anywhere blanks the entire preview. GitHub renders it as
+an ordinary empty row.
 
+A single empty cell in a row is fine (see 6.4); it is specifically the
+all-empty row that fails. Both of these are therefore shown as source rather
+than live, so the rest of this file renders:
+
+```markdown
 | One | Two | Three |
 | --- | --- | --- |
 | filled | filled | filled |
 | | | |
 | filled | filled | filled |
-
-Two consecutive empty rows:
 
 | One | Two |
 | --- | --- |
@@ -2997,6 +3002,15 @@ Two consecutive empty rows:
 | | |
 | | |
 | c | d |
+```
+
+Minimal reproduction:
+
+```markdown
+| A | B |
+| --- | --- |
+| | |
+```
 
 ### 6.6 Delimiter row count does not match the header
 
@@ -3121,10 +3135,28 @@ cell. It is here on purpose.
 | named entity | &amp; &lt; &gt; &quot; &nbsp; | `& < > " ` and a hard space |
 | numeric entity | &#65; &#x42; &#8212; | `A`, `B`, an em dash |
 | pipe entity | &#124; | a literal pipe, not a cell break |
-| raw span | <span style="color: crimson">red text</span> | red, if raw HTML is allowed |
-| raw code | <code>html code element</code> | monospace |
-| raw bold | <strong>strong</strong> and <em>em</em> | heavy and slanted |
-| script | <script>alert(1)</script> | must **not** execute |
+| raw span | <span class="demo">span with a class</span> | plain text, class kept |
+| raw break | first<br>second | two lines in one cell |
+| raw link | <a href="https://example.com">anchor tag</a> | a working link |
+
+Only tags on Fence's allowlist (`a` `img` `br` `hr` `wbr` `details` `summary`
+`p` `h1`-`h6` `div` `span` `section`) render as HTML. Anything else makes the
+renderer fail for the whole chunk, which blanks the section, so the examples
+below are shown as source rather than embedded live:
+
+```html
+| raw code   | <code>html code element</code>          | not supported |
+| raw bold   | <strong>strong</strong> <em>em</em>      | not supported |
+| raw table  | <table><tr><td>cell</td></tr></table>    | not supported |
+| script     | <script>alert(1)</script>                | never executes |
+```
+
+Inline `style` attributes are stripped even on allowlisted tags, so this cell's
+text must not be red:
+
+| Kind | Cell | Expected |
+| :--- | :--- | :--- |
+| style attr | <span style="color: crimson">not red</span> | plain body text |
 
 ### 7.7 Cells that look like other Markdown
 
@@ -3485,12 +3517,12 @@ And a table immediately after the closing fence, with one blank line:
 
 | Hidden | Until expanded |
 | --- | --- |
-| the blank line | after `<summary>` is required |
+| the blank line | after the summary tag is required |
 | without it | the Markdown stays raw |
 
 </details>
 
-Nested `<details>`, table in the inner one:
+Nested disclosure elements, table in the inner one:
 
 <details>
 <summary>Outer</summary>
@@ -3500,12 +3532,36 @@ Nested `<details>`, table in the inner one:
 
 | Depth | Element |
 | ---: | :--- |
-| 1 | outer `<details>` |
-| 2 | inner `<details>` |
+| 1 | outer disclosure |
+| 2 | inner disclosure |
 
 </details>
 
 </details>
+
+**KNOWN BUG.** The cells above deliberately spell the tag names out instead of
+writing them in backticks. A code span containing an HTML-looking tag, inside a
+table, inside a raw HTML block breaks parsing of the entire document: the HTML
+block scanner does not skip code spans, so the tag inside the backticks is
+counted as a real opening tag and the block never closes. The failure is not
+contained; the whole file falls back to plain source.
+
+```markdown
+<details>
+<summary>S</summary>
+
+| A | B |
+| --- | --- |
+| x | after `<summary>` is required |
+
+</details>
+```
+
+The same code span outside a raw HTML block is fine:
+
+| Works | Because |
+| --- | --- |
+| `<summary>` in a cell | there is no enclosing HTML block to confuse |
 
 ### 9.7 A table between two paragraphs with no blank lines
 

@@ -309,9 +309,7 @@ rangeRects cls metrics fragments ( s, e ) =
 
                     cells col =
                         -- Scan only this fragment, even near the end of a huge paragraph.
-                        EditorLayout.expandTabs segment.startCell (String.slice segment.start col fragment.text)
-                            |> String.toList
-                            |> List.length
+                        TextBuffer.cellsIn segment.startCell (String.slice segment.start col fragment.text)
 
                     startCell =
                         cells start

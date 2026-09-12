@@ -73,6 +73,29 @@ suite =
                 \_ -> TB.visualColumn "a\tbc\td" 6 |> Expect.equal 7
             , test "columnFromVisual picks the nearest boundary" <|
                 \_ -> ( TB.columnFromVisual "\tabc" 1, TB.columnFromVisual "\tabc" 2, TB.columnFromVisual "\tabc" 9 ) |> Expect.equal ( 1, 1, 4 )
+            , test "a combining mark takes no cells" <|
+                \_ -> ( TB.visualColumn "e\u{0301}x" 2, TB.visualColumn "e\u{0301}x" 3 ) |> Expect.equal ( 1, 2 )
+            , test "zalgo stacks stay one cell wide" <|
+                \_ -> TB.visualColumn "a\u{0300}\u{0301}\u{0302}\u{0303}b" 6 |> Expect.equal 2
+            , test "CJK and fullwidth Latin take two cells each" <|
+                \_ -> ( TB.visualColumn "\u{4E16}\u{754C}" 2, TB.visualColumn "\u{FF21}\u{FF22}" 2 ) |> Expect.equal ( 4, 4 )
+            , test "an emoji takes two cells" <|
+                \_ -> TB.visualColumn "\u{1F600}x" 3 |> Expect.equal 3
+            , test "a ZWJ family is one two-cell glyph" <|
+                \_ ->
+                    TB.visualColumn "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}x" 9 |> Expect.equal 3
+            , test "a flag is one two-cell glyph, and two flags are four" <|
+                \_ ->
+                    ( TB.visualColumn "\u{1F1F3}\u{1F1F4}" 4
+                    , TB.visualColumn "\u{1F1F3}\u{1F1F4}\u{1F1F8}\u{1F1EA}" 8
+                    )
+                        |> Expect.equal ( 2, 4 )
+            , test "a variation selector takes no cells" <|
+                \_ -> TB.visualColumn "\u{2764}\u{FE0F}x" 3 |> Expect.equal 2
+            , test "cellsIn measures tabs from the cell it starts at" <|
+                \_ -> ( TB.cellsIn 0 "\tx", TB.cellsIn 1 "\tx" ) |> Expect.equal ( 3, 2 )
+            , test "lineCells matches cellsIn for ascii and wide text" <|
+                \_ -> ( TB.lineCells "abc", TB.lineCells "a\t\u{4E16}" ) |> Expect.equal ( 3, 4 )
             , fuzz2 (Fuzz.listOfLengthBetween 0 12 (Fuzz.oneOfValues [ "a", "\t", "b" ]) |> Fuzz.map String.concat) (Fuzz.intRange 0 12) "columnFromVisual inverts visualColumn at every column" <|
                 \line col0 ->
                     let
@@ -147,7 +170,7 @@ suite =
             , test "delete forward deletes it whole" <|
                 \_ -> TB.deleteForward (at 0 1) (TB.fromString "a\u{1F600}b") |> Tuple.mapFirst TB.toString |> Expect.equal ( "ab", at 0 1 )
             , test "clicking never lands between the halves" <|
-                \_ -> List.map (TB.columnFromVisual "a\u{1F600}b") (List.range 0 4) |> Expect.equal [ 0, 1, 3, 4, 4 ]
+                \_ -> List.map (TB.columnFromVisual "a\u{1F600}b") (List.range 0 4) |> Expect.equal [ 0, 1, 3, 3, 4 ]
             , test "a stale cursor is snapped off the middle of one" <|
                 \_ -> TB.clampCursor (TB.fromString "a\u{1F600}b") (at 0 2) |> Expect.equal (at 0 1)
             , test "word selection measures in columns, not characters" <|

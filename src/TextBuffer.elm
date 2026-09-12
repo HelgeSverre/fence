@@ -1,9 +1,14 @@
 module TextBuffer exposing
     ( Cursor
+    , WidthState
+    , advance
     , backspace
+    , cellsIn
     , clampCursor
     , columnFromVisual
     , cursorAt
+    , lineCells
+    , widthStart
     , deleteForward
     , deleteLines
     , deleteRange
@@ -43,11 +48,13 @@ by `charUnits` and never lands between the halves of a surrogate pair. Slicing
 there would split the character into two lone surrogates and destroy it.
 
 `visualColumn` maps a column to rendered cells, where a tab expands to
-`tabWidth`. Cells assume one column per character; a double-width glyph still
-counts as one, so the caret can sit half a glyph off next to wide emoji.
+`tabWidth` and every other code point is measured by `advance`, a wcwidth-style
+model: 0 cells for combining marks and zero-width joiners, 2 for East Asian
+wide and fullwidth characters, 1 otherwise.
 -}
 
 import Array exposing (Array)
+import Regex
 
 
 type alias Cursor =
@@ -414,20 +421,139 @@ tabWidth =
     2
 
 
+{-| Carried across an `advance` fold: the previous code point, and whether it
+was a regional indicator still waiting for its pair.
+-}
+type WidthState
+    = WidthState Char Bool
+
+
+widthStart : WidthState
+widthStart =
+    WidthState ' ' False
+
+
+{-| Cells one code point advances, given the cell it starts at (tabs run to the
+next tab stop) and the state left by the code point before it.
+
+Zero-width joiners and combining marks take no cells, and the code point right
+after a joiner takes none either, so a ZWJ cluster measures as the single
+2-cell glyph it renders as. A pair of regional indicators is one flag, so the
+second of the pair takes none.
+
+-}
+advance : WidthState -> Int -> Char -> ( Int, WidthState )
+advance (WidthState prev riOpen) cell char =
+    let
+        code =
+            Char.toCode char
+
+        plain n =
+            ( n, WidthState char False )
+    in
+    if char == '\t' then
+        plain (tabWidth - modBy tabWidth cell)
+
+    else if Char.toCode prev == 0x200D then
+        plain 0
+
+    else if code >= 0x0001F1E6 && code <= 0x0001F1FF then
+        if riOpen then
+            plain 0
+
+        else
+            ( 2, WidthState char True )
+
+    else if isZeroWidth code then
+        plain 0
+
+    else if isWide code then
+        plain 2
+
+    else
+        plain 1
+
+
+{-| Combining marks (the common Mn/Me ranges) and the zero-width formatting
+characters.
+-}
+isZeroWidth : Int -> Bool
+isZeroWidth code =
+    (code >= 0x0300 && code <= 0x036F)
+        || (code >= 0x1AB0 && code <= 0x1AFF)
+        || (code >= 0x1DC0 && code <= 0x1DFF)
+        || (code >= 0x20D0 && code <= 0x20FF)
+        || (code >= 0x200B && code <= 0x200D)
+        || (code == 0x2060)
+        || (code >= 0xFE00 && code <= 0xFE0F)
+        || (code >= 0xFE20 && code <= 0xFE2F)
+
+
+{-| East Asian Wide and Fullwidth, plus the emoji planes.
+-}
+isWide : Int -> Bool
+isWide code =
+    if code < 0x1100 then
+        False
+
+    else
+        (code <= 0x115F)
+            || (code >= 0x2E80 && code <= 0x303E)
+            || (code >= 0x3041 && code <= 0x33FF)
+            || (code >= 0x3400 && code <= 0x4DBF)
+            || (code >= 0x4E00 && code <= 0x9FFF)
+            || (code >= 0xA000 && code <= 0xA4CF)
+            || (code >= 0xAC00 && code <= 0xD7A3)
+            || (code >= 0xF900 && code <= 0xFAFF)
+            || (code >= 0xFE30 && code <= 0xFE6F)
+            || (code >= 0xFF00 && code <= 0xFF60)
+            || (code >= 0xFFE0 && code <= 0xFFE6)
+            || (code >= 0x00016FE0 && code <= 0x00016FFF)
+            || (code >= 0x00017000 && code <= 0x0001B2FF)
+            || (code >= 0x0001F300 && code <= 0x0001F64F)
+            || (code >= 0x0001F680 && code <= 0x0001F6FF)
+            || (code >= 0x0001F900 && code <= 0x0001F9FF)
+            || (code >= 0x0001FA70 && code <= 0x0001FAFF)
+            || (code >= 0x00020000 && code <= 0x0003FFFD)
+
+
+{-| Cells `text` occupies when it starts at cell `start`.
+-}
+cellsIn : Int -> String -> Int
+cellsIn start text =
+    let
+        step char ( cell, state ) =
+            let
+                ( cells, next ) =
+                    advance state cell char
+            in
+            ( cell + cells, next )
+    in
+    String.foldl step ( start, widthStart ) text |> Tuple.first |> (\end -> end - start)
+
+
+nonAsciiOrTab : Regex.Regex
+nonAsciiOrTab =
+    Regex.fromString "[^\\x00-\\x7f]|\\t" |> Maybe.withDefault Regex.never
+
+
+{-| Cells a whole line occupies. Plain ASCII, the common case by far, is
+measured natively instead of a code point at a time.
+-}
+lineCells : String -> Int
+lineCells line =
+    if Regex.contains nonAsciiOrTab line then
+        cellsIn 0 line
+
+    else
+        String.length line
+
+
 {-| Rendered cell offset of a code-unit column, with tabs expanding to the
 next multiple of `tabWidth` (matches `tab-size: 2`). -}
 visualColumn : String -> Int -> Int
 visualColumn line col =
-    String.left col line
-        |> String.foldl
-            (\c acc ->
-                if c == '\t' then
-                    acc + tabWidth - modBy tabWidth acc
-
-                else
-                    acc + 1
-            )
-            0
+    cellsIn 0 (String.left col line)
 
 
 {-| Inverse of `visualColumn`: the column whose cell is at or just before the
@@ -436,19 +562,15 @@ visual offset, rounded to the nearest character boundary.
 columnFromVisual : String -> Int -> Int
 columnFromVisual line target =
     let
-        step char ( col, vis, found ) =
+        step char ( col, vis, ( state, found ) ) =
             case found of
                 Just _ ->
-                    ( col, vis, found )
+                    ( col, vis, ( state, found ) )
 
                 Nothing ->
                     let
-                        cells =
-                            if char == '\t' then
-                                tabWidth - modBy tabWidth vis
-
-                            else
-                                1
+                        ( cells, next ) =
+                            advance state vis char
 
                         units =
                             charUnits char
@@ -456,23 +578,25 @@ columnFromVisual line target =
                     if vis + cells > target then
                         ( col
                         , vis
-                        , Just
-                            (if target - vis >= (cells + 1) // 2 then
-                                col + units
+                        , ( next
+                          , Just
+                                (if target - vis >= (cells + 1) // 2 then
+                                    col + units
 
-                             else
-                                col
-                            )
+                                 else
+                                    col
+                                )
+                          )
                         )
 
                     else
-                        ( col + units, vis + cells, Nothing )
+                        ( col + units, vis + cells, ( next, Nothing ) )
     in
-    case String.foldl step ( 0, 0, Nothing ) line of
-        ( _, _, Just col ) ->
+    case String.foldl step ( 0, 0, ( widthStart, Nothing ) ) line of
+        ( _, _, ( _, Just col ) ) ->
             col
 
-        ( col, _, Nothing ) ->
+        ( col, _, ( _, Nothing ) ) ->
             col
 
 

@@ -38,7 +38,7 @@ suite =
         , test "tabs retain logical tab stops and Unicode offsets never split a pair" <|
             \_ ->
                 Expect.equal
-                    ( [ "abc", "\td" ], [ "a😀", "b😀", "c" ], " a b" )
+                    ( [ "abc", "\td" ], [ "a", "😀", "b", "😀", "c" ], " a b" )
                     ( parts 3 "abc\td", parts 2 "a😀b😀c", Layout.expandTabs 1 "\ta\tb" )
         , test "one-column panes make progress even with a two-cell tab" <|
             \_ -> parts 1 "\t😀x" |> Expect.equal [ "\t", "😀", "x" ]

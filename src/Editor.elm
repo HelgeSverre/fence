@@ -1065,12 +1065,12 @@ widestLine model lines newContent =
         longestOf lines
 
     else
-        Basics.max model.maxLineLength (String.length (Array.get model.cursor.line lines |> Maybe.withDefault ""))
+        Basics.max model.maxLineLength (TextBuffer.lineCells (Array.get model.cursor.line lines |> Maybe.withDefault ""))
 
 
 longestOf : Array String -> Int
 longestOf =
-    Array.foldl (\line widest -> Basics.max widest (String.length line)) 0
+    Array.foldl (\line widest -> Basics.max widest (TextBuffer.lineCells line)) 0
 
 
 restore : Snapshot -> Model -> Model

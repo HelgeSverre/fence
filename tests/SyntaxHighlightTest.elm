@@ -69,6 +69,8 @@ languages =
     , ( "php", SH.php, "<?php\n// c\nfunction f(int $a): string { return \"v=$a\" . 'x'; }\n" )
     , ( "dart", SH.dart, "void main() { /* c */ final s = 'a$b'; print(\"${s}\"); }\n" )
     , ( "fsharp", SH.fsharp, "let f (a: int) = // c\n    sprintf \"%d\" a |> printfn \"%s\"\n(* block *)\n" )
+    , ( "c", SH.c, "#include <stdio.h>\n// c\ntypedef struct { uint32_t len; } Row;\nint main(void) {\n    /* block */\n    const char *s = \"a\\\"b\";\n    char c = '\\n';\n    return 0x1F + 10ULL;\n}\n" )
+    , ( "cpp", SH.cpp, "#include <string>\nnamespace ns {\nclass Widget final : public Base {\npublic:\n    explicit Widget(int n) noexcept : n_(n) {}\nprivate:\n    int n_ = 0;\n};\n}\n" )
     , ( "noLang", SH.noLang, "just some <text> with \"quotes\" and 'ticks' // and slashes\n" )
     ]
 
@@ -164,6 +166,44 @@ suite =
                         |> List.filter (\( k, t ) -> List.member t [ "select", "from" ] && k /= "default")
                         |> List.length
                         |> Expect.equal 2
+            , test "c keywords, types and preprocessor directives are styled" <|
+                \_ ->
+                    SH.c "#include <stdio.h>\ntypedef struct { uint32_t len; } Row;"
+                        |> Result.map tagged
+                        |> Result.withDefault []
+                        |> (\frags ->
+                                Expect.all
+                                    [ \_ -> List.member ( "style3", "#include <stdio.h>" ) frags |> Expect.equal True
+                                    , \_ -> frags |> List.filter (\( k, t ) -> (t == "typedef" || t == "struct") && k /= "default") |> List.length |> Expect.equal 2
+
+                                    -- built-in types and the `_t` typedef convention are recognized...
+                                    , \_ -> List.member ( "style4", "uint32_t" ) frags |> Expect.equal True
+
+                                    -- ...but an arbitrary user type name is not (no semantic analysis).
+                                    -- Adjacent same-style tokens merge into one fragment, so "Row" shows
+                                    -- up inside a larger default-styled run rather than on its own.
+                                    , \_ -> frags |> List.filter (\( k, t ) -> String.contains "Row" t && k == "default") |> List.isEmpty |> Expect.equal False
+                                    ]
+                                    ()
+                           )
+            , test "cpp-only keywords are styled in cpp but not in c" <|
+                \_ ->
+                    Expect.all
+                        [ \_ ->
+                            SH.cpp "class Widget final {};"
+                                |> Result.map tagged
+                                |> Result.withDefault []
+                                |> List.filter (\( k, t ) -> t == "class" && k /= "default")
+                                |> List.isEmpty
+                                |> Expect.equal False
+                        , \_ ->
+                            SH.c "class Widget final {};"
+                                |> Result.map tagged
+                                |> Result.withDefault []
+                                |> List.filter (\( k, t ) -> t == "class" && k /= "default")
+                                |> Expect.equal []
+                        ]
+                        ()
             , test "line count matches the source" <|
                 \_ ->
                     SH.javascript "a\nb\nc"

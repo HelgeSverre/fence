@@ -74,6 +74,31 @@ describe("preview", () => {
     }
   });
 
+  test("C and C++ fenced code blocks are syntax highlighted", async () => {
+    const fence = await launchFence();
+    try {
+      const { window } = fence;
+      await setEditorContent(
+        window,
+        "```c\n#include <stdio.h>\ntypedef struct { uint32_t len; } Row;\nint main(void) { return 0; }\n```\n\n" +
+          "```cpp\nclass Widget final : public Base {\npublic:\n    explicit Widget(int n) noexcept : n_(n) {}\n};\n```\n",
+      );
+      const blocks = window.getByTestId("preview-content").locator(".md-code-block");
+      await blocks.first().waitFor();
+      assert.equal(await blocks.count(), 2);
+      // A highlighter that recognized nothing (the old Kotlin fallback for
+      // c/cpp) would still wrap tokens, so check the actual C/C++ keywords
+      // and the preprocessor directive got a real, non-default style class.
+      assert.ok(await blocks.nth(0).locator("span.elmsh3", { hasText: "typedef" }).count());
+      assert.ok(await blocks.nth(0).locator("span.elmsh3", { hasText: "#include <stdio.h>" }).count());
+      assert.ok(await blocks.nth(1).locator("span.elmsh3", { hasText: "class" }).count());
+      assert.match(await blocks.nth(0).textContent(), /typedef struct \{ uint32_t len; \} Row;/);
+      assert.match(await blocks.nth(1).textContent(), /explicit Widget\(int n\) noexcept : n_\(n\) \{\}/);
+    } finally {
+      await fence.close();
+    }
+  });
+
   test("mermaid blocks render to an SVG diagram", async () => {
     const fence = await launchFence();
     try {

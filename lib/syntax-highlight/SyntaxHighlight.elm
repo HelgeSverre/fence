@@ -3,7 +3,7 @@ module SyntaxHighlight exposing
     , toBlockHtml, toInlineHtml, toStaticBlockHtml, toStaticInlineHtml
     , Highlight(..), highlightLines
     , css, elm, javascript, python, sql, xml, json, nix, kotlin, go, noLang
-    , rust, php, typescript, dart, fsharp
+    , rust, php, typescript, dart, fsharp, c, cpp
     , Theme, useTheme, monokai, gitHub, oneDark
     , ConsoleOptions, toConsole
     , CustomTransform, toCustom
@@ -49,6 +49,7 @@ Error while parsing should not happen. If it happens, please [open an issue](htt
 
 import Html exposing (Html, text)
 import Parser
+import SyntaxHighlight.Language.C as C
 import SyntaxHighlight.Language.Css as Css
 import SyntaxHighlight.Language.Elm as Elm
 import SyntaxHighlight.Language.Fsharp as Fsharp
@@ -213,6 +214,22 @@ noLang =
 rust : String -> Result (List Parser.DeadEnd) HCode
 rust =
     Rust.toLines
+        >> Result.map HCode
+
+
+{-| Parse C syntax.
+-}
+c : String -> Result (List Parser.DeadEnd) HCode
+c =
+    C.toLines C.C
+        >> Result.map HCode
+
+
+{-| Parse C++ syntax.
+-}
+cpp : String -> Result (List Parser.DeadEnd) HCode
+cpp =
+    C.toLines C.Cpp
         >> Result.map HCode
 
 

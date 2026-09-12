@@ -4,7 +4,7 @@ module SyntaxHighlight exposing
     , Highlight(..), highlightLines
     , css, elm, javascript, python, sql, xml, json, nix, kotlin, go, noLang
     , rust, php, typescript, dart, fsharp, c, cpp
-    , yaml, toml, ruby, java, csharp, swift, scala
+    , yaml, toml, ruby, java, csharp, swift, scala, bash, dockerfile
     , Theme, useTheme, monokai, gitHub, oneDark
     , ConsoleOptions, toConsole
     , CustomTransform, toCustom
@@ -50,6 +50,7 @@ Error while parsing should not happen. If it happens, please [open an issue](htt
 
 import Html exposing (Html, text)
 import Parser
+import SyntaxHighlight.Language.Bash as Bash
 import SyntaxHighlight.Language.C as C
 import SyntaxHighlight.Language.Css as Css
 import SyntaxHighlight.Language.CurlyBrace as CurlyBrace
@@ -68,6 +69,7 @@ import SyntaxHighlight.Language.Rust as Rust
 import SyntaxHighlight.Language.Php as Php
 import SyntaxHighlight.Language.TypeScript as TypeScript
 import SyntaxHighlight.Language.Dart as Dart
+import SyntaxHighlight.Language.Dockerfile as Dockerfile
 import SyntaxHighlight.Language.Ruby as Ruby
 import SyntaxHighlight.Language.Toml as Toml
 import SyntaxHighlight.Language.Yaml as Yaml
@@ -291,6 +293,22 @@ swift =
 scala : String -> Result (List Parser.DeadEnd) HCode
 scala =
     CurlyBrace.toLines CurlyBrace.Scala
+        >> Result.map HCode
+
+
+{-| Parse shell (bash/sh/zsh) syntax.
+-}
+bash : String -> Result (List Parser.DeadEnd) HCode
+bash =
+    Bash.toLines
+        >> Result.map HCode
+
+
+{-| Parse Dockerfile syntax.
+-}
+dockerfile : String -> Result (List Parser.DeadEnd) HCode
+dockerfile =
+    Dockerfile.toLines
         >> Result.map HCode
 
 

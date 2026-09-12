@@ -78,6 +78,8 @@ languages =
     , ( "csharp", SH.csharp, "using System;\n\nnamespace N {\n    [Obsolete]\n    public sealed record Box(int N) {\n        // c\n        public async Task<List<string>> Go() => new() { $\"v={N}\", @\"C:\\raw\", \"z\" };\n        private const decimal M = 1_000.5m;\n    }\n}\n" )
     , ( "swift", SH.swift, "import Foundation\n\n// c\n@MainActor\npublic struct Box<T>: Sendable {\n    private var items: [String] = []\n    func go(_ n: Int) async throws -> String? {\n        guard n > 0 else { return nil }\n        /* block */\n        return \"v=\\(n)\" + \"\"\"\n        multi\n        \"\"\"\n    }\n}\n" )
     , ( "scala", SH.scala, "package a.b\n\nimport scala.util.Try\n\n// c\nsealed trait Shape\ncase class Box(n: Int) extends Shape {\n    def go(xs: List[Int]): Option[String] = for { x <- xs } yield s\"v=$x\"\n    val raw = \"\"\"multi\n    line\"\"\"\n    private val m = xs.map(_ * 2L) :: Nil\n}\n" )
+    , ( "bash", SH.bash, "#!/usr/bin/env bash\nset -euo pipefail\n# c\nname=${1:-world}\nif [ -f \"$name\" ]; then\n    echo \"hi $name, $(date) and ${x}\" 'raw $x' | grep -c . 2>&1 >> log\nelse\n    for i in 1 2 3; do printf '%d\\n' \"$i\"; done\nfi\n" )
+    , ( "dockerfile", SH.dockerfile, "# syntax=docker/dockerfile:1\nFROM node:20-alpine AS build\nARG VERSION=1.2\nENV PATH=\"/app:$PATH\"\nRUN apk add --no-cache git \\\n    && npm ci\nCOPY --from=build /app /app\nEXPOSE 8080\nCMD [\"node\", \"index.js\"]\n" )
     , ( "noLang", SH.noLang, "just some <text> with \"quotes\" and 'ticks' // and slashes\n" )
     ]
 
@@ -357,6 +359,64 @@ suite =
                         , \_ -> styledAs "trait" SH.csharp "trait T" |> Expect.equal False
                         ]
                         ()
+            , test "bash keywords, builtins and variables are styled" <|
+                \_ ->
+                    SH.bash "if true; then echo \"$HOME/x\"; fi # note"
+                        |> Result.map tagged
+                        |> Result.withDefault []
+                        |> (\frags ->
+                                Expect.all
+                                    [ \_ -> List.member ( "comment", "# note" ) frags |> Expect.equal True
+                                    , \_ -> frags |> List.filter (\( k, t ) -> List.member t [ "if", "then", "fi" ] && k /= "default") |> List.length |> Expect.equal 3
+                                    , \_ -> List.member ( "style7", "$HOME" ) frags |> Expect.equal True
+                                    , \_ -> frags |> List.filter (\( k, t ) -> t == "echo" && k /= "default") |> List.isEmpty |> Expect.equal False
+                                    ]
+                                    ()
+                           )
+            , test "bash single quotes do not interpolate, double quotes do" <|
+                \_ ->
+                    Expect.all
+                        [ \_ ->
+                            SH.bash "echo '$x'"
+                                |> Result.map tagged
+                                |> Result.withDefault []
+                                |> List.member ( "style2", "'$x'" )
+                                |> Expect.equal True
+                        , \_ ->
+                            SH.bash "echo \"$x\""
+                                |> Result.map tagged
+                                |> Result.withDefault []
+                                |> List.member ( "style7", "$x" )
+                                |> Expect.equal True
+                        ]
+                        ()
+            , test "dockerfile instructions are styled only at line start" <|
+                \_ ->
+                    SH.dockerfile "FROM alpine AS base\nRUN echo from run"
+                        |> Result.map tagged
+                        |> Result.withDefault []
+                        |> (\frags ->
+                                Expect.all
+                                    [ \_ -> frags |> List.filter (\( k, t ) -> List.member t [ "FROM", "RUN", "AS" ] && k /= "default") |> List.length |> Expect.equal 3
+
+                                    -- `from` inside the RUN body is plain text, and merges
+                                    -- into the surrounding default-styled run.
+                                    , \_ -> frags |> List.filter (\( k, t ) -> String.contains "from run" t && k == "default") |> List.isEmpty |> Expect.equal False
+                                    ]
+                                    ()
+                           )
+            , test "dockerfile flags and variables are styled" <|
+                \_ ->
+                    SH.dockerfile "COPY --from=build ${SRC} /app"
+                        |> Result.map tagged
+                        |> Result.withDefault []
+                        |> (\frags ->
+                                Expect.all
+                                    [ \_ -> List.member ( "style5", "--from=" ) frags |> Expect.equal True
+                                    , \_ -> List.member ( "style7", "${SRC}" ) frags |> Expect.equal True
+                                    ]
+                                    ()
+                           )
             , test "line count matches the source" <|
                 \_ ->
                     SH.javascript "a\nb\nc"

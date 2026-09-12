@@ -1117,6 +1117,8 @@ highlighters =
     , ( [ "ruby", "rb", "gemfile" ], SyntaxHighlight.ruby )
     , ( [ "yaml", "yml" ], SyntaxHighlight.yaml )
     , ( [ "toml", "ini", "cfg" ], SyntaxHighlight.toml )
+    , ( [ "bash", "sh", "shell", "zsh", "console", "shellsession" ], SyntaxHighlight.bash )
+    , ( [ "dockerfile", "docker" ], SyntaxHighlight.dockerfile )
     , ( [ "nix" ], SyntaxHighlight.nix )
     , ( [ "rust", "rs" ], SyntaxHighlight.rust )
     , ( [ "php" ], SyntaxHighlight.php )

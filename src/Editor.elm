@@ -96,6 +96,7 @@ type Key
     | ShiftTab
     | Escape
     | Char String
+    | Duplicate
     | DuplicateLine
     | MoveLineUp
     | MoveLineDown
@@ -586,6 +587,20 @@ keyPressed key model =
 
         Enter ->
             continueList model
+
+        Duplicate ->
+            case selection model of
+                -- the copy goes right after the selection, with no newline of
+                -- its own, and becomes the new selection
+                Just ( s, e ) ->
+                    let
+                        inner =
+                            TextBuffer.sliceRange s e model.lines
+                    in
+                    replaceRange e e inner 0 (String.length inner) model
+
+                Nothing ->
+                    keyPressed DuplicateLine model
 
         DuplicateLine ->
             let
@@ -1225,6 +1240,9 @@ editorAction { key, meta, ctrl, shift, alt } =
         "d" ->
             if shortcut && shift then
                 press DuplicateLine
+
+            else if shortcut then
+                press Duplicate
 
             else
                 typed

@@ -299,6 +299,7 @@ type alias Wrapping =
     , startCell : Int
     , boundary : Int
     , boundaryCell : Int
+    , width : TextBuffer.WidthState
     , rows : List Segment
     }
 
@@ -358,12 +359,8 @@ wrapCharacters width text =
     let
         step char state =
             let
-                cells =
-                    if char == '\t' then
-                        2 - modBy 2 state.cell
-
-                    else
-                        1
+                ( cells, nextWidth ) =
+                    TextBuffer.advance state.width state.cell char
 
                 units =
                     if Char.toCode char > 0xFFFF then
@@ -376,7 +373,7 @@ wrapCharacters width text =
                     makeRoom cells state
 
                 next =
-                    { ready | offset = state.offset + units, cell = state.cell + cells }
+                    { ready | offset = state.offset + units, cell = state.cell + cells, width = nextWidth }
             in
             if char == ' ' || char == '\t' then
                 { next | boundary = next.offset, boundaryCell = next.cell }
@@ -417,7 +414,7 @@ wrapCharacters width text =
                 state
 
         result =
-            String.foldl step { offset = 0, cell = 0, start = 0, startCell = 0, boundary = 0, boundaryCell = 0, rows = [] } text
+            String.foldl step { offset = 0, cell = 0, start = 0, startCell = 0, boundary = 0, boundaryCell = 0, width = TextBuffer.widthStart, rows = [] } text
     in
     Array.fromList (List.reverse ({ start = result.start, end = result.offset, startCell = result.startCell, endCell = result.cell } :: result.rows))
 
@@ -533,18 +530,7 @@ screenPosition position tree =
 
 cellAfter : Int -> String -> Int
 cellAfter start text =
-    String.foldl
-        (\char cell ->
-            cell
-                + (if char == '\t' then
-                    2 - modBy 2 cell
-
-                   else
-                    1
-                  )
-        )
-        start
-        text
+    start + TextBuffer.cellsIn start text
 
 
 positionAt : Int -> Int -> Layout -> Position
@@ -559,21 +545,18 @@ positionAt row cell tree =
         target =
             segment.startCell + max 0 cell
 
-        walk chars offset visual =
+        walk chars offset visual state =
             case chars of
                 [] ->
                     offset
 
                 char :: rest ->
                     let
-                        next =
-                            visual
-                                + (if char == '\t' then
-                                    2 - modBy 2 visual
+                        ( cells, nextState ) =
+                            TextBuffer.advance state visual char
 
-                                   else
-                                    1
-                                  )
+                        next =
+                            visual + cells
 
                         units =
                             if Char.toCode char > 0xFFFF then
@@ -586,10 +569,10 @@ positionAt row cell tree =
                         offset
 
                     else
-                        walk rest (offset + units) next
+                        walk rest (offset + units) next nextState
 
         col =
-            walk (String.slice segment.start segment.end fragment.text |> String.toList) segment.start segment.startCell
+            walk (String.slice segment.start segment.end fragment.text |> String.toList) segment.start segment.startCell TextBuffer.widthStart
     in
     { cursor = { line = fragment.line, col = col }
     , affinity =
@@ -625,16 +608,12 @@ expandTabs start text =
 
     else
         String.foldl
-            (\char ( cell, parts ) ->
+            (\char ( ( cell, state ), parts ) ->
                 let
-                    size =
-                        if char == '\t' then
-                            2 - modBy 2 cell
-
-                        else
-                            1
+                    ( size, next ) =
+                        TextBuffer.advance state cell char
                 in
-                ( cell + size
+                ( ( cell + size, next )
                 , (if char == '\t' then
                     String.repeat size " "
 
@@ -644,7 +623,7 @@ expandTabs start text =
                     :: parts
                 )
             )
-            ( start, [] )
+            ( ( start, TextBuffer.widthStart ), [] )
             text
             |> Tuple.second
             |> List.reverse

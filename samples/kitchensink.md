@@ -755,28 +755,35 @@ Term 2
 : Definition for term 2
 : An alternate definition
 
-The HTML form is on Fence's allowlist and *should* render as a real definition list:
+The HTML form uses `<dl>`, which is **not** on Fence's tag allowlist, so it is
+shown here as source rather than live markup:
 
+```html
 <dl>
   <dt>Fence</dt>
   <dd>A desktop Markdown editor built with Elm and Electron.</dd>
-  <dt>TEA</dt>
-  <dd>The Elm Architecture: model, update, view.</dd>
 </dl>
+```
 
 ## Inline HTML
+
+Fence's renderer uses a strict tag allowlist (see `customRenderer` in
+`src/Markdown.elm`). Only these tags render as real HTML:
+
+`a` `img` `br` `hr` `wbr` `details` `summary` `p` `h1`-`h6` `div` `span` `section`
+
+and only these attributes survive: `align`, `class`, `src`, `alt`, `width`,
+`height`, `href`, `title`, `open`.
+
+Everything in this section is on that list and should render live.
 
 Line break: first line<br>second line after a `<br>`.
 
 Inline image tag: <img src="https://picsum.photos/32/32" alt="inline img tag" width="32" height="32">
 
-Keyboard keys: press <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> for the palette.
+An inline <a href="https://example.com" title="via a raw anchor">anchor tag</a> with a title.
 
-Superscript and subscript: E = mc<sup>2</sup>, and water is H<sub>2</sub>O.
-
-Other inline tags: <mark>highlighted</mark>, <abbr title="HyperText Markup Language">HTML</abbr>,
-<small>small print</small>, <ins>inserted</ins>, <del>deleted</del>, <q>a short quote</q>,
-<cite>A Citation</cite>, <u>underlined</u>.
+A <span class="highlight">span with a class</span> inside a paragraph.
 
 Collapsible section:
 
@@ -796,73 +803,65 @@ Centered block:
   <strong>This block should be centered.</strong>
 </div>
 
-A block of raw HTML:
+A thematic break as a raw tag:
 
-<figure>
-  <img src="https://picsum.photos/500/250" alt="A figure image">
-  <figcaption>Figure 1 — a raw HTML figure with a caption.</figcaption>
-</figure>
+<hr>
 
-<table>
-  <thead>
-    <tr><th>Raw HTML table</th><th>Second column</th></tr>
-  </thead>
-  <tbody>
-    <tr><td>Row 1</td><td>Value</td></tr>
-    <tr><td>Row 2</td><td>Value</td></tr>
-  </tbody>
-</table>
+## Unsupported HTML
 
-<aside>
-  <p>An aside element containing a paragraph.</p>
-</aside>
+Tags outside the allowlist are **not** rendered. Fence's renderer fails on the
+chunk containing them and falls back to showing that chunk's source as plain
+text — so a single stray `<kbd>` blanks the whole section it appears in. That is
+why the examples below are inside fenced blocks instead of inline.
+
+Commonly expected in GFM but not supported by Fence today:
+
+```html
+Keyboard keys: press <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd>
+Superscript and subscript: E = mc<sup>2</sup>, water is H<sub>2</sub>O
+Text-level: <mark>highlighted</mark> <abbr title="HyperText Markup Language">HTML</abbr>
+            <small>small print</small> <ins>inserted</ins> <del>deleted</del>
+            <q>a short quote</q> <cite>A Citation</cite> <u>underlined</u>
+Structure: <figure> <figcaption> <aside> <dl> <dt> <dd>
+Raw tables: <table> <thead> <tbody> <tr> <th> <td>
+```
+
+Use the Markdown equivalents instead: a GFM table for tabular data, `**bold**`
+and `*italic*` for emphasis, and a fenced block for preformatted text.
 
 ## Sanitization Check
 
-Everything below is deliberately hostile. Fence's renderer uses a strict tag
-allowlist (`src/Markdown.elm`), so none of it should execute, load, or apply styling.
-The expected result is that each construct is either dropped or shown as inert text.
-**If you see a dialog, an embedded page, red text, or a clickable handler here, that
-is a bug.**
+Everything below is deliberately hostile. None of it should execute, load, or
+apply styling. Because these tags are not on the allowlist, they are shown as
+source here rather than embedded live — the point is that Fence has no code path
+that turns them into live elements.
 
-A script tag — must not execute:
+**If a future change makes any of this render as a real element, that is a bug.**
 
+```html
 <script>alert("XSS: script tag executed");</script>
-
-An iframe — must not load:
-
 <iframe src="https://example.com" width="400" height="200"></iframe>
+<object data="https://example.com"></object>
+<embed src="https://example.com">
+<svg width="100" height="100"><circle cx="50" cy="50" r="40" fill="red" /></svg>
+<style>body { background: red !important; }</style>
+<form action="https://example.com" method="post">
+  <input type="text" name="probe"><button type="submit">Submit</button>
+</form>
+```
 
-An inline `style` attribute — the text must not turn red:
+Attributes are filtered too. These are stripped even on allowlisted tags, so the
+text below must not be red, huge, or clickable:
 
 <div style="color: red; font-size: 40px">This text should NOT be red or huge.</div>
 
-An `onclick` handler — clicking must do nothing:
-
 <div onclick="alert('XSS: onclick fired')">Clicking this should do nothing.</div>
-
-An image with an error handler — must not fire:
 
 <img src="/nonexistent.png" onerror="alert('XSS: onerror fired')" alt="onerror probe">
 
-A `javascript:` URL in a link — must not navigate or execute:
+A `javascript:` URL in a link must not navigate or execute:
 
 [javascript URL link](javascript:alert('XSS: javascript URL'))
-
-Other non-allowlisted tags:
-
-<object data="https://example.com"></object>
-
-<embed src="https://example.com">
-
-<form action="https://example.com" method="post">
-  <input type="text" name="probe" value="should not be an input">
-  <button type="submit">Submit</button>
-</form>
-
-<svg width="100" height="100"><circle cx="50" cy="50" r="40" fill="red" /></svg>
-
-<style>body { background: red !important; }</style>
 
 An HTML comment, which should be invisible:
 

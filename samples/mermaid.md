@@ -124,7 +124,7 @@ sequenceDiagram
 
     User->>Elm: Cmd+S
     activate Elm
-    Note right of Elm: Buffer is dirty;<br>cursor position is kept
+    Note right of Elm: Buffer is dirty, cursor position is kept
 
     Elm->>Pre: writeFile(path, contents)
     activate Pre
@@ -559,65 +559,64 @@ Traceability for the editor's performance and safety requirements.
 requirementDiagram
 
 requirement open_speed {
-    id: REQ-1
-    text: A 700 KB document must paint its first screen within 200 ms.
-    risk: high
-    verifymethod: test
+id: 1
+text: A 700 KB document must paint its first screen within 200 ms.
+risk: high
+verifymethod: test
 }
 
 performanceRequirement scroll_budget {
-    id: REQ-1.1
-    text: Scrolling must hold a 16 ms frame budget at 10k lines.
-    risk: medium
-    verifymethod: test
+id: 1.1
+text: Scrolling must hold a 16 ms frame budget at 10k lines.
+risk: medium
+verifymethod: test
 }
 
 functionalRequirement no_data_loss {
-    id: REQ-2
-    text: Closing a window must never silently discard unsaved edits.
-    risk: high
-    verifymethod: demonstration
+id: 2
+text: Closing a window must never silently discard unsaved edits.
+risk: high
+verifymethod: demonstration
 }
 
 interfaceRequirement sandbox {
-    id: REQ-3
-    text: The renderer must reach the file system only through preload IPC.
-    risk: high
-    verifymethod: inspection
+id: 3
+text: The renderer must reach the file system only through preload IPC.
+risk: high
+verifymethod: inspection
 }
 
 designConstraint dagre_only {
-    id: CON-1
-    text: Diagram rendering must avoid the 1.4 MB ELK layout chunk.
-    risk: low
-    verifymethod: inspection
+id: 4
+text: Diagram rendering must avoid the 1.4 MB ELK layout chunk.
+risk: low
+verifymethod: inspection
 }
 
 element virtual_editor {
-    type: "module"
-    docref: src/VirtualEditor.elm
+type: "module"
+docRef: "src/VirtualEditor.elm"
 }
 
 element close_guard {
-    type: "module"
-    docref: electron/main.js
+type: "module"
+docRef: "electron/main.js"
 }
 
 element preload_bridge {
-    type: "module"
-    docref: electron/preload.js
+type: "module"
+docRef: "electron/preload.js"
 }
 
 element mermaid_init {
-    type: "module"
-    docref: js/mermaid-init.js
+type: "module"
+docRef: "js/mermaid-init.js"
 }
 
 element open_gate {
-    type: "test case"
-    docref: e2e/virtual-editor.test.js
+type: "test case"
+docRef: "e2e/virtual-editor.test.js"
 }
-
 open_speed - contains -> scroll_budget
 virtual_editor - satisfies -> open_speed
 virtual_editor - satisfies -> scroll_budget

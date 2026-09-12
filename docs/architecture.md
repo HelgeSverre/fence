@@ -74,6 +74,38 @@ flowchart TB
     F --> G["span class=md-* / bare text"]
 ```
 
+### The cell grid
+
+Everything the editor positions — the caret, selection rectangles,
+find-match highlights, soft-wrap break points, the horizontal scroll extent —
+is computed as `cellCount * charWidth`, where `charWidth` is one measured
+monospace advance. So the editor needs to agree with the font about how many
+advances a string occupies.
+
+One code point is not one advance, so `TextBuffer.advance` implements a
+`wcwidth`-style model, the same approach terminals use:
+
+| Width | Applies to |
+|---|---|
+| 0 cells | combining marks (Mn/Me ranges), zero-width space/joiner/non-joiner, word joiner, variation selectors |
+| 0 cells | a code point directly after a ZWJ, and the second of a regional-indicator pair, so an emoji cluster counts once |
+| 2 cells | East Asian Wide and Fullwidth ranges, and the emoji planes |
+| 1 cell | everything else |
+| to next tab stop | tab |
+
+Every call site routes through it: `TextBuffer.visualColumn` and its inverse
+`columnFromVisual`, `EditorLayout.cellAfter`/`positionAt`/`wrapCharacters`/
+`expandTabs`, and `VirtualEditor`'s selection-rect counting. The two
+directions must stay consistent or clicking lands the caret in the wrong
+place.
+
+Known limits. CJK and full-width glyphs still drift about 3px each, because
+the fallback font draws them at roughly 1.64 times the ASCII advance rather
+than exactly 2; closing that needs a font that is genuinely dual-width, not a
+model change. Rows keep `overflow: hidden`, so a tall stack of combining
+marks is clipped to its line: letting it paint freely makes the neighbouring
+lines unreadable, which is worse.
+
 ---
 
 ## Preview pane: rendered Markdown and code blocks

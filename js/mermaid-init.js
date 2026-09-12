@@ -1,3 +1,5 @@
+import { attachFullscreenButton } from "./mermaid-fullscreen.js";
+
 // Mermaid's core is ~560 KB; load it the first time a document has a diagram
 // so every other document skips the parse cost at startup.
 let mermaidModule = null;
@@ -88,6 +90,8 @@ async function renderMermaidBlocks() {
         el.innerHTML = svg;
         bindFunctions?.(el);
         el.dataset.state = "rendered";
+        // innerHTML above just removed the previous one.
+        attachFullscreenButton(el);
       } catch (error) {
         if (!isCurrent()) {
           rendered.delete(el);

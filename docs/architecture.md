@@ -147,7 +147,41 @@ flowchart TD
 ```
 
 Mermaid is intercepted *before* highlighting and never reaches the
-highlighter. Elm owns only the `data-source` attribute on that element; the
+highlighter.
+
+### Expanding a diagram
+
+Hovering a diagram reveals a button that expands it to fill the preview pane;
+Escape or a click outside closes it. The whole feature is JS
+(`js/mermaid-fullscreen.js`), which follows from the ownership split above:
+Elm owns only the block's `data-source`, so the button is injected after each
+render rather than rendered by Elm, and re-injected when a re-render replaces
+the block's innerHTML.
+
+The overlay is a `popover="auto"` appended to `document.body`, not an element
+inside the pane. Two reasons: the pane scrolls and would clip it, and the
+popover brings Escape, dismissal on an outside click, and focus return with
+it. It carries no backdrop, so the editor stays visible and usable alongside.
+Sizing follows the pane's rect, kept in sync by a `ResizeObserver` while open,
+which covers divider drags and window resizes.
+
+Three details that are easy to get wrong:
+
+- Escape would otherwise reach Elm too, which listens for keydown on the
+  document and closes the settings menu, palette and find bar. The overlay
+  stops propagation for Escape only.
+- `beforetoggle` does the setup and teardown, not `toggle`. It runs
+  synchronously inside the show/hide algorithm, so the overlay is positioned
+  before it paints and the cloned SVG is released before the popover reports
+  itself closed.
+- The injected button would otherwise ship inside exports, which send the
+  pane's `innerHTML` verbatim. `withoutFullscreenButtons` strips it from a
+  clone of the pane.
+
+The diagram is cloned rather than moved, which keeps the render cache in
+`mermaid-init.js` from fighting over the element. The trade-off is that
+mermaid's `bindFunctions` click handlers do not come along; diagrams render
+with `securityLevel: "strict"`, so there is little to lose. Elm owns only the `data-source` attribute on that element; the
 rendered SVG children belong to JS, which keeps Elm from diffing SVG it did
 not create.
 

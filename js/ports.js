@@ -1,6 +1,7 @@
 import { setupPreviewFind } from "./preview-find.js";
 import { setupLayout } from "./layout.js";
 import { reRenderMermaid, finishMermaidRendering } from "./mermaid-init.js";
+import { withoutFullscreenButtons } from "./mermaid-fullscreen.js";
 import { applyPreferences, preloadFonts } from "./preferences.js";
 import { setupEditorMetrics, remeasureEditorMetrics } from "./editor-metrics.js";
 import { setupVirtualInput } from "./virtual-input.js";
@@ -134,7 +135,7 @@ async function exportPreview(data, app) {
     title: data.title || "document",
     base: data.base || "",
     theme: document.documentElement.getAttribute("data-theme") || "",
-    html: pane.innerHTML,
+    html: withoutFullscreenButtons(pane),
     text: pane.textContent || "",
     css: collectStyles(),
   });

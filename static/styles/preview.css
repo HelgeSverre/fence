@@ -436,3 +436,100 @@ dl.frontmatter-grid dd {
   font-size: var(--font-size-ui-sm);
   font-style: italic;
 }
+
+/* Expand a single diagram to fill the preview pane. The button is injected by
+   js/mermaid-fullscreen.js after each render, so it is positioned out of flow:
+   .mermaid is a centring flex container and a button in that flow would shift
+   the diagram sideways. */
+.preview-content .mermaid {
+  position: relative;
+}
+
+.preview-content .mermaid-fullscreen-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  /* Revealed on hover, but also on keyboard focus: hover-only would put the
+     diagram out of reach of the keyboard entirely. */
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.preview-content .mermaid:hover .mermaid-fullscreen-btn,
+.preview-content .mermaid-fullscreen-btn:focus-visible {
+  opacity: 1;
+}
+
+.preview-content .mermaid-fullscreen-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-overlay);
+}
+
+/* The overlay is a popover, so it sits in the top layer and is positioned
+   over the preview pane rather than nested inside it, where the pane's own
+   scrolling would clip it. */
+.mermaid-fullscreen {
+  position: fixed;
+  margin: 0;
+  padding: 24px;
+  border: none;
+  box-sizing: border-box;
+  background: var(--bg-base);
+  overflow: hidden;
+}
+
+.mermaid-fullscreen-figure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.mermaid-fullscreen-svg {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.mermaid-fullscreen-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mermaid-fullscreen-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-overlay);
+}

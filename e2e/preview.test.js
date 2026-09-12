@@ -131,6 +131,49 @@ describe("preview", () => {
     }
   });
 
+  test("a mermaid diagram expands to fill the preview pane and Escape closes it", async () => {
+    const fence = await launchFence();
+    try {
+      const { window } = fence;
+      await setEditorContent(window, "```mermaid\nflowchart LR\n  A[One] --> B[Two]\n```\n");
+      const preview = window.getByTestId("preview-content");
+      await preview.locator(".mermaid[data-state=rendered]").waitFor({ timeout: 20000 });
+      const button = preview.locator(".mermaid-fullscreen-btn");
+      await button.waitFor();
+
+      // Revealed on hover, not permanently on screen.
+      assert.equal(await button.evaluate((b) => getComputedStyle(b).opacity), "0");
+      await preview.locator(".mermaid").hover();
+      await window.waitForFunction(() => getComputedStyle(document.querySelector(".mermaid-fullscreen-btn")).opacity === "1");
+
+      await button.click();
+      await window.waitForFunction(() => document.querySelector("#mermaid-fullscreen")?.matches(":popover-open"));
+      const open = await window.evaluate(() => {
+        const overlay = document.querySelector("#mermaid-fullscreen");
+        const pane = document.querySelector(".preview-pane").getBoundingClientRect();
+        const box = overlay.getBoundingClientRect();
+        return {
+          isOpen: overlay.matches(":popover-open"),
+          coversPane: Math.abs(box.width - pane.width) < 2 && Math.abs(box.height - pane.height) < 2,
+          hasDiagram: !!overlay.querySelector("svg"),
+          focused: document.activeElement?.className,
+        };
+      });
+      assert.equal(open.isOpen, true);
+      assert.equal(open.coversPane, true, "the overlay must cover the preview pane");
+      assert.equal(open.hasDiagram, true);
+      assert.match(open.focused, /mermaid-fullscreen-close/, "focus must move into the overlay");
+
+      await window.keyboard.press("Escape");
+      await window.waitForFunction(() => !document.querySelector("#mermaid-fullscreen").matches(":popover-open"));
+      // Escape must not also reach Elm's document-level handler.
+      assert.equal(await window.getByTestId("settings-dropdown").count(), 0);
+      assert.equal(await window.evaluate(() => !!document.querySelector("#mermaid-fullscreen svg")), false, "the clone must be released");
+    } finally {
+      await fence.close();
+    }
+  });
+
   test("mermaid blocks render to an SVG diagram", async () => {
     const fence = await launchFence();
     try {

@@ -155,6 +155,81 @@ lineOpsSuite =
                     |> (\m -> { m | cursor = { line = 0, col = 2 } })
                     |> run Editor.DuplicateLine
                     |> (\m -> Expect.equal ( "one\none\ntwo", { line = 1, col = 2 } ) ( m.content, m.cursor ))
+        , test "duplicate with no selection copies the line and keeps the column" <|
+            \_ ->
+                doc "one\ntwo\nthree"
+                    |> (\m -> { m | cursor = { line = 1, col = 2 } })
+                    |> run Editor.Duplicate
+                    |> (\m -> Expect.equal ( "one\ntwo\ntwo\nthree", { line = 2, col = 2 } ) ( m.content, m.cursor ))
+        , test "duplicate works on the first line" <|
+            \_ ->
+                doc "one\ntwo"
+                    |> run Editor.Duplicate
+                    |> (\m -> Expect.equal ( "one\none\ntwo", { line = 1, col = 0 } ) ( m.content, m.cursor ))
+        , test "duplicate on the last line adds no trailing newline" <|
+            \_ ->
+                doc "one\ntwo"
+                    |> (\m -> { m | cursor = { line = 1, col = 3 } })
+                    |> run Editor.Duplicate
+                    |> (\m -> Expect.equal ( "one\ntwo\ntwo", { line = 2, col = 3 } ) ( m.content, m.cursor ))
+        , test "repeated duplicates stack up with the caret walking down" <|
+            \_ ->
+                doc "one\ntwo"
+                    |> (\m -> { m | cursor = { line = 0, col = 1 } })
+                    |> run Editor.Duplicate
+                    |> run Editor.Duplicate
+                    |> (\m -> Expect.equal ( "one\none\none\ntwo", { line = 2, col = 1 } ) ( m.content, m.cursor ))
+        , test "duplicate on an empty line adds another empty line" <|
+            \_ ->
+                doc "one\n\ntwo"
+                    |> (\m -> { m | cursor = { line = 1, col = 0 } })
+                    |> run Editor.Duplicate
+                    |> (\m -> Expect.equal ( "one\n\n\ntwo", { line = 2, col = 0 } ) ( m.content, m.cursor ))
+        , test "duplicate in an empty document still works" <|
+            \_ ->
+                doc ""
+                    |> run Editor.Duplicate
+                    |> (\m -> Expect.equal ( "\n", { line = 1, col = 0 } ) ( m.content, m.cursor ))
+        , test "duplicating an inline selection copies it in place and selects the copy" <|
+            \_ ->
+                doc "xabcy"
+                    |> (\m -> { m | anchor = Just { line = 0, col = 1 }, cursor = { line = 0, col = 4 } })
+                    |> run Editor.Duplicate
+                    |> (\m ->
+                            Expect.equal
+                                ( "xabcabcy", Just ( { line = 0, col = 4 }, { line = 0, col = 7 } ), { line = 0, col = 7 } )
+                                ( m.content, Editor.selection m, m.cursor )
+                       )
+        , test "a selection ending at a line end duplicates without a newline" <|
+            \_ ->
+                doc "one\ntwo"
+                    |> (\m -> { m | anchor = Just { line = 0, col = 0 }, cursor = { line = 0, col = 3 } })
+                    |> run Editor.Duplicate
+                    |> (\m -> Expect.equal ( "oneone\ntwo", "one" ) ( m.content, Editor.selectedText m ))
+        , test "duplicating a multi-line selection copies it verbatim and selects the copy" <|
+            \_ ->
+                doc "one\ntwo\nthree"
+                    |> (\m -> { m | anchor = Just { line = 0, col = 0 }, cursor = { line = 1, col = 3 } })
+                    |> run Editor.Duplicate
+                    |> (\m ->
+                            Expect.equal
+                                ( "one\ntwoone\ntwo\nthree", Just ( { line = 1, col = 3 }, { line = 2, col = 3 } ), "one\ntwo" )
+                                ( m.content, Editor.selection m, Editor.selectedText m )
+                       )
+        , test "duplicating a selection is one undo step" <|
+            \_ ->
+                doc "xabcy"
+                    |> (\m -> { m | anchor = Just { line = 0, col = 1 }, cursor = { line = 0, col = 4 } })
+                    |> run Editor.Duplicate
+                    |> Editor.update Editor.Undo
+                    |> (\m -> Expect.equal ( "xabcy", { line = 0, col = 4 } ) ( m.content, m.cursor ))
+        , test "duplicating a line is one undo step" <|
+            \_ ->
+                doc "one\ntwo"
+                    |> (\m -> { m | cursor = { line = 1, col = 1 } })
+                    |> run Editor.Duplicate
+                    |> Editor.update Editor.Undo
+                    |> (\m -> Expect.equal ( "one\ntwo", { line = 1, col = 1 } ) ( m.content, m.cursor ))
         , test "duplicating a multi-line selection copies every line" <|
             \_ ->
                 doc "one\ntwo\nthree"
@@ -231,6 +306,8 @@ lineOpsSuite =
                 in
                 Expect.equal
                     [ Just (Editor.KeyPressed Editor.DuplicateLine)
+                    , Just (Editor.KeyPressed Editor.Duplicate)
+                    , Just (Editor.KeyPressed Editor.Duplicate)
                     , Just (Editor.KeyPressed Editor.DeleteLine)
                     , Just (Editor.KeyPressed Editor.MoveLineUp)
                     , Just (Editor.KeyPressed Editor.MoveLineDown)
@@ -238,6 +315,8 @@ lineOpsSuite =
                     , Just (Editor.KeyPressed Editor.OpenLineAbove)
                     ]
                     [ bound "d" [ "metaKey", "shiftKey" ]
+                    , bound "d" [ "metaKey" ]
+                    , bound "d" [ "ctrlKey" ]
                     , bound "k" [ "metaKey", "shiftKey" ]
                     , bound "ArrowUp" [ "altKey" ]
                     , bound "ArrowDown" [ "altKey" ]

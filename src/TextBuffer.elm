@@ -537,8 +537,10 @@ nonAsciiOrTab =
     Regex.fromString "[^\\x00-\\x7f]|\\t" |> Maybe.withDefault Regex.never
 
 
-{-| Cells a whole line occupies. Plain ASCII, the common case by far, is
-measured natively instead of a code point at a time.
+{-| Cells `text` occupies starting from column 0. Plain ASCII, the common case
+by far, is measured natively instead of a code point at a time: the caret asks
+for this on every keystroke, and on a very long line the difference is
+milliseconds of input latency.
 -}
 lineCells : String -> Int
 lineCells line =
@@ -553,7 +555,7 @@ lineCells line =
 next multiple of `tabWidth` (matches `tab-size: 2`). -}
 visualColumn : String -> Int -> Int
 visualColumn line col =
-    cellsIn 0 (String.left col line)
+    lineCells (String.left col line)
 
 
 {-| Inverse of `visualColumn`: the column whose cell is at or just before the

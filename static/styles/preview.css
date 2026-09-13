@@ -582,3 +582,50 @@ dl.frontmatter-grid dd {
   color: var(--text-primary);
   background: var(--bg-overlay);
 }
+
+/* Link target readout (js/link-status.js): a browser-style status line pinned
+   to a bottom corner of the preview pane. It lives on <body> - so it can never
+   reach the export payload, which is built from .preview-content - and is
+   anchor-positioned to the pane instead of nested in it. */
+.preview-container {
+  anchor-name: --preview-pane;
+}
+
+.link-status {
+  position: fixed;
+  position-anchor: --preview-pane;
+  bottom: anchor(bottom);
+  left: anchor(left);
+  position-visibility: anchors-visible;
+  z-index: 50;
+  pointer-events: none;
+  max-width: min(60%, 460px);
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 0 var(--radius) 0 0;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-ui);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 90ms ease, visibility 0s 90ms;
+}
+
+/* Flip to the other corner when the hovered link is itself down there. */
+.link-status[data-side="right"] {
+  left: auto;
+  right: anchor(right);
+  border-radius: var(--radius) 0 0 0;
+}
+
+.link-status.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 90ms ease;
+}

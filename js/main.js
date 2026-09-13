@@ -2,6 +2,7 @@ import { Elm } from "../src/Main.elm";
 import { wirePorts } from "./ports.js";
 import { initMermaid } from "./mermaid-init.js";
 import { setupTooltips } from "./tooltips.js";
+import { setupLinkStatus } from "./link-status.js";
 import { applyPreferences, preloadFonts } from "./preferences.js";
 
 const initialState = window.electronAPI?.getInitialState?.() ?? {};
@@ -21,3 +22,4 @@ preloadFonts([initialState.editorFont, initialState.uiFont].filter(Boolean));
 wirePorts(app, initialState);
 initMermaid();
 setupTooltips();
+setupLinkStatus();

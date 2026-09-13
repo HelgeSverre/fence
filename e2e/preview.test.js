@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
-const { launchFence, setEditorContent, openSettings, captureMenu, captureClipboard, waitFor } = require("./helpers");
+const { launchFence, setEditorContent, openSettings, captureMenu, captureClipboard, waitFor, sendFromElm, stubSaveDialog, waitForPath } = require("./helpers");
 
 describe("preview", () => {
   test("the virtualized editor plan renders instead of showing the welcome screen", async () => {
@@ -329,6 +329,48 @@ describe("preview", () => {
       assert.deepEqual(await copied(), { text: "docs" });
       await menu.click("Copy Link Address");
       assert.deepEqual(await copied(), { text: "https://example.com/a?b=1" });
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("hovering a link shows where it goes, and the readout stays out of the export", async () => {
+    const doc = [
+      "# Links",
+      "",
+      "[external](https://example.com/deeply/nested/page) and [local](other/deep.md) and [anchor](#links).",
+      "",
+    ].join("\n");
+    const fence = await launchFence({ files: { "note.md": doc, "other/deep.md": "# Deep\n" }, open: "note.md" });
+    try {
+      const { window } = fence;
+      const preview = window.getByTestId("preview-content");
+      await preview.locator("h1#links").waitFor();
+      const status = window.getByTestId("link-status");
+
+      await preview.getByRole("link", { name: "external" }).hover();
+      await status.waitFor({ state: "visible" });
+      assert.equal(await status.textContent(), "https://example.com/deeply/nested/page");
+
+      await preview.getByRole("link", { name: "local" }).hover();
+      await status.waitFor({ state: "visible" });
+      assert.equal(await status.textContent(), "other/deep.md");
+
+      await preview.getByRole("link", { name: "anchor" }).hover();
+      await status.waitFor({ state: "visible" });
+      assert.match(await status.textContent(), /In this document .* links/);
+
+      await window.getByTestId("sidebar").hover();
+      await status.waitFor({ state: "hidden" });
+
+      // Exported HTML is built from the pane, which the readout is not part of.
+      await preview.getByRole("link", { name: "external" }).hover();
+      await status.waitFor({ state: "visible" });
+      const target = path.join(fence.workspace, "out.html");
+      await stubSaveDialog(fence.app, target);
+      await sendFromElm(fence.app, { tag: "exportRequested", format: "html" });
+      await waitForPath(target, 20000);
+      assert.doesNotMatch(fs.readFileSync(target, "utf8"), /<div class="link-status"/);
     } finally {
       await fence.close();
     }

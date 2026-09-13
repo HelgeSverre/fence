@@ -185,20 +185,34 @@ describe("preview", () => {
       await preview.locator(".mermaid-fullscreen-btn").click();
       await window.waitForFunction(() => document.querySelector("#mermaid-fullscreen")?.matches(":popover-open"));
 
-      const view = () => window.evaluate(() => ({
-        transform: document.querySelector("#mermaid-fullscreen svg").style.transform,
-        label: document.querySelector(".mermaid-fullscreen-level").textContent,
-      }));
-      assert.deepEqual(await view(), { transform: "translate(0px, 0px) scale(1)", label: "100%" });
+      // Zoom is the SVG's laid-out size, not a transform scale, so the vector
+      // is rasterized at the zoomed size instead of a bitmap being stretched.
+      const view = () => window.evaluate(() => {
+        const svg = document.querySelector("#mermaid-fullscreen svg");
+        return {
+          transform: svg.style.transform,
+          width: Math.round(svg.getBoundingClientRect().width),
+          label: document.querySelector(".mermaid-fullscreen-level").textContent,
+        };
+      });
+      const fitted = await view();
+      assert.equal(fitted.transform, "translate(0px, 0px)");
+      assert.equal(fitted.label, "100%");
 
       await window.locator(".mermaid-fullscreen-zoom[aria-label='Zoom in']").click();
-      assert.equal((await view()).label, "125%", "the zoom button must zoom in");
+      const zoomed = await view();
+      assert.equal(zoomed.label, "125%", "the zoom button must zoom in");
+      assert.ok(zoomed.width > fitted.width, "zooming must grow the laid-out size");
+      assert.doesNotMatch(zoomed.transform, /scale\(/, "zoom must not be a transform scale");
 
       await window.keyboard.press("ArrowRight");
       assert.match((await view()).transform, /translate\(-40px, 0px\)/, "arrow keys must pan");
 
       await window.keyboard.press("0");
-      assert.deepEqual(await view(), { transform: "translate(0px, 0px) scale(1)", label: "100%" }, "0 must reset");
+      const reset = await view();
+      assert.equal(reset.transform, "translate(0px, 0px)", "0 must reset the pan");
+      assert.equal(reset.label, "100%", "0 must reset the zoom");
+      assert.equal(reset.width, fitted.width, "0 must return to the fitted size");
 
       // Drag to pan, then double-click to reset.
       const box = await window.locator(".mermaid-fullscreen-figure").boundingBox();
@@ -210,7 +224,7 @@ describe("preview", () => {
       assert.match((await view()).transform, /translate\(100px, 50px\)/, "dragging must pan by the cursor delta");
 
       await window.mouse.dblclick(cx, cy);
-      assert.equal((await view()).transform, "translate(0px, 0px) scale(1)", "double-click must reset");
+      assert.equal((await view()).transform, "translate(0px, 0px)", "double-click must reset");
     } finally {
       await fence.close();
     }

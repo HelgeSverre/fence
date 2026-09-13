@@ -179,7 +179,20 @@ Three details that are easy to get wrong:
   clone of the pane.
 
 The diagram is cloned rather than moved, which keeps the render cache in
-`mermaid-init.js` from fighting over the element. The trade-off is that
+`mermaid-init.js` from fighting over the element.
+
+Zoom is the SVG's laid-out size, not a `transform: scale()`. A transform
+scale on a composited layer stretches the bitmap the layer was rasterized
+into, which goes visibly blurry a few hundred percent in and only sharpens
+when something else invalidates the layer, such as a window resize. Sizing
+the box instead makes the browser lay the vector out at that size, so it
+rasterizes crisply at any zoom. Panning stays a transform, which has no such
+problem. There is deliberately no `will-change: transform` on the diagram:
+promoting it is exactly what pins the raster scale.
+
+Note that this class of bug cannot be caught by a screenshot test. Capturing
+a screenshot forces a fresh raster, so the captured image is crisp even when
+the screen is not. The trade-off is that
 mermaid's `bindFunctions` click handlers do not come along; diagrams render
 with `securityLevel: "strict"`, so there is little to lose. Elm owns only the `data-source` attribute on that element; the
 rendered SVG children belong to JS, which keeps Elm from diffing SVG it did

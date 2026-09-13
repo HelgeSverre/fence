@@ -19,16 +19,39 @@ let figure = null;
 let paneObserver = null;
 let zoomLabel = null;
 
-// Pan/zoom of the expanded diagram, as a transform on the SVG. The SVG stays
-// laid out by flex + preserveAspectRatio, so scale 1 is always "fitted".
+// Pan/zoom of the expanded diagram. `scale` is applied as the SVG's layout
+// size, not as a transform: a transform scale stretches the rasterized layer,
+// which goes visibly blurry a few hundred percent in and only sharpens when
+// something else invalidates the layer. Sizing the box makes the browser lay
+// the vector out at that size, so it is rasterized crisply at any zoom.
+// Panning stays a transform, which never rasterizes wrongly.
 const view = { scale: 1, x: 0, y: 0 };
+
+// The fitted size, i.e. what scale 1 means. Measured when the diagram opens
+// and whenever the pane resizes under it.
+const fitted = { width: 0, height: 0 };
 
 function applyView() {
   const svg = figure?.firstElementChild;
   if (!svg) return;
-  svg.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+  svg.style.width = `${fitted.width * view.scale}px`;
+  svg.style.height = `${fitted.height * view.scale}px`;
+  svg.style.transform = `translate(${view.x}px, ${view.y}px)`;
   if (zoomLabel) zoomLabel.textContent = `${Math.round(view.scale * 100)}%`;
-  figure.dataset.zoomed = view.scale !== 1 || view.x !== 0 || view.y !== 0 ? "true" : "false";
+}
+
+/** Re-measure what "fitted" means, keeping the current zoom. Called when the
+    diagram opens and when the pane changes size under it. */
+function measureFit() {
+  if (!figure) return;
+  const svg = figure.firstElementChild;
+  if (!svg) return;
+  svg.style.width = "";
+  svg.style.height = "";
+  const box = svg.getBoundingClientRect();
+  fitted.width = box.width;
+  fitted.height = box.height;
+  applyView();
 }
 
 function resetView() {
@@ -72,6 +95,8 @@ function trackPane() {
   overlay.style.left = `${box.left}px`;
   overlay.style.width = `${box.width}px`;
   overlay.style.height = `${box.height}px`;
+  // A different pane size means a different fitted size to zoom from.
+  measureFit();
 }
 
 function ensureOverlay() {
@@ -230,9 +255,13 @@ function expand(block) {
   if (!svg) return;
   ensureOverlay();
   figure.replaceChildren(scalableCopy(svg));
-  resetView();
+  view.scale = 1;
+  view.x = 0;
+  view.y = 0;
   trackPane();
   overlay.showPopover();
+  // The fitted size is only measurable once the overlay is laid out.
+  measureFit();
 }
 
 /** Called after a block renders. The button is injected rather than rendered

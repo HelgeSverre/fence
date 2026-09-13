@@ -62,6 +62,77 @@
   --syntax-list: oklch(0.559 0.089 194.8);
 }
 
+/* Polar Night — near-black blue chrome, bright text, and a separate code palette. */
+[data-theme="polar-night"] {
+  color-scheme: dark;
+  --bg-base: oklch(0.125 0.010 250);
+  --bg-surface: oklch(0.150 0.012 250);
+  --bg-overlay: oklch(0.200 0.014 250);
+  --bg-elevated: oklch(0.240 0.016 250);
+  --text-primary: oklch(0.980 0.004 250);
+  --text-secondary: oklch(0.840 0.014 250);
+  --text-muted: oklch(0.700 0.020 250);
+  --accent: oklch(0.820 0.080 230);
+  --accent-hover: oklch(0.890 0.065 230);
+  --accent-text: oklch(0.890 0.065 230);
+  --border: oklch(0.285 0.020 250);
+  --status-error: oklch(0.790 0.125 20);
+  --selection: oklch(0.350 0.055 240);
+
+  /* Keep Markdown quiet; reserve ice blue for links and interface actions. */
+  --syntax-emphasis: oklch(0.880 0.018 250);
+  --syntax-strong: var(--text-primary);
+  --syntax-heading: oklch(0.930 0.025 250);
+  --syntax-list: var(--text-secondary);
+
+  /* Code has its own violet-black surfaces and sage/lilac/gold/apricot tokens.
+     Explicit code colors avoid inheriting the interface accent or headings. */
+  --code-background: oklch(0.178 0.013 275);
+  --code-inline-background: oklch(0.225 0.020 275);
+  --code-border: oklch(0.310 0.025 275);
+  --syntax-code: oklch(0.860 0.090 150);
+  --code-comment: oklch(0.730 0.020 270);
+  --code-number: oklch(0.870 0.100 85);
+  --code-keyword: oklch(0.810 0.105 305);
+  --code-function: oklch(0.830 0.100 50);
+}
+
+/* Deep Tide — teal-black surfaces, crisp boundaries, and restrained lime accents. */
+[data-theme="deep-tide"] {
+  color-scheme: dark;
+  accent-color: var(--accent);
+  --bg-base: oklch(0.130 0.014 190);
+  --bg-surface: oklch(0.180 0.019 190);
+  --bg-overlay: oklch(0.235 0.024 190);
+  --bg-elevated: oklch(0.280 0.026 190);
+  --text-primary: oklch(0.993 0.003 190);
+  --text-secondary: oklch(0.890 0.014 190);
+  --text-muted: oklch(0.765 0.020 190);
+  --accent: oklch(0.845 0.105 126);
+  --accent-hover: oklch(0.905 0.095 126);
+  --accent-text: oklch(0.905 0.095 126);
+  --border: oklch(0.340 0.030 190);
+  --status-error: oklch(0.820 0.100 20);
+  --selection: oklch(0.350 0.035 190);
+
+  /* Neutral Markdown keeps the lime accents sparse. */
+  --syntax-emphasis: oklch(0.930 0.012 190);
+  --syntax-strong: var(--text-primary);
+  --syntax-heading: oklch(0.975 0.009 190);
+  --syntax-list: var(--text-secondary);
+
+  /* Steel-blue code surfaces with blue/lavender/sand/coral tokens;
+     lime belongs to links and interface actions. */
+  --code-background: oklch(0.195 0.017 230);
+  --code-inline-background: oklch(0.245 0.020 230);
+  --code-border: oklch(0.355 0.025 230);
+  --syntax-code: oklch(0.870 0.065 230);
+  --code-comment: oklch(0.785 0.016 210);
+  --code-number: oklch(0.875 0.080 75);
+  --code-keyword: oklch(0.855 0.085 315);
+  --code-function: oklch(0.840 0.085 30);
+}
+
 /* GitHub Dark */
 [data-theme="github-dark"] {
   /* Primer's own ladder: canvas.default for the editor, canvas.subtle for the

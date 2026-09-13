@@ -267,6 +267,8 @@ themes : List ( String, String )
 themes =
     [ ( "", "Catppuccin Mocha" )
     , ( "light", "Catppuccin Latte" )
+    , ( "polar-night", "Polar Night" )
+    , ( "deep-tide", "Deep Tide" )
     , ( "github-dark", "GitHub Dark" )
     , ( "vscode-dark", "VS Code Dark+" )
     , ( "fleet-dark", "Fleet Dark" )

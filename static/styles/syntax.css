@@ -38,7 +38,7 @@
 }
 
 .veditor .md-code-span {
-  background: var(--bg-overlay);
+  background: var(--code-inline-background, var(--bg-overlay));
   border-radius: 2px;
   /* Token decoration must not change the editor cell geometry. */
 }

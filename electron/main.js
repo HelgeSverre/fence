@@ -465,7 +465,9 @@ registerIpc("fence:read-dir", async (data) => {
   sendToRenderer({ tag: "dirContents", path: dirPath, entries });
 });
 
-registerIpc("fence:open-link", async data => {
+registerIpc("fence:open-link", data => openLink(data));
+
+async function openLink(data) {
   const documentPath = await fsOps.resolvePath(requireString(data, "documentPath", 32768));
   const url = new URL(requireString(data, "href", 32768), pathToFileURL(documentPath));
   if (url.protocol !== "file:") return;
@@ -485,7 +487,7 @@ registerIpc("fence:open-link", async data => {
       sendToRenderer({ tag: "navigateHeading", path: target, fragment });
     });
   }
-});
+}
 
 registerIpc("fence:read-file", async (data) => {
   const filePath = requireString(data, "path", 32768);
@@ -620,6 +622,56 @@ registerIpc("fence:tree-context-menu", async (data) => {
     },
     { label: "Copy Path", click: () => clipboard.writeText(filePath) },
   ]).popup({ window: mainWindow });
+});
+
+// Right-click in the editor. cut/copy/paste roles reach the hidden input and
+// js/virtual-input.js turns them into the editor's own clipboard path; Select
+// All has to go back to Elm, since the input itself holds no text.
+registerIpc("fence:editor-context-menu", (data) => {
+  if (typeof data.hasSelection !== "boolean") throw new TypeError("Invalid hasSelection");
+  const hasText = clipboard.readText().length > 0;
+  Menu.buildFromTemplate([
+    { role: "cut", enabled: data.hasSelection },
+    { role: "copy", enabled: data.hasSelection },
+    { role: "paste", enabled: hasText },
+    { role: "pasteAndMatchStyle", enabled: hasText },
+    { type: "separator" },
+    { label: "Select All", click: () => sendToRenderer({ tag: "editCommand", command: "selectAll" }) },
+  ]).popup({ window: mainWindow });
+});
+
+// Right-click in the preview. Nothing there is editable, so no paste. The
+// selected text comes with the payload rather than through webContents.copy(),
+// which would follow the focused element (usually the editor's hidden input).
+registerIpc("fence:preview-context-menu", (data) => {
+  const documentPath = requireString(data, "documentPath", 32768);
+  const href = requireString(data, "href", 32768);
+  const imageSrc = requireString(data, "imageSrc", 32768);
+  const selection = requireString(data, "selection");
+
+  const template = [
+    { label: "Copy", enabled: selection.length > 0, click: () => clipboard.writeText(selection) },
+    { label: "Select All", click: () => sendToRenderer({ tag: "editCommand", command: "previewSelectAll" }) },
+  ];
+  if (href) {
+    template.push(
+      { type: "separator" },
+      { label: "Copy Link Address", click: () => clipboard.writeText(href) },
+      {
+        label: "Open Link",
+        // Same split as the renderer's click handler: local links go through
+        // the vetted open path, anything absolute through the scheme filter.
+        click: () => {
+          if (href.startsWith("//") || (/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("file:"))) openExternalIfSafe(href);
+          else openLink({ documentPath, href }).catch((error) => sendToRenderer({ tag: "error", message: error.message }));
+        },
+      },
+    );
+  }
+  if (imageSrc) {
+    template.push({ type: "separator" }, { label: "Copy Image Address", click: () => clipboard.writeText(imageSrc) });
+  }
+  Menu.buildFromTemplate(template).popup({ window: mainWindow });
 });
 
 registerIpc("fence:set-title", (data) => {

@@ -142,8 +142,26 @@ async function captureClipboard(app) {
   await app.evaluate(({ clipboard }) => {
     globalThis.__copied = null;
     clipboard.write = (data) => { globalThis.__copied = data; };
+    clipboard.writeText = (text) => { globalThis.__copied = { text }; };
   });
   return () => app.evaluate(() => globalThis.__copied);
+}
+
+// Playwright cannot drive a native menu, so record the template instead of
+// popping it up. `template()` returns the plain item fields; `click(label)`
+// runs an item's handler.
+async function captureMenu(app) {
+  await app.evaluate(({ Menu }) => {
+    globalThis.__menu = null;
+    Menu.buildFromTemplate = (template) => {
+      globalThis.__menu = template;
+      return { popup: () => {} };
+    };
+  });
+  return {
+    template: () => app.evaluate(() => globalThis.__menu?.map(({ label, role, type, enabled }) => ({ label, role, type, enabled }))),
+    click: (label) => app.evaluate((_electron, want) => globalThis.__menu.find((item) => item.label === want).click(), label),
+  };
 }
 
 // Answer the next native save dialog with `filePath`, without showing it.
@@ -170,4 +188,4 @@ const waitForPreviewSettled = (window, timeout = 15000) =>
 
 const save = (window) => window.keyboard.press(`${MOD}+s`);
 
-module.exports = { MOD, launchFence, withFence, openEditor, focusEditor, editorText, expectEditorText, waitForEditorValue, setEditorContent, waitFor, waitForFile, waitForPath, waitForPreviewSettled, sendFromElm, openSettings, captureClipboard, stubSaveDialog, save };
+module.exports = { MOD, launchFence, withFence, openEditor, focusEditor, editorText, expectEditorText, waitForEditorValue, setEditorContent, waitFor, waitForFile, waitForPath, waitForPreviewSettled, sendFromElm, openSettings, captureClipboard, captureMenu, stubSaveDialog, save };

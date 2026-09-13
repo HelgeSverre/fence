@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
-const { launchFence, setEditorContent, openSettings } = require("./helpers");
+const { launchFence, setEditorContent, openSettings, captureMenu, captureClipboard, waitFor } = require("./helpers");
 
 describe("preview", () => {
   test("the virtualized editor plan renders instead of showing the welcome screen", async () => {
@@ -295,6 +295,40 @@ describe("preview", () => {
       await window.locator('.mermaid[data-state="error"]').waitFor();
       assert.equal(await window.locator(".mermaid svg").count(), 0);
       assert.match(await window.locator(".mermaid-source").textContent(), /broken again/);
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("right-clicking the preview offers copy, and link items over a link", async () => {
+    const fence = await launchFence({ files: { "note.md": "Some [docs](https://example.com/a?b=1) here.\n" }, open: "note.md" });
+    try {
+      const { window } = fence;
+      const preview = window.getByTestId("preview-content");
+      await preview.locator("a").waitFor();
+      const menu = await captureMenu(fence.app);
+      const copied = await captureClipboard(fence.app);
+
+      // Away from the link: no paste, no link items, Copy off without a selection.
+      await preview.locator("p").click({ button: "right", position: { x: 2, y: 2 } });
+      const plain = await waitFor(menu.template, { label: "the preview context menu" });
+      assert.deepEqual(plain.map((item) => item.label ?? item.type), ["Copy", "Select All"]);
+      assert.equal(plain[0].enabled, false);
+
+      // On the link, with a selection.
+      await preview.locator("a").evaluate((el) => window.getSelection().selectAllChildren(el));
+      await preview.locator("a").click({ button: "right" });
+      const onLink = await waitFor(async () => {
+        const items = await menu.template();
+        return items?.some((item) => item.label === "Copy Link Address") ? items : null;
+      }, { label: "the link items" });
+      assert.deepEqual(onLink.map((item) => item.label ?? item.type), ["Copy", "Select All", "separator", "Copy Link Address", "Open Link"]);
+      assert.equal(onLink[0].enabled, true);
+
+      await menu.click("Copy");
+      assert.deepEqual(await copied(), { text: "docs" });
+      await menu.click("Copy Link Address");
+      assert.deepEqual(await copied(), { text: "https://example.com/a?b=1" });
     } finally {
       await fence.close();
     }

@@ -166,12 +166,22 @@ view config metrics scrollTop maxLineLength lines =
         -- past the last line, in the padding, right of a short line - places
         -- the caret, the way every other editor behaves. Window coordinates,
         -- so it does not matter which element was actually hit.
+        -- Left button only: a right-click opens the context menu and must
+        -- leave the caret and the selection it acts on alone.
         , preventDefaultOn "mousedown"
-            (D.map4 (\x y shift clicks -> ( config.onPointerDown { x = x, y = y, shift = shift, clicks = clicks }, True ))
-                (D.field "clientX" D.float)
-                (D.field "clientY" D.float)
-                (D.field "shiftKey" D.bool)
-                (D.field "detail" D.int)
+            (D.field "button" D.int
+                |> D.andThen
+                    (\button ->
+                        if button /= 0 then
+                            D.fail "not the primary button"
+
+                        else
+                            D.map4 (\x y shift clicks -> ( config.onPointerDown { x = x, y = y, shift = shift, clicks = clicks }, True ))
+                                (D.field "clientX" D.float)
+                                (D.field "clientY" D.float)
+                                (D.field "shiftKey" D.bool)
+                                (D.field "detail" D.int)
+                    )
             )
         ]
         [ div

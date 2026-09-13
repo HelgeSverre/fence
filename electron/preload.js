@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   watchDir: send("fence:watch-dir"),
   unwatchDir: send("fence:unwatch-dir"),
   showTreeContextMenu: send("fence:tree-context-menu"),
+  showEditorContextMenu: send("fence:editor-context-menu"),
+  showPreviewContextMenu: send("fence:preview-context-menu"),
   createFile: send("fence:create-file"),
   createDir: send("fence:create-dir"),
   renamePath: send("fence:rename-path"),

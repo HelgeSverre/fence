@@ -78,6 +78,8 @@ export function wirePorts(app, initialState = {}) {
     window.electronAPI.onMessage((data) => {
       if (data.tag === "navigateHeading") {
         navigatePreviewHeading(data);
+      } else if (data.tag === "editCommand") {
+        runEditCommand(data.command);
       } else {
         app.ports.fromElectron.send(data);
       }
@@ -91,12 +93,37 @@ export function wirePorts(app, initialState = {}) {
     }
   });
 
-  // Right-click on a file-tree item -> native context menu in main process
+  // Right-click -> native context menu built in the main process.
   document.addEventListener("contextmenu", (e) => {
+    if (!window.electronAPI) return;
     const item = e.target.closest(".file-tree-item[data-path]");
-    if (!item || !window.electronAPI) return;
-    e.preventDefault();
-    window.electronAPI.showTreeContextMenu({ path: item.dataset.path });
+    if (item) {
+      e.preventDefault();
+      window.electronAPI.showTreeContextMenu({ path: item.dataset.path });
+      return;
+    }
+    if (e.target.closest(".veditor")) {
+      e.preventDefault();
+      // cut/copy/paste act on the focused element, and the editor's selection
+      // only exists on the hidden input.
+      const input = document.getElementById("veditor-input");
+      input?.focus({ preventScroll: true });
+      window.electronAPI.showEditorContextMenu({ hasSelection: Boolean(input?.dataset.selection) });
+      return;
+    }
+    const pane = e.target.closest(".preview-content");
+    if (pane) {
+      e.preventDefault();
+      const image = e.target.closest("img[src]");
+      window.electronAPI.showPreviewContextMenu({
+        documentPath: pane.dataset.documentPath || "",
+        href: e.target.closest("a[href]")?.getAttribute("href") || "",
+        // Local images are rendered as fence-image:// URLs; the address worth
+        // copying is the source the document actually names.
+        imageSrc: imageAddress(image?.getAttribute("src") || ""),
+        selection: window.getSelection()?.toString() || "",
+      });
+    }
   });
 
   setupEditorMetrics(app);
@@ -112,6 +139,30 @@ export function wirePorts(app, initialState = {}) {
     const documentPath = link.closest(".preview-content").dataset.documentPath;
     if (documentPath) window.electronAPI?.openLink({ documentPath, href });
   });
+}
+
+// A fence-image:// URL carries the document's own source in its query.
+function imageAddress(src) {
+  if (!src.startsWith("fence-image:")) return src;
+  try {
+    return new URL(src).searchParams.get("src") || src;
+  } catch {
+    return src;
+  }
+}
+
+// Select All from a context menu. The editor's selection lives in Elm, so
+// replay the shortcut it already handles; the preview is plain DOM.
+function runEditCommand(command) {
+  if (command === "selectAll") {
+    const input = document.getElementById("veditor-input");
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "a", metaKey: true, bubbles: true, cancelable: true }));
+  } else if (command === "previewSelectAll") {
+    const pane = document.querySelector(".preview-content");
+    if (pane) window.getSelection()?.selectAllChildren(pane);
+  }
 }
 
 // Export takes the preview exactly as rendered - mermaid diagrams included -

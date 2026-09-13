@@ -6,7 +6,9 @@ export function setupVirtualInput() {
   // Focus the hidden input on click without letting focus() scroll the
   // container (Elm's mousedown handler prevents the default focus change).
   document.addEventListener("mousedown", (e) => {
-    const scroller = e.target?.closest?.(".veditor");
+    // A right-click only opens the context menu; moving the input there would
+    // drag the caret away from the selection the menu acts on.
+    const scroller = e.button === 0 ? e.target?.closest?.(".veditor") : null;
     if (!scroller) return;
     const input = document.getElementById("veditor-input");
     const spacer = scroller.querySelector(".veditor-spacer");

@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test, describe } = require("node:test");
-const { launchFence, setEditorContent, waitForEditorValue, waitForFile, sendFromElm, save } = require("./helpers");
+const { MOD, launchFence, setEditorContent, waitForEditorValue, waitForFile, waitFor, sendFromElm, captureMenu, save } = require("./helpers");
 
 describe("editing and saving", () => {
   test("typing updates the preview after the debounce", async () => {
@@ -171,6 +171,41 @@ describe("editing and saving", () => {
       } finally { await fence.close(); }
     });
   }
+
+  test("right-clicking the editor offers the editing commands, enabled by the selection", async () => {
+    const fence = await launchFence();
+    try {
+      const { window } = fence;
+      await setEditorContent(window, "# Hello\n");
+      const menu = await captureMenu(fence.app);
+
+      await window.locator(".veditor-spacer").click({ button: "right", position: { x: 2, y: 2 } });
+      const empty = await waitFor(menu.template, { label: "the editor context menu" });
+      assert.deepEqual(empty.map((item) => item.role ?? item.label ?? item.type), ["cut", "copy", "paste", "pasteAndMatchStyle", "separator", "Select All"]);
+      assert.equal(empty.find((item) => item.role === "cut").enabled, false);
+      assert.equal(empty.find((item) => item.role === "copy").enabled, false);
+
+      // With a selection cut/copy light up, and the right-click leaves it alone.
+      await window.keyboard.press(`${MOD}+a`);
+      await window.waitForFunction(() => document.getElementById("veditor-input")?.dataset.selection === "# Hello\n");
+      await window.locator(".veditor-spacer").click({ button: "right", position: { x: 2, y: 2 } });
+      const selected = await waitFor(async () => {
+        const items = await menu.template();
+        return items?.find((item) => item.role === "copy")?.enabled ? items : null;
+      }, { label: "cut/copy to be enabled" });
+      assert.equal(selected.find((item) => item.role === "cut").enabled, true);
+      assert.equal(await window.evaluate(() => document.getElementById("veditor-input")?.dataset.selection), "# Hello\n");
+
+      // Select All comes back from the menu as a renderer command.
+      await window.keyboard.press("ArrowRight");
+      await window.waitForFunction(() => document.getElementById("veditor-input")?.dataset.selection === "");
+      await sendFromElm(fence.app, { tag: "editCommand", command: "selectAll" });
+      await window.waitForFunction(() => document.getElementById("veditor-input")?.dataset.selection === "# Hello\n");
+      assert.equal(await window.evaluate(() => document.activeElement?.id), "veditor-input");
+    } finally {
+      await fence.close();
+    }
+  });
 
 });
 

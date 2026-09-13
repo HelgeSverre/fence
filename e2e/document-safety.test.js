@@ -170,3 +170,48 @@ test('a clicked link can open a document above the current workspace', async () 
     assert.equal(await f.window.locator('#veditor-input').getAttribute('data-path'), f.file('parent.md'));
   } finally { await f.close(); }
 });
+
+// A renderer that never answers the close guard's state probe must not make
+// the window impossible to close: the guard falls back to the dirty flag the
+// renderer last reported, and asks before discarding anything.
+async function closeWithHungRenderer(f, dialogAnswer) {
+  await f.app.evaluate(({ dialog }, answer) => {
+    globalThis.__closeDialog = null;
+    dialog.showMessageBox = async (_w, opts) => { globalThis.__closeDialog = opts.title; return { response: answer }; };
+  }, dialogAnswer);
+  // Block the renderer's JS thread outright; deliberately not awaited.
+  f.window.evaluate(() => { const until = Date.now() + 20000; while (Date.now() < until) { /* hang */ } }).catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const closed = await f.app.evaluate(async ({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    win.close();
+    for (let i = 0; i < 150; i += 1) {
+      if (win.isDestroyed()) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  });
+  return { closed, dialog: await f.app.evaluate(() => globalThis.__closeDialog) };
+}
+
+test('an unresponsive renderer does not make a clean document impossible to close', async () => {
+  const f = await launchFence({ files: { 'note.md': '# Clean\n' } });
+  try {
+    const { closed, dialog } = await closeWithHungRenderer(f, 1);
+    assert.equal(closed, true, 'the window must still close');
+    assert.equal(dialog, null, 'nothing was unsaved, so nothing to ask about');
+  } finally { await f.close(); }
+});
+
+test('an unresponsive renderer asks before discarding unsaved changes', async () => {
+  for (const [answer, shouldClose] of [[0, true], [1, false]]) {
+    const f = await launchFence({ files: { 'note.md': '# Doc\n' } });
+    try {
+      await setEditorContent(f.window, '# Doc\n\nunsaved edit\n');
+      await f.window.waitForFunction(() => window.electronAPI && document.querySelector('[data-testid=editor-header]').textContent.includes('*'));
+      const { closed, dialog } = await closeWithHungRenderer(f, answer);
+      assert.match(dialog ?? '', /not responding/i, 'the user must be asked before losing work');
+      assert.equal(closed, shouldClose, answer === 0 ? 'Close Anyway must close' : 'Cancel must keep it open');
+    } finally { await f.close(); }
+  }
+});

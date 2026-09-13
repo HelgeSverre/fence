@@ -78,6 +78,16 @@ bun run vendor-fonts # Copy sans fonts from @fontsource into static/fonts, regen
 
 Vite dev server runs on **port 5173**.
 
+A dev run keeps its own state under `Application Support/fence-dev`, so it has
+its own single-instance lock and never collides with an installed Fence. Set
+`FENCE_USER_DATA` to work against a specific directory; the e2e suite does
+exactly that.
+
+`bun run dev` owns `dist-electron/`, rebuilding it on every change and removing
+it on exit. The e2e suite launches that same file, so running the suite while a
+dev server is up will fail in confusing ways. Stop dev first, or rebuild with
+`bunx vite build` before running e2e.
+
 ## Architecture
 
 ### Elm Architecture (TEA)

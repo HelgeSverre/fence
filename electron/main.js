@@ -16,6 +16,13 @@ const {
 // recovery drafts or single-instance lock. Must run before the lock below.
 if (process.env.FENCE_USER_DATA) {
   app.setPath("userData", process.env.FENCE_USER_DATA);
+} else if (!app.isPackaged) {
+  // A dev run keeps its own state directory, and with it its own
+  // single-instance lock: sharing the installed app's means `bun run dev`
+  // while Fence is open loses the lock, quits, and hands its arguments to
+  // the installed app instead of opening a dev window.
+  // Point FENCE_USER_DATA at the real directory to work against live state.
+  app.setPath("userData", path.join(app.getPath("userData"), "..", "fence-dev"));
 }
 
 // Set by the e2e suite and profiling scripts: run fully headless. The window
@@ -76,6 +83,45 @@ async function confirmNavigation(closing = false) {
     // during the write are checked again rather than discarded.
   }
 }
+
+/**
+ * Close, checking for unsaved work first, but never becoming impossible to
+ * close. The guard asks the renderer for its document state; if the renderer
+ * does not answer — a reload in flight, or a hung page — that question can
+ * never be settled, and preventing the close forever traps the window.
+ *
+ * So probe first. If the renderer is silent, fall back to the dirty flag it
+ * last reported: close straight away when there was nothing unsaved, and ask
+ * before discarding anything when there was.
+ */
+async function closeGuarded(window) {
+  try {
+    await requestDocumentState();
+  } catch {
+    if (window.isDestroyed()) return;
+    if (window._isDirty) {
+      const { response } = await dialog.showMessageBox(window, {
+        type: "warning",
+        buttons: ["Close Anyway", "Cancel"],
+        defaultId: 1,
+        cancelId: 1,
+        title: "Fence Is Not Responding",
+        message: "The editor stopped responding, so unsaved changes cannot be saved.",
+        detail: "Closing now discards them.",
+      });
+      if (response !== 0) return;
+    }
+    window._closeApproved = true;
+    window.close();
+    return;
+  }
+
+  await navigate(async () => {
+    window._closeApproved = true;
+    window.close();
+  }, true);
+}
+
 
 function navigate(action, closing = false) {
   const task = navigationQueue.then(async () => {
@@ -249,10 +295,7 @@ function createWindow() {
     event.preventDefault();
     if (checkingClose) return;
     checkingClose = true;
-    navigate(async () => {
-      window._closeApproved = true;
-      window.close();
-    }, true).finally(() => { checkingClose = false; });
+    closeGuarded(window).finally(() => { checkingClose = false; });
   });
 
   // Open external links in system browser

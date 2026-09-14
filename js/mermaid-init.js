@@ -10,7 +10,7 @@ function loadMermaid() {
 
 function getMermaidTheme() {
   const appTheme = document.documentElement.getAttribute("data-theme");
-  return appTheme === "light" ? "default" : "dark";
+  return ["light", "jetbrains-light", "jetbrains-islands-light"].includes(appTheme) ? "default" : "dark";
 }
 
 let renderTimeout = null;

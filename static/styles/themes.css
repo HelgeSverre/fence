@@ -277,3 +277,114 @@
   --syntax-heading: oklch(0.855 0.089 84.1);
   --syntax-list: oklch(0.693 0.096 38.2);
 }
+
+/* Adapted from Artem Evsevev’s JetBrains themes for Zed (Apache-2.0).
+   Copyright 2025 Artem Evsevev. See static/licenses/jetbrains-themes/.
+   Modified for Fence: UI/Markdown tokens, shared code token groups, oklch. */
+/* JetBrains Dark */
+[data-theme="jetbrains-dark"] {
+  color-scheme: dark;
+  --bg-base: oklch(0.23947 0.00590 271.17);
+  --bg-surface: oklch(0.27600 0.00624 258.36);
+  --bg-overlay: oklch(0.35269 0.01072 271.10);
+  --bg-elevated: oklch(0.40925 0.00514 271.29);
+  --text-primary: oklch(0.80173 0.00869 271.31);
+  --text-secondary: oklch(0.76018 0.00305 264.54);
+  --text-muted: oklch(0.55443 0.01186 261.77);
+  --accent: oklch(0.71355 0.13868 249.06);
+  --accent-hover: oklch(0.64994 0.17260 262.72);
+  --accent-text: oklch(0.71355 0.13868 249.06);
+  --border: oklch(0.35269 0.01072 271.10);
+  --status-error: oklch(0.69997 0.18092 17.01);
+  --syntax-code: oklch(0.68254 0.10569 147.66);
+  --syntax-emphasis: oklch(0.80173 0.00869 271.31);
+  --syntax-strong: oklch(0.80173 0.00869 271.31);
+  --syntax-heading: oklch(0.68757 0.12180 332.86);
+  --syntax-list: oklch(0.80173 0.00869 271.31);
+  --code-comment: oklch(0.59201 0.01166 261.78);
+  --code-number: oklch(0.68287 0.10743 204.44);
+  --code-keyword: oklch(0.70383 0.09183 47.69);
+  --code-function: oklch(0.69468 0.09820 248.10);
+  --selection: oklch(0.39240 0.11622 262.20);
+}
+
+/* JetBrains Light */
+[data-theme="jetbrains-light"] {
+  color-scheme: light;
+  --bg-base: oklch(1.00000 0.00000 0.00);
+  --bg-surface: oklch(0.97893 0.00287 264.54);
+  --bg-overlay: oklch(0.91640 0.00269 286.35);
+  --bg-elevated: oklch(0.89429 0.00293 264.54);
+  --text-primary: oklch(0.13441 0.00000 0.00);
+  --text-secondary: oklch(0.37149 0.00000 0.00);
+  --text-muted: oklch(0.61839 0.02304 273.83);
+  --accent: oklch(0.53744 0.16889 253.60);
+  --accent-hover: oklch(0.53744 0.16889 253.60);
+  --accent-text: oklch(0.53744 0.16889 253.60);
+  --border: oklch(0.94346 0.00547 274.96);
+  --status-error: oklch(0.62796 0.25768 29.23);
+  --syntax-code: oklch(0.51254 0.16489 143.78);
+  --syntax-emphasis: oklch(0.13441 0.00000 0.00);
+  --syntax-strong: oklch(0.13441 0.00000 0.00);
+  --syntax-heading: oklch(0.45199 0.20282 323.34);
+  --syntax-list: oklch(0.13441 0.00000 0.00);
+  --code-comment: oklch(0.64009 0.00000 0.00);
+  --code-number: oklch(0.50829 0.23916 263.95);
+  --code-keyword: oklch(0.39837 0.20575 263.23);
+  --code-function: oklch(0.46002 0.08512 222.18);
+  --selection: oklch(0.84825 0.07842 249.34);
+}
+
+/* JetBrains Islands Dark */
+[data-theme="jetbrains-islands-dark"] {
+  color-scheme: dark;
+  --bg-base: oklch(0.21754 0.00419 264.48);
+  --bg-surface: oklch(0.21754 0.00419 264.48);
+  --bg-overlay: oklch(0.35269 0.01072 271.10);
+  --bg-elevated: oklch(0.40925 0.00514 271.29);
+  --text-primary: oklch(0.80173 0.00869 271.31);
+  --text-secondary: oklch(0.76018 0.00305 264.54);
+  --text-muted: oklch(0.55443 0.01186 261.77);
+  --accent: oklch(0.71355 0.13868 249.06);
+  --accent-hover: oklch(0.64994 0.17260 262.72);
+  --accent-text: oklch(0.71355 0.13868 249.06);
+  --border: oklch(0.27643 0.00791 264.44);
+  --status-error: oklch(0.69997 0.18092 17.01);
+  --syntax-code: oklch(0.68254 0.10569 147.66);
+  --syntax-emphasis: oklch(0.80173 0.00869 271.31);
+  --syntax-strong: oklch(0.80173 0.00869 271.31);
+  --syntax-heading: oklch(0.68757 0.12180 332.86);
+  --syntax-list: oklch(0.80173 0.00869 271.31);
+  --code-comment: oklch(0.59201 0.01166 261.78);
+  --code-number: oklch(0.68287 0.10743 204.44);
+  --code-keyword: oklch(0.70383 0.09183 47.69);
+  --code-function: oklch(0.71355 0.13868 249.06);
+  --selection: oklch(0.39240 0.11622 262.20);
+}
+
+/* JetBrains Islands Light */
+[data-theme="jetbrains-islands-light"] {
+  color-scheme: light;
+  --bg-base: oklch(1.00000 0.00000 0.00);
+  --bg-surface: oklch(1.00000 0.00000 0.00);
+  --bg-overlay: oklch(0.91640 0.00269 286.35);
+  --bg-elevated: oklch(0.89429 0.00293 264.54);
+  --text-primary: oklch(0.13441 0.00000 0.00);
+  --text-secondary: oklch(0.37149 0.00000 0.00);
+  --text-muted: oklch(0.61839 0.02304 273.83);
+  --accent: oklch(0.53744 0.16889 253.60);
+  --accent-hover: oklch(0.53744 0.16889 253.60);
+  --accent-text: oklch(0.53744 0.16889 253.60);
+  --border: oklch(0.93742 0.00548 274.96);
+  --status-error: oklch(0.62796 0.25768 29.23);
+  --syntax-code: oklch(0.51254 0.16489 143.78);
+  --syntax-emphasis: oklch(0.13441 0.00000 0.00);
+  --syntax-strong: oklch(0.13441 0.00000 0.00);
+  --syntax-heading: oklch(0.45199 0.20282 323.34);
+  --syntax-list: oklch(0.13441 0.00000 0.00);
+  --code-comment: oklch(0.64009 0.00000 0.00);
+  --code-number: oklch(0.50829 0.23916 263.95);
+  --code-keyword: oklch(0.39837 0.20575 263.23);
+  --code-function: oklch(0.46002 0.08512 222.18);
+  --selection: oklch(0.84825 0.07842 249.34);
+}

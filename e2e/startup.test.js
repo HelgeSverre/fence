@@ -13,7 +13,7 @@ describe("startup", () => {
       // the running app must not choke on them.
       const electron = require("electron");
       await new Promise((resolve, reject) =>
-        execFile(electron, [path.join(__dirname, "..", "dist-electron", "main.js"), fence.file("other.md")], {
+        execFile(electron, [...(process.platform === "linux" ? ["--no-sandbox"] : []), path.join(__dirname, "..", "dist-electron", "main.js"), fence.file("other.md")], {
           env: { ...process.env, FENCE_USER_DATA: fence.userDataDir },
         }, (error, stdout, stderr) => (error ? reject(new Error(`${error.message}\n${stderr}`)) : resolve())),
       );

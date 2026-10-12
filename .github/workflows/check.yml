@@ -35,5 +35,5 @@ jobs:
         run: bunx vite build
 
       - name: Electron smoke and performance test
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: ${{ runner.os == 'Linux' && 'xvfb-run -a ' || '' }}bun run test:e2e

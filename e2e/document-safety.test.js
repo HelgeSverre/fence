@@ -175,7 +175,9 @@ test('a clicked link can open a document above the current workspace', async () 
 // the window impossible to close: the guard falls back to the dirty flag the
 // renderer last reported, and asks before discarding anything.
 async function closeWithHungRenderer(f, dialogAnswer) {
-  await f.app.evaluate(({ dialog }, answer) => {
+  await f.app.evaluate(({ app, dialog }, answer) => {
+    // Keep the test process alive when Linux closes its last window.
+    app.removeAllListeners('window-all-closed');
     globalThis.__closeDialog = null;
     dialog.showMessageBox = async (_w, opts) => { globalThis.__closeDialog = opts.title; return { response: answer }; };
   }, dialogAnswer);

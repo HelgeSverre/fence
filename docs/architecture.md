@@ -149,6 +149,24 @@ flowchart TD
 Mermaid is intercepted *before* highlighting and never reaches the
 highlighter.
 
+`js/mermaid-init.js` lazily loads Mermaid and serializes its renders. Supported
+graph diagrams use Mermaid 12's bundled ELK layout; mindmaps keep their
+`cose-bilkent` layout. `js/mermaid-theme.js`
+resolves Fence's diagram color tokens to hex using Canvas, and uses the
+preview's current font and size for SVG text labels. Classic geometry, rounded
+boxes, pill labels and chevron arrows keep diagrams quiet while preserving
+authored shapes and colors. Fonts load before Mermaid measures the text.
+
+The bounded render cache is keyed by source and resolved appearance settings,
+including typography. `js/mermaid-svg.js` assigns unique IDs to each mounted
+or expanded copy and rewrites its marker, accessibility and CSS references.
+Source edits and appearance changes discard stale asynchronous results.
+
+`js/mermaid-block.js` adds Source and Actual size controls. A diagram that
+would shrink below 70% starts at actual size with horizontal scrolling;
+a ResizeObserver re-evaluates this as the pane changes width, until the user
+chooses a size explicitly. Source text remains selectable.
+
 ### Expanding a diagram
 
 Hovering a diagram reveals a button that expands it to fill the preview pane;
@@ -174,12 +192,16 @@ Three details that are easy to get wrong:
   synchronously inside the show/hide algorithm, so the overlay is positioned
   before it paints and the cloned SVG is released before the popover reports
   itself closed.
-- The injected button would otherwise ship inside exports, which send the
-  pane's `innerHTML` verbatim. `withoutFullscreenButtons` strips it from a
-  clone of the pane.
+- The injected controls and hidden source would otherwise ship inside exports.
+  `prepareDiagramExport` removes them from a clone and always exports the
+  drawing fitted to its column, even when Source or Actual size is selected.
 
 The diagram is cloned rather than moved, which keeps the render cache in
 `mermaid-init.js` from fighting over the element.
+Appearance changes refresh the expanded copy without resetting pan and zoom;
+new source resets its viewport. Removing the originating block or making its
+source invalid closes the overlay. The expanded surface disables text
+selection, so dragging labels pans instead of selecting text.
 
 Zoom is the SVG's laid-out size, not a `transform: scale()`. A transform
 scale on a composited layer stretches the bitmap the layer was rasterized

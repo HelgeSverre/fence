@@ -2,9 +2,12 @@
 
 A manual-QA document for Fence's Mermaid support. Each section below holds one
 realistic diagram of a given type, so a reader can scroll the preview pane and
-check every renderer in a single pass. Fence uses Mermaid 12 with the `dagre`
-layout, the `classic` look and `securityLevel: "strict"`, so labels are plain
-text — no embedded HTML.
+check every renderer in a single pass. Fence uses Mermaid 12 with the `elk`
+layout for graph diagrams (`cose-bilkent` for mindmaps), the `classic` look
+and `securityLevel: "strict"`, so labels are plain
+text — no embedded HTML. Diagram colors and typography follow Fence's theme.
+Source and Actual size controls are available above each drawing; the expand
+button opens a pannable, zoomable view over the preview pane.
 
 Diagrams that Mermaid itself still marks as beta live in their own section at
 the end: a failure there is expected noise, not a regression.

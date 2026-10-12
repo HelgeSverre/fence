@@ -38,6 +38,7 @@ const ATTACHMENT_DIR = "assets";
 let mainWindow;
 let pendingOpenPath = null; // open-file path received before the renderer loaded
 let rendererReady = false;
+let quitRequested = false;
 
 let navigationQueue = Promise.resolve();
 let saveQueue = Promise.resolve();
@@ -111,17 +112,23 @@ async function closeGuarded(window) {
       });
       if (response !== 0) return;
     }
-    window._closeApproved = true;
-    window.close();
+    closeApproved(window);
     return;
   }
 
   await navigate(async () => {
-    window._closeApproved = true;
-    window.close();
+    closeApproved(window);
   }, true);
 }
 
+function closeApproved(window) {
+  window._closeApproved = true;
+  // The guard's preventDefault cancels Electron's original app.quit().
+  // Resume that request after approval; closing only the window leaves the
+  // application running on macOS.
+  if (quitRequested) app.quit();
+  else window.close();
+}
 
 function navigate(action, closing = false) {
   const task = navigationQueue.then(async () => {
@@ -295,7 +302,12 @@ function createWindow() {
     event.preventDefault();
     if (checkingClose) return;
     checkingClose = true;
-    closeGuarded(window).finally(() => { checkingClose = false; });
+    closeGuarded(window).finally(() => {
+      checkingClose = false;
+      // Cancel (including Save As cancellation or a failed save) must also
+      // cancel the quit intent, so a later window close stays a window close.
+      quitRequested = false;
+    });
   });
 
   // Open external links in system browser
@@ -777,6 +789,8 @@ function revealPath(target) {
 if (!gotLock) {
   app.quit();
 } else {
+  app.on("before-quit", () => { quitRequested = true; });
+
   // `fence <path>` while the app is running: the new process forwards its
   // argv here and exits; open the path in the existing window.
   app.on("second-instance", (_event, argv, workingDirectory) => {

@@ -6,14 +6,56 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-12
+
+### Added
+
+- Mermaid diagrams have Source and Actual size controls, plus an expanded
+  view with mouse, trackpad and keyboard pan/zoom. Wide diagrams start at
+  actual size when fitting would make their labels too small to read.
+- Polar Night, Deep Tide, JetBrains Dark/Light and JetBrains Islands
+  Dark/Light themes.
+- Syntax highlighting for C, C++, YAML, TOML, Ruby, Java, C#, Swift, Scala,
+  shell scripts and Dockerfiles.
+- Cmd/Ctrl+D duplicates the current line or selected text.
+- Native context menus in the editor and preview, with clipboard commands
+  and actions for links and images.
+- Hovering a preview link shows its destination.
+
 ### Changed
 
+- Mermaid diagrams use ELK layout for supported graph types and follow the
+  document's colors, font and text size. Nodes have rounded corners, edge
+  labels have pill backgrounds, and ordinary arrows use open chevrons.
+- Code blocks and inline code use backgrounds slightly darker than the
+  document in every theme, with readable comment colors in light themes.
+- Wide preview tables scroll horizontally instead of being clipped.
+- Measuring caret columns on long ASCII lines is faster.
 - Internal refactor, no user-facing changes: split `electron/main.js` into
   `export.js`, `session.js`, `menu.js` and `validate.js`; split `src/Main.elm`
   into `Decoders`, `PreviewSync`, `Settings` and `Splits`, and gave `Find` and
   `Palette` their own update/view; unified the two `dirName` implementations.
 - Consolidated e2e test helpers, replaced timing-based waits with polling,
   fixed brittle test locators, and added macOS to CI.
+
+### Fixed
+
+- Dragging an expanded diagram pans without selecting its labels. Expanded
+  diagrams update after source and appearance changes, and close when their
+  source becomes invalid or the originating block is removed.
+- Switching between dark themes, changing fonts or using the editor font in
+  the preview updates Mermaid diagrams. Cached and expanded SVGs have unique
+  IDs so their markers and styles do not interfere with other diagrams.
+- Diagram exports always include the drawing, even when Source is shown,
+  and omit preview controls and duplicate source. Plain-text clipboard
+  exports omit SVG styles.
+- Caret placement, selections and soft wrapping account for combining marks,
+  wide characters, emoji and joined Unicode sequences.
+- Malformed Markdown and unsupported HTML are contained to the affected
+  block or segment instead of blanking the whole preview.
+- An unresponsive renderer no longer traps the window open.
+- Cmd+Q on macOS completes after resolving unsaved-document prompts and
+  saving, instead of leaving Fence running after its window closes.
 
 ## [0.6.0] — 2026-09-11
 
@@ -317,7 +359,8 @@ First release. A split-view Markdown editor with a file browser, live
 preview, YAML frontmatter, syntax highlighting, several themes, and resizable
 panes.
 
-[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/HelgeSverre/fence/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/HelgeSverre/fence/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/HelgeSverre/fence/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/HelgeSverre/fence/compare/v0.4.1...v0.4.2

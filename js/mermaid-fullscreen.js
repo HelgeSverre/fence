@@ -10,6 +10,8 @@
 // outside click, and returning focus to the button with it. It carries no
 // backdrop, so the editor stays visible and usable beside it.
 
+import { uniqueDiagramCopy } from "./mermaid-svg.js";
+
 const BUTTON_CLASS = "mermaid-fullscreen-btn";
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 12;
@@ -18,6 +20,8 @@ let overlay = null;
 let figure = null;
 let paneObserver = null;
 let zoomLabel = null;
+let expandedBlock = null;
+let expandedSource = null;
 
 // Pan/zoom of the expanded diagram. `scale` is applied as the SVG's layout
 // size, not as a transform: a transform scale stretches the rasterized layer,
@@ -165,6 +169,7 @@ function ensureOverlay() {
   let dragging = null;
   figure.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
+    event.preventDefault();
     dragging = { id: event.pointerId, x: event.clientX, y: event.clientY };
     figure.setPointerCapture(event.pointerId);
     figure.dataset.dragging = "true";
@@ -184,6 +189,7 @@ function ensureOverlay() {
   };
   figure.addEventListener("pointerup", endDrag);
   figure.addEventListener("pointercancel", endDrag);
+  figure.addEventListener("lostpointercapture", endDrag);
   figure.addEventListener("dblclick", resetView);
 
   // Keyboard equivalents: the overlay is focusable, so pan and zoom must not
@@ -231,6 +237,10 @@ function ensureOverlay() {
       window.removeEventListener("resize", trackPane);
       // Release the clone: a large diagram is a lot of SVG to hold onto.
       figure.replaceChildren();
+      expandedBlock = null;
+      expandedSource = null;
+      dragging = null;
+      delete figure.dataset.dragging;
     }
   });
 
@@ -241,7 +251,7 @@ function ensureOverlay() {
 /** A copy of the block's SVG, freed from the intrinsic size mermaid gave it
     so it scales to the space instead of sitting small in the middle. */
 function scalableCopy(svg) {
-  const copy = svg.cloneNode(true);
+  const copy = uniqueDiagramCopy(svg);
   copy.removeAttribute("style");
   copy.removeAttribute("width");
   copy.removeAttribute("height");
@@ -254,6 +264,8 @@ function expand(block) {
   const svg = block.querySelector("svg");
   if (!svg) return;
   ensureOverlay();
+  expandedBlock = block;
+  expandedSource = block.dataset.source;
   figure.replaceChildren(scalableCopy(svg));
   view.scale = 1;
   view.x = 0;
@@ -264,10 +276,8 @@ function expand(block) {
   measureFit();
 }
 
-/** Called after a block renders. The button is injected rather than rendered
-    by Elm because mermaid replaces the block's innerHTML on every render. */
-export function attachFullscreenButton(block) {
-  if (block.querySelector(`.${BUTTON_CLASS}`)) return;
+export function attachFullscreenButton(container, block = container) {
+  if (container.querySelector(`.${BUTTON_CLASS}`)) return;
 
   const button = document.createElement("button");
   button.type = "button";
@@ -279,13 +289,40 @@ export function attachFullscreenButton(block) {
     event.preventDefault();
     expand(block);
   });
-  block.appendChild(button);
+  container.appendChild(button);
 }
 
-/** Strip the injected buttons out of exported markup: the export path sends
-    the pane's innerHTML verbatim, and a stray button would ship with it. */
-export function withoutFullscreenButtons(pane) {
+export function refreshExpandedDiagram(block) {
+  if (expandedBlock !== block || !overlay?.matches(":popover-open")) return;
+  const svg = block.querySelector(".mermaid-diagram svg");
+  if (!svg) return;
+  figure.replaceChildren(scalableCopy(svg));
+  // Keep the viewport on appearance changes; new content starts fitted.
+  if (expandedSource !== block.dataset.source) {
+    view.scale = 1;
+    view.x = view.y = 0;
+  }
+  expandedSource = block.dataset.source;
+  measureFit();
+}
+
+export function closeStaleExpandedDiagram() {
+  if (expandedBlock && (!expandedBlock.isConnected || expandedBlock.dataset.state === "error")) {
+    overlay.hidePopover();
+  }
+}
+
+/** Export drawings at fitted size, irrespective of the current source/size
+    toggle, without controls or the duplicate source text. */
+export function prepareDiagramExport(pane) {
   const copy = pane.cloneNode(true);
-  copy.querySelectorAll(`.${BUTTON_CLASS}`).forEach((node) => node.remove());
-  return copy.innerHTML;
+  copy.querySelectorAll(`.${BUTTON_CLASS}, .mermaid-bar, .mermaid[data-state="rendered"] > .mermaid-source`)
+    .forEach((node) => node.remove());
+  copy.querySelectorAll('.mermaid[data-state="rendered"]').forEach((block) => {
+    block.dataset.view = "diagram";
+    block.dataset.size = "fit";
+    block.removeAttribute("data-source");
+    block.querySelector(".mermaid-diagram")?.removeAttribute("tabindex");
+  });
+  return copy;
 }

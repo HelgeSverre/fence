@@ -1,7 +1,7 @@
 import { setupPreviewFind } from "./preview-find.js";
 import { setupLayout } from "./layout.js";
 import { reRenderMermaid, finishMermaidRendering } from "./mermaid-init.js";
-import { withoutFullscreenButtons } from "./mermaid-fullscreen.js";
+import { prepareDiagramExport } from "./mermaid-fullscreen.js";
 import { applyPreferences, preloadFonts } from "./preferences.js";
 import { setupEditorMetrics, remeasureEditorMetrics } from "./editor-metrics.js";
 import { setupVirtualInput } from "./virtual-input.js";
@@ -26,12 +26,10 @@ export function wirePorts(app, initialState = {}) {
         layout.setBinding(data.layoutCycleKey);
       }
       if (data.tag === "setPreferences") {
-        const themeChanged =
-          (data.theme ?? "") !== (document.documentElement.getAttribute("data-theme") ?? "");
         applyPreferences(data);
         preloadFonts([data.editorFont, data.uiFont].filter(Boolean));
         remeasureEditorMetrics();
-        if (themeChanged) reRenderMermaid();
+        reRenderMermaid();
       } else if (data.tag === "exportDocument") {
         exportPreview(data, app);
         return;
@@ -181,13 +179,16 @@ async function exportPreview(data, app) {
     app.ports.fromElectron.send({ tag: "exportRequested", format: data.format });
     return;
   }
+  const content = prepareDiagramExport(pane);
+  const html = content.innerHTML;
+  content.querySelectorAll("style").forEach((node) => node.remove());
   window.electronAPI.exportDocument({
     format: data.format,
     title: data.title || "document",
     base: data.base || "",
     theme: document.documentElement.getAttribute("data-theme") || "",
-    html: withoutFullscreenButtons(pane),
-    text: pane.textContent || "",
+    html,
+    text: content.textContent || "",
     css: collectStyles(),
   });
 }

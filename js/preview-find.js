@@ -147,7 +147,10 @@ export function setupPreviewFind(app) {
     schedule(changed, true);
   };
   update.navigate = ({ query, occurrence, metadata }) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    requestAnimationFrame(() => requestAnimationFrame(async () => {
+      // Font swaps can move a distant result by many screens. Measure after
+      // the rendered preview has requested and loaded its fonts.
+      await document.fonts.ready;
       const root = document.querySelector(".preview-content");
       const container = document.getElementById("preview-container");
       if (!root || !container || !query.trim()) return;

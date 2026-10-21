@@ -261,7 +261,14 @@ for (const mode of ["editor", "split", "preview"]) {
           if (Math.abs(rect.top + rect.height / 2 - pane.top - pane.height / 2) > 35) return false;
         }
         return true;
-      }, mode);
+      }, mode).catch(async (error) => {
+        const state = await window.evaluate(() => {
+          const target = [...document.querySelectorAll(".preview-content p")].find(p => p.textContent.includes("Paragraph 600"));
+          const rect = element => element?.getBoundingClientRect().toJSON();
+          return { active: document.activeElement?.id, fonts: document.fonts.status, target: rect(target), preview: rect(document.getElementById("preview-container")), caret: rect(document.querySelector("[data-testid=veditor-caret]")), editor: rect(document.getElementById("veditor")) };
+        });
+        throw new Error(`${error.message}\nNavigation state: ${JSON.stringify(state)}`);
+      });
       if (mode !== "preview") {
         await window.keyboard.type("X");
         await window.waitForFunction(() => document.querySelector('[data-source-line="1204"]')?.textContent.startsWith("XParagraph 600"));

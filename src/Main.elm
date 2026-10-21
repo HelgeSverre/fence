@@ -16,6 +16,7 @@ import Decoders exposing (..)
 import Editor
 import FileTree
 import Find
+import Frontmatter
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
@@ -124,6 +125,7 @@ type alias Model =
     , closeAfterSave : Bool
     , find : Find.Model
     , palette : Palette.Model
+    , focusNextOpen : Bool
     , pendingSearchQuery : String
     , pendingSearchLine : Maybe Int
     , revealNextOpen : Bool -- the next file to open was chosen with "open and reveal"
@@ -306,6 +308,7 @@ init flagsValue =
       , closeAfterSave = False
       , find = Find.init
       , palette = Palette.init
+      , focusNextOpen = False
       , pendingSearchQuery = ""
       , pendingSearchLine = Nothing
       , revealNextOpen = False
@@ -546,6 +549,18 @@ update msg model =
                 ( palette, peekCmds ) =
                     Palette.settle model.preferences.palettePeek updated
 
+                opensDocument =
+                    List.any
+                        (\c ->
+                            case c of
+                                Palette.CmdReadFile _ _ _ ->
+                                    True
+
+                                _ ->
+                                    False
+                        )
+                        outCmds
+
                 revealNext =
                     List.any
                         (\outCmd ->
@@ -560,19 +575,9 @@ update msg model =
             in
             ( { model
                 | palette = palette
+                , focusNextOpen = opensDocument || model.focusNextOpen
                 , pendingSearchQuery =
-                    if
-                        List.any
-                            (\c ->
-                                case c of
-                                    Palette.CmdReadFile _ _ _ ->
-                                        True
-
-                                    _ ->
-                                        False
-                            )
-                            outCmds
-                    then
+                    if opensDocument then
                         Palette.query model.palette
 
                     else
@@ -604,14 +609,31 @@ update msg model =
                                     |> List.take (line - 1)
                                     |> String.join "\n"
 
+                            body =
+                                (Frontmatter.extract model.editor.content).body
+
+                            bodyStart =
+                                List.length (String.split "\n" model.editor.content) - List.length (String.split "\n" body)
+
+                            inMetadata =
+                                line <= bodyStart
+
+                            visibleBefore =
+                                if inMetadata then
+                                    before
+
+                                else
+                                    (Frontmatter.extract before).body
+
                             -- Preserve which hit was chosen when the query occurs on several lines.
                             occurrence =
-                                String.indexes (String.toLower (String.trim model.pendingSearchQuery)) (String.toLower before)
+                                String.indexes (String.toLower (String.trim model.pendingSearchQuery)) (String.toLower visibleBefore)
                                     |> List.length
                         in
                         command "navigateSearchPreview"
                             [ ( "query", E.string model.pendingSearchQuery )
                             , ( "occurrence", E.int occurrence )
+                            , ( "metadata", E.bool inMetadata )
                             ]
 
                     Nothing ->
@@ -1347,6 +1369,7 @@ handlePortMessage tag value model =
                             else
                                 0
                         , navigating = False
+                        , focusNextOpen = False
                         , revealNextOpen = False
                       }
                     , Cmd.batch
@@ -1363,7 +1386,11 @@ handlePortMessage tag value model =
 
                         -- Match the browser viewport to the new virtual rows,
                         -- including ordinary file opens while scrolled down.
-                        , command "focusDocument" [ ( "id", E.string (documentFocusId model) ) ]
+                        , if model.focusNextOpen then
+                            command "focusDocument" [ ( "id", E.string (documentFocusId model) ) ]
+
+                          else
+                            Cmd.none
                         , ignoreResult (Browser.Dom.setViewportOf "veditor" newEditor.scrollLeft newEditor.scrollTop)
                         ]
                     )

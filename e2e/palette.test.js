@@ -271,3 +271,18 @@ for (const mode of ["editor", "split", "preview"]) {
     }
   });
 }
+
+test("opening a metadata search result in preview reveals the collapsed fields", async () => {
+  const fence = await launchFence({ files: { "a.md": "---\ntitle: hiddenneedle\n---\n\n# Document\n" }, open: "a.md" });
+  try {
+    const { window } = fence;
+    await window.getByTestId("layout-preview").click();
+    await window.keyboard.press(`${MOD}+Shift+f`);
+    await window.getByTestId("palette-input").fill("hiddenneedle");
+    await window.waitForFunction(() => document.querySelectorAll("[data-testid=palette-row]").length === 1);
+    await window.keyboard.press("Enter");
+    await window.waitForFunction(() => document.querySelector(".frontmatter")?.open && document.activeElement?.id === "preview-container");
+  } finally {
+    await fence.close();
+  }
+});

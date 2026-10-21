@@ -11,7 +11,7 @@ export function setupPreviewFind(app) {
   let pendingDelta = 0;
   let shouldScroll = false;
 
-  function searchText(root) {
+  function searchText(root, skipFrontmatter = false) {
     const parts = [];
     let length = 0;
     let lastCharacter = "";
@@ -47,6 +47,7 @@ export function setupPreviewFind(app) {
         return;
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return;
+      if (skipFrontmatter && node.matches(".frontmatter")) return;
       if (node.matches("script, style, [aria-hidden=true], .welcome")) return;
       const style = getComputedStyle(node);
       if (style.display === "none" || style.visibility === "hidden") return;
@@ -61,7 +62,7 @@ export function setupPreviewFind(app) {
 
   function findRanges(root, options = state) {
     if (!options.query) return [];
-    const { text, nodes } = searchText(root);
+    const { text, nodes } = searchText(root, options.skipFrontmatter);
     const escaped = options.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const pattern = new RegExp(escaped, options.caseSensitive ? "gu" : "giu");
     const matches = [];
@@ -145,12 +146,14 @@ export function setupPreviewFind(app) {
     pendingDelta += data.delta || 0;
     schedule(changed, true);
   };
-  update.navigate = ({ query, occurrence }) => {
+  update.navigate = ({ query, occurrence, metadata }) => {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const root = document.querySelector(".preview-content");
       const container = document.getElementById("preview-container");
       if (!root || !container || !query.trim()) return;
-      const matches = findRanges(root, { query: query.trim(), caseSensitive: false, limit: Number.MAX_SAFE_INTEGER });
+      const details = root.querySelector(".frontmatter");
+      if (metadata && details) details.open = true;
+      const matches = findRanges(metadata && details ? details : root, { query: query.trim(), caseSensitive: false, limit: Number.MAX_SAFE_INTEGER, skipFrontmatter: !metadata });
       const range = matches[Math.min(occurrence, matches.length - 1)];
       if (!range) return;
       const rect = range.getBoundingClientRect();

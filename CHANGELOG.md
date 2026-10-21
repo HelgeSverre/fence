@@ -27,6 +27,9 @@ Notable changes to Fence. Dates are release dates; versions follow
 - Opening a workspace search result centers the selected line and focuses the
   editor in editor or split mode. Preview mode centers the rendered match
   without an editing cursor.
+- Sidebar keyboard navigation keeps focus in the file tree when opening files.
+- Preview search navigation handles collapsed frontmatter and expands metadata
+  when the selected result is inside it.
 - Enter opens the current highlighted result even when pressed immediately
   after the arrow keys.
 

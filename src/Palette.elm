@@ -364,6 +364,7 @@ type Msg
     | PeekDue Int
     | Step Int
     | Choose (Maybe Item)
+    | ChooseActive
     | ChooseAndReveal
     | CopyRelativePath
     | CopyAbsolutePath
@@ -467,6 +468,9 @@ update msg root model =
 
         Step delta ->
             ( step delta model, [] )
+
+        ChooseActive ->
+            update (Choose (active model)) root model
 
         Choose item ->
             case item of
@@ -615,7 +619,7 @@ view peekEnabled palette =
                     , value (query palette)
                     , spellcheck False
                     , onInput QueryChanged
-                    , preventDefaultOn "keydown" (keyDecoder palette)
+                    , preventDefaultOn "keydown" keyDecoder
                     ]
                     []
                 , span [ class "palette-count", attribute "data-testid" "palette-count" ] [ text count ]
@@ -897,8 +901,8 @@ key label =
     kbd [ class "palette-key" ] [ text label ]
 
 
-keyDecoder : Model -> D.Decoder ( Msg, Bool )
-keyDecoder palette =
+keyDecoder : D.Decoder ( Msg, Bool )
+keyDecoder =
     D.map5
         (\k meta ctrl shift alt -> { key = k, modifier = meta || ctrl, shift = shift, alt = alt })
         (D.field "key" D.string)
@@ -923,7 +927,7 @@ keyDecoder palette =
                         D.succeed ( ChooseAndReveal, True )
 
                     ( "Enter", _ ) ->
-                        D.succeed ( Choose (active palette), True )
+                        D.succeed ( ChooseActive, True )
 
                     ( "Escape", _ ) ->
                         D.succeed ( Close, True )

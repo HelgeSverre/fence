@@ -68,6 +68,14 @@ suite =
                     , Palette.update Palette.CopyAbsolutePath (Just "/w") model |> Tuple.second
                     , Palette.update Palette.ChooseAndReveal (Just "/w") model |> Tuple.second
                     )
+        , test "Enter chooses the current highlight after queued arrow keys" <|
+            \_ ->
+                opened ""
+                    |> Palette.step 1
+                    |> Palette.step 1
+                    |> Palette.update Palette.ChooseActive (Just "/w")
+                    |> Tuple.second
+                    |> Expect.equal [ Palette.CmdReadFile "/w/docs/deep/planning-notes.md" Nothing False ]
         , test "settling asks to peek only when the highlighted row changed and peeking is on" <|
             \_ ->
                 let

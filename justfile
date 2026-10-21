@@ -20,6 +20,27 @@ dev: setup
 dev-debug: setup
     bun run dev:debug
 
+# Build and launch a local macOS app bundle; optional args go to Fence (e.g. just run samples/mermaid.md).
+[group('run')]
+[macos]
+[positional-arguments]
+run *args: setup
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$(uname -m)" in
+      arm64) arch=arm64; app_dir=release/run/mac-arm64 ;;
+      x86_64) arch=x64; app_dir=release/run/mac ;;
+      *) echo "Unsupported macOS architecture" >&2; exit 1 ;;
+    esac
+    bunx vite build
+    CSC_IDENTITY_AUTO_DISCOVERY=false bunx electron-builder --mac dir "--$arch" --publish never \
+      -c.directories.output=release/run -c.mac.identity=- -c.mac.forceCodeSigning=false \
+      -c.mac.hardenedRuntime=false -c.mac.notarize=false
+    # Keep a persistent test profile with its own single-instance lock.
+    # FENCE_USER_DATA can override it to test against a specific profile.
+    export FENCE_USER_DATA="${FENCE_USER_DATA:-$HOME/Library/Application Support/fence-run}"
+    exec "$app_dir/Fence.app/Contents/MacOS/Fence" "$@"
+
 # Run the Elm and Node unit tests.
 [group('check')]
 test: setup

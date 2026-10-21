@@ -334,8 +334,17 @@ search hit. Out-of-range lines clamp to the document.
 -}
 gotoLine : Int -> Model -> Model
 gotoLine line model =
+    let
+        cursor =
+            TextBuffer.clampCursor model.lines { line = line - 1, col = 0 }
+
+        row =
+            EditorLayout.lineStartRow cursor.line model.layout
+    in
     { model
-        | cursor = TextBuffer.clampCursor model.lines { line = line - 1, col = 0 }
+        | cursor = cursor
+        , scrollTop = Basics.max 0 (toFloat row * model.metrics.lineHeight - (model.metrics.viewportHeight - model.metrics.lineHeight) / 2)
+        , scrollLeft = 0
         , affinity = EditorLayout.Downstream
         , desiredColumn = Nothing
         , anchor = Nothing

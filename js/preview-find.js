@@ -59,11 +59,11 @@ export function setupPreviewFind(app) {
     return { text: parts.join(""), nodes };
   }
 
-  function findRanges(root) {
-    if (!state.query) return [];
+  function findRanges(root, options = state) {
+    if (!options.query) return [];
     const { text, nodes } = searchText(root);
-    const escaped = state.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(escaped, state.caseSensitive ? "gu" : "giu");
+    const escaped = options.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(escaped, options.caseSensitive ? "gu" : "giu");
     const matches = [];
     let cursor = 0;
     for (const match of text.matchAll(pattern)) {
@@ -78,7 +78,7 @@ export function setupPreviewFind(app) {
       range.setStart(start.node, start.starts[match.index - start.start]);
       range.setEnd(end.node, end.ends[endOffset - end.start - 1]);
       matches.push(range);
-      if (matches.length >= state.limit) break;
+      if (matches.length >= options.limit) break;
     }
     return matches;
   }
@@ -138,11 +138,25 @@ export function setupPreviewFind(app) {
     requestAnimationFrame(() => requestAnimationFrame(refresh));
   }
 
-  return (data) => {
+  const update = (data) => {
     const changed = data.query !== state.query || data.caseSensitive !== state.caseSensitive || data.opened !== state.opened;
     if (changed) active = 0;
     state = data;
     pendingDelta += data.delta || 0;
     schedule(changed, true);
   };
+  update.navigate = ({ query, occurrence }) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const root = document.querySelector(".preview-content");
+      const container = document.getElementById("preview-container");
+      if (!root || !container || !query.trim()) return;
+      const matches = findRanges(root, { query: query.trim(), caseSensitive: false, limit: Number.MAX_SAFE_INTEGER });
+      const range = matches[Math.min(occurrence, matches.length - 1)];
+      if (!range) return;
+      const rect = range.getBoundingClientRect();
+      const viewport = container.getBoundingClientRect();
+      container.scrollTop += rect.top + rect.height / 2 - viewport.top - container.clientHeight / 2;
+    }));
+  };
+  return update;
 }

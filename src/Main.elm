@@ -124,6 +124,8 @@ type alias Model =
     , closeAfterSave : Bool
     , find : Find.Model
     , palette : Palette.Model
+    , pendingSearchQuery : String
+    , pendingSearchLine : Maybe Int
     , revealNextOpen : Bool -- the next file to open was chosen with "open and reveal"
 
     -- recently opened files, newest first, with a cursor for back/forward
@@ -304,6 +306,8 @@ init flagsValue =
       , closeAfterSave = False
       , find = Find.init
       , palette = Palette.init
+      , pendingSearchQuery = ""
+      , pendingSearchLine = Nothing
       , revealNextOpen = False
       , history = []
       , historyPos = 0
@@ -554,7 +558,27 @@ update msg model =
                         )
                         outCmds
             in
-            ( { model | palette = palette, revealNextOpen = revealNext || model.revealNextOpen }
+            ( { model
+                | palette = palette
+                , pendingSearchQuery =
+                    if
+                        List.any
+                            (\c ->
+                                case c of
+                                    Palette.CmdReadFile _ _ _ ->
+                                        True
+
+                                    _ ->
+                                        False
+                            )
+                            outCmds
+                    then
+                        Palette.query model.palette
+
+                    else
+                        model.pendingSearchQuery
+                , revealNextOpen = revealNext || model.revealNextOpen
+              }
             , Cmd.batch (List.map (runPaletteCmd model) (outCmds ++ peekCmds))
             )
 
@@ -566,7 +590,33 @@ update msg model =
                 measured =
                     { model | syncPoints = points }
             in
-            ( measured, syncPreview measured.editor measured )
+            if model.parseProgress /= Nothing then
+                ( measured, Cmd.none )
+
+            else
+                ( { measured | pendingSearchLine = Nothing }
+                , case model.pendingSearchLine of
+                    Just line ->
+                        let
+                            before =
+                                model.editor.content
+                                    |> String.split "\n"
+                                    |> List.take (line - 1)
+                                    |> String.join "\n"
+
+                            -- Preserve which hit was chosen when the query occurs on several lines.
+                            occurrence =
+                                String.indexes (String.toLower (String.trim model.pendingSearchQuery)) (String.toLower before)
+                                    |> List.length
+                        in
+                        command "navigateSearchPreview"
+                            [ ( "query", E.string model.pendingSearchQuery )
+                            , ( "occurrence", E.int occurrence )
+                            ]
+
+                    Nothing ->
+                        syncPreview measured.editor measured
+                )
 
         NavigateHistory delta ->
             let
@@ -1277,6 +1327,7 @@ handlePortMessage tag value model =
                                     | editor = newEditor
                                     , fileTree = tree
                                     , debounceGeneration = gen
+                                    , pendingSearchLine = file.line
                                 }
                     in
                     ( { parsedModel
@@ -1312,12 +1363,8 @@ handlePortMessage tag value model =
 
                         -- Match the browser viewport to the new virtual rows,
                         -- including ordinary file opens while scrolled down.
-                        , case ( file.line, Editor.caretFollow newEditor ) of
-                            ( Just _, Just target ) ->
-                                ignoreResult (Browser.Dom.setViewportOf "veditor" target.left target.top)
-
-                            _ ->
-                                ignoreResult (Browser.Dom.setViewportOf "veditor" newEditor.scrollLeft newEditor.scrollTop)
+                        , command "focusDocument" [ ( "id", E.string (documentFocusId model) ) ]
+                        , ignoreResult (Browser.Dom.setViewportOf "veditor" newEditor.scrollLeft newEditor.scrollTop)
                         ]
                     )
 

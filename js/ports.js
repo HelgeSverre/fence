@@ -16,7 +16,15 @@ export function wirePorts(app, initialState = {}) {
     app.ports.toElectron.subscribe((data) => {
       // Preference changes apply locally, then fall through to IPC so the
       // main process persists them to state.json.
-      if (data.tag === "previewFind") {
+      if (data.tag === "focusDocument") {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          document.getElementById(data.id)?.focus({ preventScroll: true });
+        }));
+        return;
+      } else if (data.tag === "navigateSearchPreview") {
+        previewFind.navigate(data);
+        return;
+      } else if (data.tag === "previewFind") {
         previewFind(data);
         return;
       } else if (data.tag === "layoutChanged") {

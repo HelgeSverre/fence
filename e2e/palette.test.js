@@ -230,3 +230,44 @@ describe("command palette", () => {
     }
   });
 });
+
+for (const mode of ["editor", "split", "preview"]) {
+  test(`workspace search centers the selected result and focuses ${mode}`, async () => {
+    const content = "---\ntitle: needle\n---\n\n" + Array.from({ length: 1200 }, (_, i) => `Paragraph ${i}${i === 0 || i === 600 ? " needle" : ""}.\n`).join("\n");
+    const fence = await launchFence({ files: { "a.md": "# Start", "long.md": content }, open: "a.md" });
+    try {
+      const { window } = fence;
+      await window.getByTestId(`layout-${mode}`).click();
+      await window.keyboard.press(`${MOD}+Shift+f`);
+      await window.getByTestId("palette-input").fill("needle");
+      await window.waitForFunction(() => document.querySelectorAll("[data-testid=palette-row]").length === 3);
+      await window.keyboard.press("ArrowDown");
+      await window.keyboard.press("ArrowDown");
+      await window.keyboard.press("Enter");
+      if (mode !== "preview") await waitForEditorValue(window, content);
+      await window.waitForFunction((mode) => {
+        const id = mode === "preview" ? "preview-container" : "veditor-input";
+        if (document.activeElement?.id !== id) return false;
+        if (mode !== "preview") {
+          const caret = document.querySelector("[data-testid=veditor-caret]").getBoundingClientRect();
+          const pane = document.getElementById("veditor").getBoundingClientRect();
+          if (Math.abs(caret.top - pane.top - pane.height / 2) > 35) return false;
+        }
+        if (mode !== "editor") {
+          const paragraph = [...document.querySelectorAll(".preview-content p")].find(p => p.textContent.includes("Paragraph 600"));
+          if (!paragraph) return false;
+          const rect = paragraph.getBoundingClientRect();
+          const pane = document.getElementById("preview-container").getBoundingClientRect();
+          if (Math.abs(rect.top + rect.height / 2 - pane.top - pane.height / 2) > 35) return false;
+        }
+        return true;
+      }, mode);
+      if (mode !== "preview") {
+        await window.keyboard.type("X");
+        await window.waitForFunction(() => document.querySelector('[data-source-line="1204"]')?.textContent.startsWith("XParagraph 600"));
+      }
+    } finally {
+      await fence.close();
+    }
+  });
+}

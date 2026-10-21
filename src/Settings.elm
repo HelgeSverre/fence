@@ -206,6 +206,7 @@ view softWrap model =
             , viewToggleRow (tip "Pane headings" "Show the title strip above the file tree, editor, preview and outline. Default: on.") "Show pane headings" "pane-headers-toggle" prefs.showPaneHeaders (toggle (\on p -> { p | showPaneHeaders = on }))
             , viewToggleRow (tip "Soft wrap" "Wrap long lines at the editor's edge instead of scrolling sideways. Default: on.") "Soft wrap" "soft-wrap-toggle" softWrap SetSoftWrap
             , viewToggleRow (tip "Reveal open file" "When a file opens from the palette, a link, history or the command line, expand the sidebar to it and select it. Default: on.") "Reveal open file" "reveal-in-sidebar-toggle" prefs.revealInSidebar (toggle (\on p -> { p | revealInSidebar = on }))
+            , viewToggleRow (tip "Peek pane" "Preview the highlighted document beside the quick-open and search results. Default: off.") "Peek in palette" "palette-peek-toggle" prefs.palettePeek (toggle (\on p -> { p | palettePeek = on }))
             , div [ class "settings-dropdown-divider" ] []
             , div [ class "settings-dropdown-label" ] [ text "Outline" ]
             , viewOutlineLevelStepper model.outlineMaxLevel

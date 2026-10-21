@@ -57,6 +57,79 @@ describe("command palette", () => {
     }
   });
 
+  test("Cmd+Shift+C copies the highlighted file's workspace path, Opt+Cmd+C its full path", async () => {
+    const fence = await launchFence({ files, open: "a.md" });
+    const { window, app } = fence;
+    const clipboard = () => app.evaluate(({ clipboard }) => clipboard.readText());
+    // the system clipboard is shared with the developer: put it back afterwards
+    const before = await clipboard();
+    try {
+      await window.keyboard.press(`${MOD}+p`);
+      await window.getByTestId("palette-input").fill("plan");
+      await window.waitForFunction(() => document.querySelectorAll("[data-testid=palette-row]").length === 1);
+      // the write crosses IPC, so poll for it
+      const copied = async (expected) => {
+        for (let i = 0; i < 50 && (await clipboard()) !== expected; i += 1) await new Promise((r) => setTimeout(r, 50));
+        return clipboard();
+      };
+      await window.keyboard.press(`${MOD}+Shift+c`);
+      assert.equal(await copied("docs/plan.md"), "docs/plan.md");
+      await window.keyboard.press(`Alt+${MOD}+c`);
+      assert.equal(await copied(fence.file("docs/plan.md")), fence.file("docs/plan.md"));
+      // the palette stays open: copying is not choosing
+      await window.getByTestId("palette").waitFor();
+    } finally {
+      await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), before).catch(() => {});
+      await fence.close();
+    }
+  });
+
+  test("rows name the file and its folder, and the footer lists the keys", async () => {
+    const fence = await launchFence({ files, open: "a.md" });
+    try {
+      const { window } = fence;
+      await window.keyboard.press(`${MOD}+p`);
+      await window.getByTestId("palette-input").fill("plan");
+      await window.waitForFunction(() => document.querySelectorAll("[data-testid=palette-row]").length === 1);
+      assert.equal(await window.locator(".palette-row .palette-primary").textContent(), "plan.md");
+      assert.equal(await window.locator(".palette-row [data-testid=palette-path]").textContent(), "docs");
+      assert.equal(await window.locator(".palette-row mark").first().textContent(), "plan");
+      assert.equal(await window.getByTestId("palette-mode").textContent(), "Files");
+      assert.equal(await window.getByTestId("palette-count").textContent(), "1 / 3");
+      assert.match(await window.getByTestId("palette-footer").textContent(), /Copy path/);
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("the peek pane previews the highlighted document when turned on", async () => {
+    const fence = await launchFence({ files, open: "a.md", state: { palettePeek: true } });
+    try {
+      const { window } = fence;
+      await window.keyboard.press(`${MOD}+p`);
+      await window.getByTestId("palette-input").fill("plan");
+      await window.waitForFunction(() => document.querySelectorAll("[data-testid=palette-row]").length === 1);
+      await window.locator("[data-testid=palette-peek] .palette-peek-line", { hasText: "alpha again" }).waitFor();
+      const peek = await window.getByTestId("palette-peek").textContent();
+      assert.match(peek, /^Plandocs\/plan\.md/);
+      assert.match(peek, /2 lines/);
+    } finally {
+      await fence.close();
+    }
+  });
+
+  test("the peek pane is off by default", async () => {
+    const fence = await launchFence({ files, open: "a.md" });
+    try {
+      const { window } = fence;
+      await window.keyboard.press(`${MOD}+p`);
+      await window.getByTestId("palette-input").waitFor();
+      assert.equal(await window.getByTestId("palette-peek").count(), 0);
+    } finally {
+      await fence.close();
+    }
+  });
+
   test("workspace search finds matching lines and opens one at its line", async () => {
     const fence = await launchFence({ files, open: "b.md" });
     try {
@@ -117,6 +190,8 @@ describe("command palette", () => {
       const { window } = fence;
       await window.keyboard.press(`${MOD}+p`);
       await window.getByTestId("palette-input").fill("plan");
+      // The file list arrives over IPC: Enter before it lands would no-op.
+      await window.waitForFunction(() => document.querySelectorAll("[data-testid=palette-row]").length === 1);
       await window.keyboard.press("Enter");
       await waitForEditorValue(window, files["docs/plan.md"]);
       await window.locator("[data-testid=tree-file].selected", { hasText: "plan.md" }).waitFor();
@@ -132,6 +207,8 @@ describe("command palette", () => {
       const { window } = fence;
       await window.keyboard.press(`${MOD}+p`);
       await window.getByTestId("palette-input").fill("plan");
+      // The file list arrives over IPC: Enter before it lands would no-op.
+      await window.waitForFunction(() => document.querySelectorAll("[data-testid=palette-row]").length === 1);
       await window.keyboard.press("Enter");
       await waitForEditorValue(window, files["docs/plan.md"]);
       assert.equal(await window.getByTestId("tree-file").filter({ hasText: "plan.md" }).count(), 0);

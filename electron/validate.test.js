@@ -27,6 +27,7 @@ const cases = {
   previewUsesEditorFont: { ok: [true, false], bad: [0] },
   softWrap: { ok: [true, false], bad: ["yes"] },
   revealInSidebar: { ok: [true, false], bad: [undefined] },
+  palettePeek: { ok: [true, false], bad: [undefined, "yes"] },
 };
 
 test("preferenceRules cover exactly the documented keys and ranges", () => {

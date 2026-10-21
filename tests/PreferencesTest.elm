@@ -20,6 +20,7 @@ custom =
     , previewUsesEditorFont = True
     , softWrap = False
     , revealInSidebar = False
+    , palettePeek = True
     }
 
 

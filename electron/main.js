@@ -566,6 +566,44 @@ registerIpc("fence:list-files", async (data) => {
   sendToRenderer({ tag: "fileList", files: await fsOps.listMarkdownFiles(root) });
 });
 
+registerIpc("fence:copy-text", (data) => {
+  clipboard.writeText(requireString(data, "text", 65536));
+});
+
+// A look at a document for the palette's peek pane: its title, size and the
+// lines around `line` (or the top). Small enough to answer on every cursor move.
+const PEEK_LINES = 60;
+const PEEK_BEFORE = 3;
+registerIpc("fence:peek-file", async (data) => {
+  const file = await fsOps.readFile(requireString(data, "path", 32768));
+  const line = Number.isInteger(data.line) ? data.line : null;
+  const stats = await fs.promises.stat(file.path);
+  const lines = file.content.split("\n");
+  const heading = lines.find((l) => /^#\s+\S/.test(l));
+  const firstLine = line ? Math.max(1, line - PEEK_BEFORE) : 1;
+  sendToRenderer({
+    tag: "filePeek",
+    path: file.path,
+    line,
+    title: heading ? heading.replace(/^#\s+/, "").trim() : path.basename(file.path, path.extname(file.path)),
+    modified: describeModified(stats.mtime),
+    words: file.content.split(/\s+/).filter(Boolean).length,
+    // a trailing newline ends the last line rather than starting another
+    lines: lines.length - (lines.length > 1 && lines[lines.length - 1] === "" ? 1 : 0),
+    firstLine,
+    excerpt: lines.slice(firstLine - 1, firstLine - 1 + PEEK_LINES),
+  });
+});
+
+function describeModified(date, now = new Date()) {
+  const time = date.toTimeString().slice(0, 5);
+  const day = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((day(now) - day(date)) / 86_400_000);
+  if (days === 0) return `today ${time}`;
+  if (days === 1) return `yesterday ${time}`;
+  return date.toISOString().slice(0, 10);
+}
+
 registerIpc("fence:search-workspace", async (data) => {
   const root = requireString(data, "path", 32768);
   const query = requireString(data, "query", 1024);

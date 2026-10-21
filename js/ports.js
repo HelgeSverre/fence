@@ -53,6 +53,8 @@ export function wirePorts(app, initialState = {}) {
           revealPath: "revealPath",
           listFiles: "listFiles",
           searchWorkspace: "searchWorkspace",
+          peekFile: "peekFile",
+          copyText: "copyText",
           setTitle: "setTitle",
           setDirty: "setDirty",
           closeWindow: "closeWindow",

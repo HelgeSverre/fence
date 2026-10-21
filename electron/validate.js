@@ -21,7 +21,7 @@ const preferenceRules = {
   editorFontSize: number(8, 32), previewFontSize: number(8, 32), uiFontSize: number(8, 24),
   previewWidth: oneOf(["full", "narrow", "normal", "wide", "custom"]), previewMaxWidth: integer(320, 2000),
   showPaneHeaders: boolean, previewUsesEditorFont: boolean, softWrap: boolean,
-  revealInSidebar: boolean,
+  revealInSidebar: boolean, palettePeek: boolean,
 };
 
 function isAppUrl(candidate) {

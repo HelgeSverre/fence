@@ -8,6 +8,7 @@ module Decoders exposing
     , fileTypeDecoder
     , fsEventDecoder
     , renamedDecoder
+    , peekDecoder
     , searchResultsDecoder
     , treeCommandDecoder
     )
@@ -90,7 +91,7 @@ fileSavedDecoder =
 fileItemDecoder : D.Decoder Palette.Item
 fileItemDecoder =
     D.map2
-        (\path relative -> { primary = baseName path, secondary = relative, path = path, line = Nothing })
+        (\path relative -> { primary = baseName path, relative = relative, path = path, line = Nothing })
         (D.field "path" D.string)
         (D.field "relative" D.string)
 
@@ -104,7 +105,7 @@ searchResultsDecoder =
                 (D.map4
                     (\path relative line text ->
                         { primary = String.trim text
-                        , secondary = relative ++ ":" ++ String.fromInt line
+                        , relative = relative
                         , path = path
                         , line = Just line
                         }
@@ -138,3 +139,16 @@ fsEventDecoder =
         (D.field "event" D.string)
         (D.field "path" D.string)
 
+
+
+peekDecoder : D.Decoder Palette.Peek
+peekDecoder =
+    D.map8 Palette.Peek
+        (D.field "path" D.string)
+        (D.field "line" (D.nullable D.int))
+        (D.field "title" D.string)
+        (D.field "modified" D.string)
+        (D.field "words" D.int)
+        (D.field "lines" D.int)
+        (D.field "firstLine" D.int)
+        (D.field "excerpt" (D.list D.string))

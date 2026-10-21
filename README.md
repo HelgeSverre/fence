@@ -25,7 +25,7 @@ Fence provides a clean, focused environment for writing markdown with a live pre
 
 - **Flexible Layout** — Editor, preview, or split view with synchronized scrolling
 - **Find & Replace** — Cmd+F, with match highlighting and a single-undo Replace All
-- **Quick-Open & Search** — Cmd+P by file name, Cmd+Shift+F across the workspace
+- **Quick-Open & Search** — Cmd+P by file name, Cmd+Shift+F across the workspace, with an optional peek pane that previews the highlighted document
 - **Markdown Editing** — List continuation, bold/italic/link shortcuts, line operations
 - **File Management** — Create, rename and trash files and folders from the tree
 - **Export** — PDF, HTML, or rich text on the clipboard
@@ -159,6 +159,9 @@ On Windows and Linux, use Ctrl where this says Cmd.
 | Cmd+N / Cmd+Shift+N     | New file / new folder                   |
 | Cmd+P                   | Go to file                              |
 | Cmd+Shift+F             | Search the workspace                    |
+| Cmd+Enter (in palette)  | Open and reveal in the sidebar          |
+| Cmd+Shift+C / Alt+Cmd+C | Copy the highlighted file's path / full path |
+| Alt+Cmd+R (in palette)  | Reveal the highlighted file in Finder   |
 | Cmd+F / Cmd+Alt+F       | Find / find and replace                 |
 | Cmd+G / Cmd+Shift+G     | Next / previous match                   |
 | Cmd+[ / Cmd+]           | Back / forward through opened files     |

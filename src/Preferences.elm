@@ -24,6 +24,7 @@ type alias Preferences =
     , previewUsesEditorFont : Bool
     , softWrap : Bool
     , revealInSidebar : Bool
+    , palettePeek : Bool
     }
 
 
@@ -55,6 +56,7 @@ default =
     , previewUsesEditorFont = False
     , softWrap = True
     , revealInSidebar = True
+    , palettePeek = False
     }
 
 
@@ -186,6 +188,7 @@ decoder =
         |> andMap (field "previewUsesEditorFont" D.bool default.previewUsesEditorFont)
         |> andMap (field "softWrap" D.bool default.softWrap)
         |> andMap (field "revealInSidebar" D.bool default.revealInSidebar)
+        |> andMap (field "palettePeek" D.bool default.palettePeek)
 
 
 andMap : D.Decoder a -> D.Decoder (a -> b) -> D.Decoder b
@@ -207,6 +210,7 @@ encode prefs =
     , ( "previewUsesEditorFont", E.bool prefs.previewUsesEditorFont )
     , ( "softWrap", E.bool prefs.softWrap )
     , ( "revealInSidebar", E.bool prefs.revealInSidebar )
+    , ( "palettePeek", E.bool prefs.palettePeek )
     ]
 
 

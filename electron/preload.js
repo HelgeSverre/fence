@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   revealPath: send("fence:reveal-path"),
   listFiles: send("fence:list-files"),
   searchWorkspace: send("fence:search-workspace"),
+  peekFile: send("fence:peek-file"),
+  copyText: send("fence:copy-text"),
   exportDocument: send("fence:export"),
   saveAttachment: send("fence:save-attachment"),
   openPath: send("fence:open-path"),

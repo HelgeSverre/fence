@@ -124,6 +124,7 @@ type alias Model =
     , closeAfterSave : Bool
     , find : Find.Model
     , palette : Palette.Model
+    , revealNextOpen : Bool -- the next file to open was chosen with "open and reveal"
 
     -- recently opened files, newest first, with a cursor for back/forward
     , history : List FilePath
@@ -303,6 +304,7 @@ init flagsValue =
       , closeAfterSave = False
       , find = Find.init
       , palette = Palette.init
+      , revealNextOpen = False
       , history = []
       , historyPos = 0
       , navigating = False
@@ -534,11 +536,26 @@ update msg model =
 
         PaletteMsg subMsg ->
             let
-                ( palette, outCmds ) =
+                ( updated, outCmds ) =
                     Palette.update subMsg model.fileTree.rootPath model.palette
+
+                ( palette, peekCmds ) =
+                    Palette.settle model.preferences.palettePeek updated
+
+                revealNext =
+                    List.any
+                        (\outCmd ->
+                            case outCmd of
+                                Palette.CmdReadFile _ _ True ->
+                                    True
+
+                                _ ->
+                                    False
+                        )
+                        outCmds
             in
-            ( { model | palette = palette }
-            , Cmd.batch (List.map (runPaletteCmd model) outCmds)
+            ( { model | palette = palette, revealNextOpen = revealNext || model.revealNextOpen }
+            , Cmd.batch (List.map (runPaletteCmd model) (outCmds ++ peekCmds))
             )
 
         SyncPointsMeasured points ->
@@ -892,17 +909,40 @@ runPaletteCmd model outCmd =
         Palette.CmdSearch root text ->
             command "searchWorkspace" [ ( "path", E.string root ), ( "query", E.string text ) ]
 
-        Palette.CmdReadFile path line ->
-            command "readFile"
-                (( "path", E.string path )
-                    :: (case line of
-                            Just n ->
-                                [ ( "line", E.int n ) ]
+        Palette.CmdReadFile path line _ ->
+            command "readFile" (( "path", E.string path ) :: lineField line)
 
-                            Nothing ->
-                                []
-                       )
-                )
+        Palette.CmdDebouncePeek generation ->
+            Task.perform (\_ -> PaletteMsg (Palette.PeekDue generation)) (Process.sleep Palette.peekDelay)
+
+        Palette.CmdPeek path line ->
+            command "peekFile" (( "path", E.string path ) :: lineField line)
+
+        Palette.CmdCopyText text ->
+            command "copyText" [ ( "text", E.string text ) ]
+
+        Palette.CmdRevealPath path ->
+            command "revealPath" [ ( "path", E.string path ) ]
+
+
+lineField : Maybe Int -> List ( String, E.Value )
+lineField line =
+    case line of
+        Just n ->
+            [ ( "line", E.int n ) ]
+
+        Nothing ->
+            []
+
+
+{-| Store a palette whose rows changed, and peek at the row now highlighted. -}
+settlePalette : Palette.Model -> Model -> ( Model, Cmd Msg )
+settlePalette updated model =
+    let
+        ( palette, outCmds ) =
+            Palette.settle model.preferences.palettePeek updated
+    in
+    ( { model | palette = palette }, Cmd.batch (List.map (runPaletteCmd model) outCmds) )
 
 
 runFindCmd : Find.OutCmd -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
@@ -1221,8 +1261,11 @@ handlePortMessage tag value model =
                         gen =
                             model.debounceGeneration + 1
 
+                        revealOpened =
+                            model.preferences.revealInSidebar || model.revealNextOpen
+
                         ( tree, treeCmds ) =
-                            if model.preferences.revealInSidebar then
+                            if revealOpened then
                                 FileTree.reveal file.path model.fileTree
 
                             else
@@ -1253,6 +1296,7 @@ handlePortMessage tag value model =
                             else
                                 0
                         , navigating = False
+                        , revealNextOpen = False
                       }
                     , Cmd.batch
                         [ setTitleCmd newEditor
@@ -1260,7 +1304,7 @@ handlePortMessage tag value model =
                         , setDirtyCmd file.dirty
                         , parseCmd
                         , outCmdsToPortCmds treeCmds
-                        , if model.preferences.revealInSidebar then
+                        , if revealOpened then
                             revealScrollCmd file.path
 
                           else
@@ -1429,7 +1473,15 @@ handlePortMessage tag value model =
         "fileList" ->
             case D.decodeValue (D.field "files" (D.list fileItemDecoder)) value of
                 Ok items ->
-                    ( { model | palette = Palette.setResults items model.palette }, Cmd.none )
+                    settlePalette (Palette.setResults items model.palette) model
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        "filePeek" ->
+            case D.decodeValue peekDecoder value of
+                Ok peek ->
+                    ( { model | palette = Palette.setPeek peek model.palette }, Cmd.none )
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -1440,7 +1492,7 @@ handlePortMessage tag value model =
                     -- a slower search that finished after the query moved on
                     -- must not replace what is on screen now
                     if String.trim (Palette.query model.palette) == query then
-                        ( { model | palette = Palette.setResults hits model.palette }, Cmd.none )
+                        settlePalette (Palette.setResults hits model.palette) model
 
                     else
                         ( model, Cmd.none )
@@ -1914,7 +1966,7 @@ view model =
                 (List.map (Tuple.mapSecond (\( _, pane ) -> div [ class "layout-cell" ] [ pane ])) sections)
             ]
         , if Palette.isOpen model.palette then
-            Html.map PaletteMsg (Palette.view model.palette)
+            Html.map PaletteMsg (Palette.view model.preferences.palettePeek model.palette)
 
           else
             text ""

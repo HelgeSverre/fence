@@ -6,6 +6,30 @@ Notable changes to Fence. Dates are release dates; versions follow
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-21
+
+### Added
+
+- Optional document peek pane beside quick-open and workspace search results,
+  enabled through Settings.
+- Palette shortcuts to copy the highlighted file's workspace or full path,
+  reveal it in Finder, or open it and reveal it in the sidebar.
+- The just run command builds and launches a local macOS app with a separate
+  test profile.
+
+### Changed
+
+- Quick-open uses tighter fuzzy matching and highlights matched characters.
+  Palette rows show file names and folders, with result counts and shortcut hints.
+
+### Fixed
+
+- Opening a workspace search result centers the selected line and focuses the
+  editor in editor or split mode. Preview mode centers the rendered match
+  without an editing cursor.
+- Enter opens the current highlighted result even when pressed immediately
+  after the arrow keys.
+
 ## [0.7.0] — 2026-10-12
 
 ### Added
@@ -359,7 +383,8 @@ First release. A split-view Markdown editor with a file browser, live
 preview, YAML frontmatter, syntax highlighting, several themes, and resizable
 panes.
 
-[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/HelgeSverre/fence/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/HelgeSverre/fence/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/HelgeSverre/fence/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/HelgeSverre/fence/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/HelgeSverre/fence/compare/v0.4.2...v0.5.0
